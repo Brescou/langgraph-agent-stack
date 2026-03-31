@@ -194,3 +194,8 @@ logs/
 
 # Node (if any tooling is added)
 node_modules/
+
+
+
+.claude/
+CLAUDE.md
