@@ -1,0 +1,107 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "langgraph-agent-stack.fullname" . }}
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- include "langgraph-agent-stack.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: {{ include "langgraph-agent-stack.name" . }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+
+  selector:
+    matchLabels:
+      {{- include "langgraph-agent-stack.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+
+  template:
+    metadata:
+      labels:
+        {{- include "langgraph-agent-stack.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: api
+        app.kubernetes.io/part-of: {{ include "langgraph-agent-stack.name" . }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- if not .Values.secrets.existingSecret }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "langgraph-agent-stack.serviceAccountName" . }}
+
+      securityContext:
+        runAsNonRoot: {{ .Values.podSecurityContext.runAsNonRoot }}
+        runAsUser: {{ .Values.podSecurityContext.runAsUser }}
+        runAsGroup: {{ .Values.podSecurityContext.runAsUser }}
+        fsGroup: {{ .Values.podSecurityContext.fsGroup }}
+        seccompProfile:
+          type: RuntimeDefault
+
+      terminationGracePeriodSeconds: 30
+
+      containers:
+        - name: api
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+
+          envFrom:
+            - configMapRef:
+                name: {{ include "langgraph-agent-stack.fullname" . }}-config
+            - secretRef:
+                name: {{ include "langgraph-agent-stack.secretName" . }}
+
+          resources:
+            requests:
+              memory: {{ .Values.resources.requests.memory | quote }}
+              cpu: {{ .Values.resources.requests.cpu | quote }}
+            limits:
+              memory: {{ .Values.resources.limits.memory | quote }}
+              cpu: {{ .Values.resources.limits.cpu | quote }}
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: {{ .Values.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.livenessProbe.periodSeconds }}
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: {{ .Values.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.readinessProbe.periodSeconds }}
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          securityContext:
+            allowPrivilegeEscalation: {{ .Values.securityContext.allowPrivilegeEscalation }}
+            readOnlyRootFilesystem: {{ .Values.securityContext.readOnlyRootFilesystem }}
+            capabilities:
+              drop:
+                {{- toYaml .Values.securityContext.capabilities.drop | nindent 16 }}
+
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: app-data
+              mountPath: /app/data
+
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: app-data
+          emptyDir: {}

@@ -162,31 +162,55 @@ The application is available at `http://localhost:8000` after the health check p
 
 ## Kubernetes Deployment
 
-**Prerequisites**: `kubectl` configured against a running cluster.
+The chart lives in `infra/helm/langgraph-agent-stack/`. It requires Helm 3 and a running Kubernetes cluster.
 
-**1. Create the namespace and apply manifests**
-
-```bash
-kubectl create namespace langgraph-agents
-
-kubectl apply -f infra/k8s/configmap.yaml
-kubectl apply -f infra/k8s/secret.yaml
-kubectl apply -f infra/k8s/deployment.yaml
-kubectl apply -f infra/k8s/service.yaml
-```
-
-**2. Verify the deployment**
+### Install
 
 ```bash
-kubectl rollout status deployment/langgraph-agent-stack -n langgraph-agents
-kubectl get pods -n langgraph-agents
+helm install langgraph ./infra/helm/langgraph-agent-stack \
+  --namespace langgraph-agents \
+  --create-namespace \
+  --set secrets.anthropicApiKey=$ANTHROPIC_API_KEY
 ```
 
-**3. Secrets management**
+### Custom values
 
-`infra/k8s/secret.yaml` is a placeholder. In production, use the [External Secrets Operator](https://external-secrets.io/) to sync `ANTHROPIC_API_KEY` and `REDIS_URL` from your secrets manager (AWS Secrets Manager, GCP Secret Manager, HashiCorp Vault) rather than storing base64-encoded values in the manifest.
+```bash
+# Development
+helm install langgraph ./infra/helm/langgraph-agent-stack \
+  -f infra/helm/langgraph-agent-stack/values.dev.yaml \
+  --set secrets.anthropicApiKey=$ANTHROPIC_API_KEY
 
-The deployment is Helm-ready: all environment-specific values are surfaced as commented `{{ .Values.* }}` placeholders in the manifest files.
+# Production (with External Secrets Operator — no key in CLI)
+helm install langgraph ./infra/helm/langgraph-agent-stack \
+  -f infra/helm/langgraph-agent-stack/values.prod.yaml
+```
+
+### Upgrade / Uninstall
+
+```bash
+helm upgrade langgraph ./infra/helm/langgraph-agent-stack
+helm uninstall langgraph -n langgraph-agents
+```
+
+### Feature flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `ingress.enabled` | `false` | Create an Ingress resource |
+| `autoscaling.enabled` | `false` | Enable HorizontalPodAutoscaler |
+| `secrets.existingSecret` | `""` | Use an existing Secret (External Secrets Operator) |
+| `serviceAccount.create` | `true` | Create a dedicated ServiceAccount |
+
+### Production secrets
+
+In production, set `secrets.existingSecret` to point to a secret managed by the [External Secrets Operator](https://external-secrets.io) or Sealed Secrets instead of passing keys via `--set`.
+
+```yaml
+# values.prod.yaml (already configured)
+secrets:
+  existingSecret: langgraph-secrets  # chart will not create a Secret
+```
 
 ## API Reference
 

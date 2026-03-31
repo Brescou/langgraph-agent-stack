@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "langgraph-agent-stack.fullname" . }}-config
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- include "langgraph-agent-stack.labels" . | nindent 4 }}
+    app.kubernetes.io/component: config
+    app.kubernetes.io/part-of: {{ include "langgraph-agent-stack.name" . }}
+data:
+  LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  ENVIRONMENT: {{ .Values.config.environment | quote }}
+  MEMORY_BACKEND: {{ .Values.config.memoryBackend | quote }}
+  SQLITE_PATH: {{ .Values.config.sqlitePath | quote }}
+  MAX_TOKENS: {{ .Values.config.maxTokens | quote }}
+  API_PORT: "8000"
+  LLM_PROVIDER: {{ .Values.llm.provider | quote }}
+  ANTHROPIC_MODEL: {{ .Values.llm.anthropicModel | quote }}
+  OPENAI_MODEL: {{ .Values.llm.openaiModel | quote }}
+  GOOGLE_MODEL: {{ .Values.llm.googleModel | quote }}
+  OLLAMA_BASE_URL: {{ .Values.llm.ollamaBaseUrl | quote }}
+  OLLAMA_MODEL: {{ .Values.llm.ollamaModel | quote }}

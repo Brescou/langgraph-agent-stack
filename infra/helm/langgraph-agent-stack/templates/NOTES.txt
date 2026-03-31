@@ -1,0 +1,23 @@
+LangGraph Agent Stack has been deployed.
+
+Get the application URL:
+{{- if .Values.ingress.enabled }}
+  http{{ if .Values.ingress.tls }}s{{ end }}://{{ .Values.ingress.host }}
+{{- else }}
+  kubectl port-forward -n {{ .Values.namespace.name }} svc/{{ include "langgraph-agent-stack.fullname" . }} 8080:{{ .Values.service.port }}
+  Then visit http://localhost:8080/docs
+{{- end }}
+
+Health check:
+  kubectl get pods -n {{ .Values.namespace.name }}
+
+Test the API:
+  curl -X POST http://localhost:8080/run \
+    -H "Content-Type: application/json" \
+    -d '{"query": "What is LangGraph?"}'
+
+Upgrade:
+  helm upgrade {{ .Release.Name }} ./infra/helm/langgraph-agent-stack
+
+Uninstall:
+  helm uninstall {{ .Release.Name }} -n {{ .Values.namespace.name }}

@@ -1,0 +1,80 @@
+replicaCount: 2
+
+image:
+  repository: langgraph-agent-stack
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: nginx
+  host: langgraph.example.com
+  tls: false
+
+resources:
+  requests:
+    memory: 256Mi
+    cpu: 250m
+  limits:
+    memory: 512Mi
+    cpu: 500m
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+
+config:
+  logLevel: INFO
+  environment: production
+  memoryBackend: sqlite
+  sqlitePath: /app/data/memory.db
+  maxTokens: "4096"
+
+llm:
+  provider: anthropic
+  anthropicModel: claude-3-5-sonnet-20241022
+  openaiModel: gpt-4o
+  googleModel: gemini-1.5-pro
+  ollamaBaseUrl: http://localhost:11434
+  ollamaModel: llama3.2
+
+secrets:
+  existingSecret: ""
+  anthropicApiKey: ""
+  openaiApiKey: ""
+  googleApiKey: ""
+  redisUrl: ""
+
+serviceAccount:
+  create: true
+  name: ""
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  fsGroup: 1001
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+livenessProbe:
+  initialDelaySeconds: 15
+  periodSeconds: 20
+
+readinessProbe:
+  initialDelaySeconds: 10
+  periodSeconds: 10
+
+namespace:
+  create: true
+  name: langgraph-agents

@@ -1,0 +1,19 @@
+replicaCount: 1
+
+image:
+  pullPolicy: Never
+
+config:
+  environment: development
+  logLevel: DEBUG
+
+resources:
+  requests:
+    memory: 128Mi
+    cpu: 100m
+  limits:
+    memory: 256Mi
+    cpu: 250m
+
+autoscaling:
+  enabled: false

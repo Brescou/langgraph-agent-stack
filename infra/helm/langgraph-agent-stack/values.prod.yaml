@@ -1,0 +1,22 @@
+replicaCount: 3
+
+image:
+  pullPolicy: Always
+
+config:
+  environment: production
+
+resources:
+  requests:
+    memory: 512Mi
+    cpu: 500m
+  limits:
+    memory: 1Gi
+    cpu: 1000m
+
+autoscaling:
+  enabled: true
+  maxReplicas: 10
+
+secrets:
+  existingSecret: langgraph-secrets

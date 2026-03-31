@@ -1,0 +1,14 @@
+apiVersion: v2
+name: langgraph-agent-stack
+description: Multi-agent LangGraph system on Kubernetes
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - langgraph
+  - ai
+  - multi-agent
+  - llm
+maintainers:
+  - name: your-name
+    url: https://github.com/brescou
