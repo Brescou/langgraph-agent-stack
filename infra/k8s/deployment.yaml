@@ -1,0 +1,147 @@
+# deployment.yaml — Kubernetes Deployment for langgraph-agent-stack
+#
+# Helm-ready: all environment-specific values are surfaced as commented
+# template variables ({{ .Values.* }}) so conversion to a Helm chart is trivial.
+#
+# To templatise for Helm, replace the following placeholders:
+#   image tag          → {{ .Values.image.tag }}
+#   replica count      → {{ .Values.replicaCount }}
+#   resource limits    → {{ .Values.resources.* }}
+#   namespace          → {{ .Release.Namespace }}
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langgraph-agent-stack
+  namespace: langgraph-agents
+  labels:
+    app.kubernetes.io/name: langgraph-agent-stack
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: langgraph-agent-stack
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  # {{ .Values.replicaCount }}
+  replicas: 2
+
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: langgraph-agent-stack
+      app.kubernetes.io/component: api
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: langgraph-agent-stack
+        app.kubernetes.io/component: api
+      annotations:
+        # Force pod restart when ConfigMap content changes
+        checksum/config: "placeholder-replace-with-helm-sha256sum"
+    spec:
+      # -----------------------------------------------------------------------
+      # Security context — pod level
+      # Runs every container as a non-root user
+      # -----------------------------------------------------------------------
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+
+      terminationGracePeriodSeconds: 30
+
+      containers:
+        - name: api
+          # {{ .Values.image.repository }}:{{ .Values.image.tag }}
+          image: langgraph-agent-stack:latest
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+
+          # ------------------------------------------------------------------
+          # Environment — non-sensitive values from ConfigMap, secrets from Secret
+          # ------------------------------------------------------------------
+          envFrom:
+            - configMapRef:
+                name: langgraph-agent-stack-config
+          env:
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: langgraph-agent-stack-secrets
+                  key: ANTHROPIC_API_KEY
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: langgraph-agent-stack-secrets
+                  key: REDIS_URL
+                  # optional: true allows the pod to start when Redis is not used
+                  optional: true
+
+          # ------------------------------------------------------------------
+          # Resource requests and limits
+          # ------------------------------------------------------------------
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+
+          # ------------------------------------------------------------------
+          # Liveness probe — restart the container if the API is unresponsive
+          # ------------------------------------------------------------------
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          # ------------------------------------------------------------------
+          # Readiness probe — remove the pod from the LB until it is ready
+          # ------------------------------------------------------------------
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          # ------------------------------------------------------------------
+          # Container-level security context
+          # ------------------------------------------------------------------
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+
+          # Writable tmp volume for the read-only root filesystem
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: app-data
+              mountPath: /app/data
+
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: app-data
+          emptyDir: {}
