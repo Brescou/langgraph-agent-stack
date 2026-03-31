@@ -1,0 +1,216 @@
+# security.yml — Security scanning pipeline for langgraph-agent-stack
+#
+# Jobs:
+#   secrets-scan   — gitleaks: detect secrets and credentials committed to the repo
+#   dependency-audit — pip-audit: identify known CVEs in Python dependencies
+#   sast           — bandit: static application security testing for Python code
+#
+# Triggers:
+#   push / pull_request  — on every change to the main branch
+#   schedule             — weekly full scan every Monday at 06:00 UTC
+#
+# All scan results are uploaded as artifacts and retained for 30 days.
+# The dependency-audit and sast jobs produce SARIF output when available so
+# results can be reviewed in the GitHub Security tab.
+
+name: Security Scanning
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  schedule:
+    # Every Monday at 06:00 UTC — catches newly disclosed CVEs between PRs
+    - cron: "0 6 * * 1"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+  UV_VERSION: "0.5.21"
+
+# ---------------------------------------------------------------------------
+# Job 1 — Secrets scanning with gitleaks
+# ---------------------------------------------------------------------------
+jobs:
+  secrets-scan:
+    name: Secrets Scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source (full history for gitleaks)
+        uses: actions/checkout@v4
+        with:
+          # Fetch the complete git history so gitleaks can scan all commits,
+          # not just the files present in the working tree.
+          fetch-depth: 0
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # GITLEAKS_LICENSE is required for use in private repositories.
+          # For public repos this environment variable can be omitted.
+          # GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
+      # gitleaks-action writes a SARIF report when findings exist.
+      # Upload it so the results surface in the GitHub Security tab.
+      - name: Upload gitleaks SARIF report
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: results.sarif
+        continue-on-error: true   # File may not exist when there are no findings
+
+      - name: Upload gitleaks report artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gitleaks-report
+          path: results.sarif
+          retention-days: 30
+          if-no-files-found: ignore
+
+# ---------------------------------------------------------------------------
+# Job 2 — Dependency audit with pip-audit
+# ---------------------------------------------------------------------------
+  dependency-audit:
+    name: Dependency Audit (pip-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Cache uv dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('pyproject.toml', 'uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-
+
+      - name: Install production dependencies
+        # Install only production deps to audit what actually ships in the image.
+        # pip-audit is added as a temporary tool install, not a project dependency.
+        run: uv sync --frozen --no-dev
+
+      - name: Install pip-audit
+        run: uv tool install pip-audit
+
+      - name: Run pip-audit (JSON output)
+        # --require-hashes is skipped because uv lockfiles handle integrity.
+        # Fail the job on any found vulnerability (exit code != 0).
+        run: |
+          uv run pip-audit \
+            --format json \
+            --output pip-audit-report.json \
+            --progress-spinner off
+        continue-on-error: true   # Always upload the report even on findings
+
+      - name: Run pip-audit (human-readable summary)
+        run: |
+          uv run pip-audit \
+            --format columns \
+            --progress-spinner off
+        continue-on-error: true
+
+      - name: Upload pip-audit report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pip-audit-report
+          path: pip-audit-report.json
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Fail on vulnerabilities
+        # Re-run in strict mode after uploading the artifact so the job
+        # status reflects real findings.  The artifact is preserved regardless.
+        run: |
+          uv run pip-audit \
+            --format columns \
+            --progress-spinner off
+
+# ---------------------------------------------------------------------------
+# Job 3 — Python SAST with bandit
+# ---------------------------------------------------------------------------
+  sast:
+    name: SAST (bandit)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install bandit
+        run: uv tool install "bandit[sarif]"
+
+      - name: Run bandit (SARIF output for GitHub Security tab)
+        run: |
+          uv tool run bandit \
+            --recursive \
+            --format sarif \
+            --output bandit-results.sarif \
+            --severity-level medium \
+            --confidence-level medium \
+            --exclude ".venv,tests" \
+            api/ core/ agents/
+        continue-on-error: true   # Always upload results even when findings exist
+
+      - name: Run bandit (human-readable summary for log output)
+        run: |
+          uv tool run bandit \
+            --recursive \
+            --format text \
+            --severity-level medium \
+            --confidence-level medium \
+            --exclude ".venv,tests" \
+            api/ core/ agents/
+        continue-on-error: true
+
+      - name: Upload bandit SARIF to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: bandit-results.sarif
+        continue-on-error: true   # Requires Advanced Security on private repos
+
+      - name: Upload bandit SARIF artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bandit-sarif-report
+          path: bandit-results.sarif
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Fail on high/critical findings
+        # Re-run at HIGH severity to gate the job.  Medium findings are
+        # surfaced in the artifact but do not block merging.
+        run: |
+          uv tool run bandit \
+            --recursive \
+            --format text \
+            --severity-level high \
+            --confidence-level high \
+            --exclude ".venv,tests" \
+            api/ core/ agents/
