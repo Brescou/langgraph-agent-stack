@@ -18,15 +18,15 @@ import abc
 import logging
 import time
 import uuid
-from typing import Any, Optional
+from typing import Any
 
-from langchain_anthropic import ChatAnthropic
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage
 from langchain_core.tools import BaseTool
-from langgraph.graph import StateGraph
 from typing_extensions import TypedDict
 
 from core.config import settings
+from core.llm import get_llm
 from core.memory import create_checkpointer
 
 # ---------------------------------------------------------------------------
@@ -84,7 +84,7 @@ class AgentState(TypedDict, total=False):
     context: dict[str, Any]
     metadata: dict[str, Any]
     step_count: int
-    error: Optional[str]
+    error: str | None
     status: str
 
 
@@ -123,8 +123,8 @@ class BaseAgent(abc.ABC):
     def __init__(
         self,
         name: str,
-        thread_id: Optional[str] = None,
-        tools: Optional[list[BaseTool]] = None,
+        thread_id: str | None = None,
+        tools: list[BaseTool] | None = None,
     ) -> None:
         self.name: str = name
         self.thread_id: str = thread_id or str(uuid.uuid4())
@@ -136,14 +136,11 @@ class BaseAgent(abc.ABC):
 
         # Build LLM client
         try:
-            self.llm: ChatAnthropic = ChatAnthropic(
-                model=settings.model_name,
-                max_tokens=settings.max_tokens,
-                api_key=settings.anthropic_api_key,
-            )
-        except Exception as exc:
+            self.llm: BaseChatModel = get_llm(settings.llm_config)
+        except (ImportError, ValueError) as exc:
             raise AgentConfigurationError(
-                f"[{self.name}] Failed to initialise ChatAnthropic: {exc}"
+                f"[{self.name}] Failed to initialise LLM provider "
+                f"'{settings.llm_provider}': {exc}"
             ) from exc
 
         # Build checkpointer via the shared factory
@@ -157,7 +154,7 @@ class BaseAgent(abc.ABC):
             extra={
                 "agent": self.name,
                 "thread_id": self.thread_id,
-                "model": settings.model_name,
+                "llm_provider": settings.llm_provider,
                 "memory_backend": settings.memory_backend.value,
                 "tools": [t.name for t in self.tools],
             },

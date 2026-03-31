@@ -81,10 +81,12 @@ uv sync
 cp .env.example .env
 ```
 
-Open `.env` and set your API key:
+Open `.env` and set your provider and API key:
 
 ```
-ANTHROPIC_API_KEY=sk-ant-api03-your-real-key-here
+LLM_PROVIDER=anthropic
+ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_MODEL=claude-3-5-sonnet-20241022
 ```
 
 All other values have working defaults for local development.
@@ -106,6 +108,39 @@ curl -X POST http://localhost:8000/run \
 ```
 
 You will receive a structured `AnalysisReport` with an executive summary, key insights, identified patterns, and a confidence score.
+
+## LLM Providers
+
+The template supports any LangChain-compatible LLM provider. Set `LLM_PROVIDER` in your `.env` and install the matching extra.
+
+| Provider | `LLM_PROVIDER` | Install | Key variable |
+|----------|---------------|---------|--------------|
+| Anthropic (Claude) | `anthropic` | `uv sync --extra anthropic` | `ANTHROPIC_API_KEY` |
+| OpenAI (GPT) | `openai` | `uv sync --extra openai` | `OPENAI_API_KEY` |
+| Google (Gemini) | `google` | `uv sync --extra google` | `GOOGLE_API_KEY` |
+| AWS Bedrock | `bedrock` | `uv sync --extra bedrock` | `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` |
+| Azure OpenAI | `azure` | `uv sync --extra openai` | `AZURE_OPENAI_API_KEY` + `AZURE_OPENAI_ENDPOINT` |
+| Ollama (local) | `ollama` | `uv sync --extra ollama` | None — runs locally |
+
+### Switching providers
+
+**OpenAI:**
+```env
+LLM_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-4o
+```
+`uv sync --extra openai`
+
+**Ollama (no API key required):**
+```env
+LLM_PROVIDER=ollama
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=llama3.2
+```
+`uv sync --extra ollama`
+
+> **Note:** The agents never import provider-specific code directly. The `LLMFactory` in `core/llm.py` resolves the provider at startup, so switching is a one-line `.env` change.
 
 ## Running with Docker
 
@@ -217,8 +252,9 @@ All configuration is loaded from environment variables. Copy `.env.example` to `
 
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
-| `ANTHROPIC_API_KEY` | Anthropic API key for Claude models | — | Yes |
-| `MODEL_NAME` | Claude model identifier | `claude-3-5-sonnet-20241022` | No |
+| `LLM_PROVIDER` | LLM provider to use | `anthropic` | Required |
+| `ANTHROPIC_API_KEY` | Anthropic API key | — | Required if `LLM_PROVIDER=anthropic` |
+| `ANTHROPIC_MODEL` | Claude model name | `claude-3-5-sonnet-20241022` | Optional |
 | `MAX_TOKENS` | Maximum tokens per LLM call | `4096` | No |
 | `MEMORY_BACKEND` | Checkpoint backend: `sqlite` or `redis` | `sqlite` | No |
 | `SQLITE_PATH` | Path to the SQLite database file | `./data/agent_memory.db` | No |
@@ -227,6 +263,8 @@ All configuration is loaded from environment variables. Copy `.env.example` to `
 | `API_PORT` | TCP port the server listens on | `8000` | No |
 | `LOG_LEVEL` | Logging verbosity: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` | `INFO` | No |
 | `ENVIRONMENT` | Deployment environment label: `development`, `staging`, `production` | `development` | No |
+
+See `.env.example` for all provider-specific variables (OpenAI, Google, Bedrock, Azure, Ollama).
 
 ## Development
 
@@ -294,7 +332,9 @@ langgraph-agent-stack/
 
 ### Change the LLM provider
 
-The agents use `langchain-anthropic` via the `MODEL_NAME` setting. To switch providers, replace the `ChatAnthropic` instantiation in `core/config.py` or your agent class with any LangChain-compatible chat model (e.g. `ChatOpenAI`, `ChatGoogleGenerativeAI`). Update `pyproject.toml` dependencies accordingly.
+Set `LLM_PROVIDER` in `.env` to one of: `anthropic`, `openai`, `google`, `bedrock`, `azure`, `ollama`.
+Install the matching extra: `uv sync --extra <provider>`.
+No code changes required — the factory in `core/llm.py` handles instantiation.
 
 ### Enable Redis for production
 

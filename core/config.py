@@ -8,23 +8,26 @@ shell environment instead.
 
 from __future__ import annotations
 
-from enum import Enum
-from typing import Literal
-
-import re
+from enum import StrEnum
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from core.llm import LLMProvider
 
-class MemoryBackend(str, Enum):
+if TYPE_CHECKING:
+    from core.llm import LLMConfig
+
+
+class MemoryBackend(StrEnum):
     """Supported memory/persistence backends."""
 
     SQLITE = "sqlite"
     REDIS = "redis"
 
 
-class LogLevel(str, Enum):
+class LogLevel(StrEnum):
     """Standard Python log levels."""
 
     DEBUG = "DEBUG"
@@ -63,14 +66,40 @@ class Settings(BaseSettings):
     )
 
     # --- LLM ---
-    anthropic_api_key: str = Field(
-        ...,
-        description="Anthropic API key — must be set in the environment or .env.",
+    anthropic_api_key: str | None = Field(
+        default=None,
+        description="Anthropic API key — required when llm_provider='anthropic'.",
     )
-    model_name: str = Field(
-        default="claude-sonnet-4-5",
-        description="Anthropic model identifier passed to ChatAnthropic.",
+    llm_provider: LLMProvider = Field(
+        default="anthropic",
+        validation_alias="LLM_PROVIDER",
     )
+    anthropic_model: str = Field(
+        default="claude-3-5-sonnet-20241022",
+        validation_alias="ANTHROPIC_MODEL",
+    )
+    openai_api_key: str | None = Field(default=None)
+    openai_model: str = Field(default="gpt-4o", validation_alias="OPENAI_MODEL")
+    google_api_key: str | None = Field(default=None)
+    google_model: str = Field(default="gemini-1.5-pro", validation_alias="GOOGLE_MODEL")
+    aws_access_key_id: str | None = Field(default=None)
+    aws_secret_access_key: str | None = Field(default=None)
+    aws_region: str = Field(default="us-east-1", validation_alias="AWS_REGION")
+    bedrock_model: str = Field(
+        default="anthropic.claude-3-5-sonnet-20241022-v2:0",
+        validation_alias="BEDROCK_MODEL",
+    )
+    azure_openai_api_key: str | None = Field(default=None)
+    azure_openai_endpoint: str | None = Field(default=None)
+    azure_openai_deployment: str = Field(
+        default="gpt-4o",
+        validation_alias="AZURE_OPENAI_DEPLOYMENT",
+    )
+    ollama_base_url: str = Field(
+        default="http://localhost:11434",
+        validation_alias="OLLAMA_BASE_URL",
+    )
+    ollama_model: str = Field(default="llama3.2", validation_alias="OLLAMA_MODEL")
     max_tokens: int = Field(
         default=4096,
         ge=1,
@@ -130,26 +159,30 @@ class Settings(BaseSettings):
         description="Deployment environment tag used for log correlation.",
     )
 
-    @field_validator("anthropic_api_key")
-    @classmethod
-    def anthropic_key_format(cls, v: str) -> str:
-        """
-        Warn early when the API key does not match the expected Anthropic format.
+    @property
+    def llm_config(self) -> LLMConfig:
+        """Build an :class:`~core.llm.LLMConfig` from the current settings."""
+        from core.llm import LLMConfig
 
-        The key must begin with ``sk-ant-`` followed by at least 10 characters
-        of alphanumerics, hyphens, or underscores.  A misconfigured placeholder
-        (e.g. the example value from ``.env.example``) will be rejected at
-        settings-load time rather than producing a cryptic Anthropic SDK error
-        at runtime.
-        """
-        _pattern = re.compile(r"^sk-ant-[A-Za-z0-9\-_]{10,}$")
-        if not _pattern.match(v):
-            raise ValueError(
-                "anthropic_api_key does not match the expected Anthropic format "
-                "(must start with 'sk-ant-' followed by at least 10 characters). "
-                "Check that ANTHROPIC_API_KEY is set correctly in your environment."
-            )
-        return v
+        return LLMConfig(
+            provider=self.llm_provider,
+            anthropic_api_key=self.anthropic_api_key,
+            anthropic_model=self.anthropic_model,
+            max_tokens=self.max_tokens,
+            openai_api_key=self.openai_api_key,
+            openai_model=self.openai_model,
+            google_api_key=self.google_api_key,
+            google_model=self.google_model,
+            aws_access_key_id=self.aws_access_key_id,
+            aws_secret_access_key=self.aws_secret_access_key,
+            aws_region=self.aws_region,
+            bedrock_model=self.bedrock_model,
+            azure_openai_api_key=self.azure_openai_api_key,
+            azure_openai_endpoint=self.azure_openai_endpoint,
+            azure_openai_deployment=self.azure_openai_deployment,
+            ollama_base_url=self.ollama_base_url,
+            ollama_model=self.ollama_model,
+        )
 
     @field_validator("redis_url")
     @classmethod

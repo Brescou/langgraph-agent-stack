@@ -11,8 +11,8 @@ requires-python = ">=3.12"
 dependencies = [
     "langgraph>=0.2",
     "langchain>=0.3",
-    "langchain-anthropic>=0.3",
     "langchain-community>=0.3",
+    "langchain-core>=0.3",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
     "pydantic>=2.9",
@@ -23,6 +23,20 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# LLM providers — install the one(s) you need
+anthropic = ["langchain-anthropic>=0.3"]
+openai    = ["langchain-openai>=0.2"]
+google    = ["langchain-google-genai>=2.0"]
+bedrock   = ["langchain-aws>=0.2"]
+ollama    = ["langchain-ollama>=0.2"]
+all-providers = [
+    "langchain-anthropic>=0.3",
+    "langchain-openai>=0.2",
+    "langchain-google-genai>=2.0",
+    "langchain-aws>=0.2",
+    "langchain-ollama>=0.2",
+]
+# Infrastructure
 redis = [
     "redis>=5",
     "langgraph-checkpoint-redis>=0.0.6",

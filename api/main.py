@@ -26,14 +26,21 @@ import asyncio
 import logging
 import time
 import uuid
-from contextlib import asynccontextmanager
+from collections.abc import AsyncGenerator
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, AsyncGenerator
+from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 
+from agents.base_agent import (
+    AgentExecutionError,
+    AgentTimeoutError,
+    AgentValidationError,
+)
+from agents.researcher import ResearchAgent
 from api.models import (
     HealthResponse,
     ResearchRequest,
@@ -41,11 +48,9 @@ from api.models import (
     RunRequest,
     RunResponse,
 )
-from agents.base_agent import AgentExecutionError, AgentTimeoutError, AgentValidationError
 from core.config import settings
 from core.graph import MultiAgentGraph
-from core.security import InputValidator, RateLimiter, validate_api_key_format
-from agents.researcher import ResearchAgent
+from core.security import InputValidator, RateLimiter
 
 # ---------------------------------------------------------------------------
 # Logging — structured JSON-friendly via ``extra`` dicts
@@ -99,14 +104,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         thread_name_prefix="agent-worker",
     )
 
-    # Validate the Anthropic API key format early so a misconfigured key
-    # (e.g. an unset placeholder) produces a clear startup error rather than
-    # a cryptic Anthropic SDK exception on the first real request.
-    if not validate_api_key_format(settings.anthropic_api_key):
-        logger.warning(
-            "ANTHROPIC_API_KEY does not match the expected 'sk-ant-...' format — "
-            "verify the key is set correctly before sending requests."
-        )
+    # Validate LLM configuration early so a misconfigured provider or missing
+    # API key produces a clear startup warning rather than a cryptic SDK error
+    # on the first real request.
+    from core.llm import get_llm
+    try:
+        get_llm(settings.llm_config)
+        logger.info("LLM provider '%s' configured successfully", settings.llm_provider)
+    except (ImportError, ValueError) as exc:
+        logger.warning("LLM configuration warning: %s", exc)
 
     logger.info(
         "API server starting up",
@@ -115,7 +121,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             "environment": settings.environment,
             "host": settings.api_host,
             "port": settings.api_port,
-            "model": settings.model_name,
+            "llm_provider": settings.llm_provider,
             "memory_backend": settings.memory_backend.value,
         },
     )

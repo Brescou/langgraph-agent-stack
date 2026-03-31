@@ -1,7 +1,7 @@
 """
 tests/conftest.py — Shared pytest fixtures for the langgraph-agent-stack test suite.
 
-All fixtures use mocks so that no real Anthropic API calls are made during tests.
+All fixtures use mocks so that no real LLM API calls are made during tests.
 The FastAPI TestClient is wired to a patched application that replaces
 MultiAgentGraph and ResearchAgent with MagicMock instances.
 """
@@ -17,8 +17,9 @@ from fastapi.testclient import TestClient
 
 # ---------------------------------------------------------------------------
 # Environment must be patched BEFORE the settings singleton is imported.
-# We set ANTHROPIC_API_KEY to a value that passes the format validator.
+# LLM_PROVIDER=anthropic with a dummy key so Settings loads without error.
 # ---------------------------------------------------------------------------
+os.environ.setdefault("LLM_PROVIDER", "anthropic")
 os.environ.setdefault("ANTHROPIC_API_KEY", "sk-ant-test123456789012345")
 os.environ.setdefault("MEMORY_BACKEND", "sqlite")
 os.environ.setdefault("SQLITE_PATH", ":memory:")
@@ -145,6 +146,7 @@ def test_settings():
     from core.config import Settings
 
     return Settings(
+        llm_provider="anthropic",
         anthropic_api_key="sk-ant-test123456789012345",
         memory_backend="sqlite",
         sqlite_path=":memory:",
