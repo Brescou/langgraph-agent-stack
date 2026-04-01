@@ -765,6 +765,8 @@ async def _stream_pipeline(
     Yields:
         SSE-formatted strings ready to be sent as ``text/event-stream`` chunks.
     """
+    if active_pipelines is not None:
+        active_pipelines.inc()
     try:
         yield f"data: {json.dumps({'type': 'status', 'message': 'Starting research phase...'})}\n\n"
 
@@ -846,6 +848,9 @@ async def _stream_pipeline(
             extra={"run_id": run_id, "error": str(exc)},
         )
         yield f"data: {json.dumps({'type': 'error', 'message': 'An unexpected error occurred.'})}\n\n"
+    finally:
+        if active_pipelines is not None:
+            active_pipelines.dec()
 
 
 @app.post(
@@ -1022,7 +1027,7 @@ async def run_research(
 
     def _execute() -> ResearchResponse:
         agent = ResearchAgent(
-            thread_id=session_id,
+            thread_id=run_id,
             llm=_shared_llm,
             checkpointer=_shared_checkpointer,
         )
