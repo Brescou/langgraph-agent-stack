@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, field
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
@@ -32,78 +31,14 @@ from agents.base_agent import (
     AgentState,
     AgentValidationError,
     BaseAgent,
+    _input_validator,
 )
-from agents.researcher import ResearchResult
+from agents.models import (
+    AnalysisReport,  # backward-compat re-export
+    ResearchResult,
+)
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Output data model
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class AnalysisReport:
-    """
-    Structured output produced by the AnalystAgent.
-
-    Attributes:
-        query: The original research question this report addresses.
-        executive_summary: One-paragraph high-level conclusion.
-        key_insights: Bulleted list of the most important findings.
-        patterns: Identified recurring themes or structural patterns.
-        implications: Practical consequences and recommendations.
-        confidence: Self-reported confidence score between 0.0 and 1.0.
-        research_summary: The input ``ResearchResult.summary`` for traceability.
-        metadata: Forwarded run-level metadata.
-    """
-
-    query: str
-    executive_summary: str = ""
-    key_insights: list[str] = field(default_factory=list)
-    patterns: list[str] = field(default_factory=list)
-    implications: list[str] = field(default_factory=list)
-    confidence: float = 0.0
-    research_summary: str = ""
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialise the report to a plain dictionary."""
-        return {
-            "query": self.query,
-            "executive_summary": self.executive_summary,
-            "key_insights": self.key_insights,
-            "patterns": self.patterns,
-            "implications": self.implications,
-            "confidence": self.confidence,
-            "research_summary": self.research_summary,
-            "metadata": self.metadata,
-        }
-
-    def to_markdown(self) -> str:
-        """Render the report as a Markdown string."""
-        lines: list[str] = [
-            f"# Analysis Report: {self.query}",
-            "",
-            "## Executive Summary",
-            self.executive_summary,
-            "",
-            "## Key Insights",
-        ]
-        for insight in self.key_insights:
-            lines.append(f"- {insight}")
-        lines += ["", "## Identified Patterns"]
-        for pattern in self.patterns:
-            lines.append(f"- {pattern}")
-        lines += ["", "## Implications & Recommendations"]
-        for impl in self.implications:
-            lines.append(f"- {impl}")
-        lines += [
-            "",
-            f"*Confidence: {self.confidence:.0%}*",
-        ]
-        return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -172,19 +107,13 @@ class AnalystAgent(BaseAgent):
     # Graph nodes
     # ------------------------------------------------------------------
 
-    def _node_analyze(self, state: AgentState) -> AgentState:
+    def _node_analyze(self, state: AgentState) -> dict[str, Any]:
         """
         Node: extract key insights from the research findings.
 
         Reads the ``ResearchResult`` from ``state["context"][_CTX_RESEARCH]``
         and writes a list of insight strings to
         ``state["context"][_CTX_INSIGHTS]``.
-
-        Args:
-            state: Current graph state.
-
-        Returns:
-            Updated state with raw insights stored in context.
         """
         state = self._increment_step(state)
         self._log_step("analyze", state)
@@ -224,26 +153,20 @@ class AnalystAgent(BaseAgent):
         )
 
         return {
-            **state,
+            "step_count": state["step_count"],
             "context": {
                 **state.get("context", {}),
                 self._CTX_INSIGHTS: insights,
                 "analyze_confidence": confidence,
             },
-        }  # type: ignore[return-value]
+        }
 
-    def _node_synthesize(self, state: AgentState) -> AgentState:
+    def _node_synthesize(self, state: AgentState) -> dict[str, Any]:
         """
         Node: connect insights and identify cross-cutting patterns.
 
         Reads ``state["context"][_CTX_INSIGHTS]`` and writes pattern strings
         to ``state["context"][_CTX_PATTERNS]``.
-
-        Args:
-            state: Current graph state.
-
-        Returns:
-            Updated state with patterns stored in context.
         """
         state = self._increment_step(state)
         self._log_step("synthesize", state)
@@ -285,27 +208,21 @@ class AnalystAgent(BaseAgent):
         )
 
         return {
-            **state,
+            "step_count": state["step_count"],
             "context": {
                 **state.get("context", {}),
                 self._CTX_PATTERNS: patterns,
                 "implications": implications,
             },
-        }  # type: ignore[return-value]
+        }
 
-    def _node_report(self, state: AgentState) -> AgentState:
+    def _node_report(self, state: AgentState) -> dict[str, Any]:
         """
         Node: compile all intermediate results into a final ``AnalysisReport``.
 
-        Serialises the report dict into
-        ``state["context"][_CTX_REPORT]`` and appends the Markdown rendering
-        as an ``AIMessage`` to ``state["messages"]``.
-
-        Args:
-            state: Current graph state.
-
-        Returns:
-            Updated state containing the serialised ``AnalysisReport``.
+        Serialises the report dict into ``state["context"][_CTX_REPORT]`` and
+        appends the Markdown rendering as an ``AIMessage`` to
+        ``state["messages"]``.
         """
         state = self._increment_step(state)
         self._log_step("report", state)
@@ -338,7 +255,10 @@ class AnalystAgent(BaseAgent):
             )
             exec_summary: str = str(exec_response.content).strip()
         except Exception:
-            exec_summary = f"Analysis of '{query}' completed with {len(insights)} insights identified."
+            exec_summary = (
+                f"Analysis of '{query}' completed with "
+                f"{len(insights)} insights identified."
+            )
 
         report = AnalysisReport(
             query=query,
@@ -365,29 +285,50 @@ class AnalystAgent(BaseAgent):
         updated_messages.append(AIMessage(content=report_markdown))
 
         return {
-            **state,
+            "step_count": state["step_count"],
             "messages": updated_messages,
             "context": {
                 **ctx,
                 self._CTX_REPORT: report.to_dict(),
             },
             "status": "done",
-        }  # type: ignore[return-value]
+        }
 
     # ------------------------------------------------------------------
     # Public run interface
     # ------------------------------------------------------------------
 
-    def run(self, input: str) -> str:
+    def _execute(self, query: str, research_dict: dict[str, Any]) -> AgentState:
+        """Execute the analysis graph and return the final state."""
+        if not query or not query.strip():
+            raise AgentValidationError(f"[{self.name}] Query must not be empty.")
+        query = _input_validator.validate(query)
+        initial_state = self._make_initial_state(query)
+        initial_state["context"][self._CTX_RESEARCH] = research_dict
+        self._log.info(
+            "Starting analysis run",
+            extra={"query": research_dict.get("query", "")[:120]},
+        )
+        try:
+            final_state: AgentState = self._graph.invoke(
+                initial_state, config=self._get_config()
+            )
+        except Exception as exc:
+            raise AgentExecutionError(
+                f"[{self.name}] Analysis pipeline failed: {exc}"
+            ) from exc
+        return final_state
+
+    def run(self, query: str) -> str:
         """
         Execute the analysis pipeline.
 
-        ``input`` is expected to be either a plain question string or a
+        ``query`` is expected to be either a plain question string or a
         JSON-encoded ``ResearchResult`` dict.  When a plain string is
         supplied the agent will analyse it directly without research context.
 
         Args:
-            input: Research summary / topic string, or JSON ``ResearchResult``.
+            query: Research summary / topic string, or JSON ``ResearchResult``.
 
         Returns:
             Markdown-formatted analysis report as a string.
@@ -395,45 +336,23 @@ class AnalystAgent(BaseAgent):
         Raises:
             AgentExecutionError: On unrecoverable graph errors.
         """
-        if not input or not input.strip():
-            raise AgentValidationError("AnalystAgent.run() requires a non-empty input.")
-
-        initial_state = self._make_initial_state(input)
-
-        # Attempt to parse a ResearchResult from the input
         research_dict: dict[str, Any] = {}
         try:
-            candidate = json.loads(input)
+            candidate = json.loads(query)
             if isinstance(candidate, dict) and "query" in candidate:
                 research_dict = candidate
         except (json.JSONDecodeError, ValueError):
-            # Plain string input — treat the whole string as the research summary
             research_dict = {
-                "query": input,
-                "summary": input,
+                "query": query,
+                "summary": query,
                 "findings": [],
                 "sources": [],
                 "confidence": 0.5,
                 "metadata": {},
             }
 
-        initial_state["context"][self._CTX_RESEARCH] = research_dict
+        final_state = self._execute(query, research_dict)
 
-        self._log.info(
-            "Starting analysis run",
-            extra={"query": research_dict.get("query", "")[:120]},
-        )
-
-        try:
-            final_state: AgentState = self._graph.invoke(
-                initial_state, config=self._get_config()
-            )
-        except Exception as exc:
-            raise AgentExecutionError(
-                f"[AnalystAgent] Graph execution failed: {exc}"
-            ) from exc
-
-        # Return the last AIMessage content (Markdown report)
         for msg in reversed(final_state.get("messages", [])):
             if isinstance(msg, AIMessage):
                 return str(msg.content)
@@ -457,17 +376,7 @@ class AnalystAgent(BaseAgent):
             AgentExecutionError: On unrecoverable graph errors.
             AgentValidationError: When no structured report is produced.
         """
-        initial_state = self._make_initial_state(research_result.query)
-        initial_state["context"][self._CTX_RESEARCH] = research_result.to_dict()
-
-        try:
-            final_state: AgentState = self._graph.invoke(
-                initial_state, config=self._get_config()
-            )
-        except Exception as exc:
-            raise AgentExecutionError(
-                f"[AnalystAgent] Graph execution failed: {exc}"
-            ) from exc
+        final_state = self._execute(research_result.query, research_result.to_dict())
 
         report_dict = final_state.get("context", {}).get(self._CTX_REPORT)
         if not report_dict:

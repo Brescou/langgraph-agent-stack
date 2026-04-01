@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from langchain_core.language_models import BaseChatModel
@@ -28,48 +27,12 @@ from agents.base_agent import (
     AgentState,
     AgentValidationError,
     BaseAgent,
+    _input_validator,
 )
+from agents.models import ResearchResult  # backward-compat re-export
 from core.config import get_settings
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Output data model
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class ResearchResult:
-    """
-    Structured output produced by the ResearchAgent.
-
-    Attributes:
-        query: Original research query.
-        findings: List of raw text snippets collected during retrieval.
-        summary: LLM-generated summary of the consolidated findings.
-        sources: List of source identifiers (URLs, doc IDs, …).
-        confidence: Self-reported confidence score between 0.0 and 1.0.
-        metadata: Arbitrary run-level metadata forwarded from ``AgentState``.
-    """
-
-    query: str
-    findings: list[str] = field(default_factory=list)
-    summary: str = ""
-    sources: list[str] = field(default_factory=list)
-    confidence: float = 0.0
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialise the result to a plain dictionary."""
-        return {
-            "query": self.query,
-            "findings": self.findings,
-            "summary": self.summary,
-            "sources": self.sources,
-            "confidence": self.confidence,
-            "metadata": self.metadata,
-        }
 
 
 # ---------------------------------------------------------------------------
@@ -93,7 +56,6 @@ class ResearchAgent(BaseAgent):
         thread_id: Optional stable ID for resuming a checkpointed session.
     """
 
-    # Key under which we store intermediate research data in AgentState.context
     _CTX_FINDINGS = "findings"
     _CTX_SOURCES = "sources"
     _CTX_ITERATIONS = "research_iterations"
@@ -135,8 +97,8 @@ class ResearchAgent(BaseAgent):
             "validate",
             self._route_after_validate,
             {
-                "research": "research",  # insufficient — loop back
-                "summarize": "summarize",  # sufficient — move on
+                "research": "research",
+                "summarize": "summarize",
             },
         )
         graph.add_edge("summarize", END)
@@ -147,18 +109,12 @@ class ResearchAgent(BaseAgent):
     # Graph nodes
     # ------------------------------------------------------------------
 
-    def _node_research(self, state: AgentState) -> AgentState:
+    def _node_research(self, state: AgentState) -> dict[str, Any]:
         """
         Node: expand the query and retrieve information snippets.
 
         Calls the (mock) search tool and accumulates findings in
         ``state["context"][_CTX_FINDINGS]``.
-
-        Args:
-            state: Current graph state.
-
-        Returns:
-            Updated state with new findings appended to context.
         """
         state = self._increment_step(state)
         self._log_step("research", state)
@@ -168,7 +124,6 @@ class ResearchAgent(BaseAgent):
         existing: list[str] = state.get("context", {}).get(self._CTX_FINDINGS, [])
         sources: list[str] = state.get("context", {}).get(self._CTX_SOURCES, [])
 
-        # --- Query expansion via LLM ---
         expansion_prompt = (
             f"You are a research assistant. The user wants to research: '{query}'.\n"
             "Provide 3 focused sub-queries that would help gather comprehensive "
@@ -196,7 +151,6 @@ class ResearchAgent(BaseAgent):
             )
             sub_queries = [query]
 
-        # --- Retrieval via search tool ---
         search_tool = next((t for t in self.tools if t.name == "web_search"), None)
         new_findings: list[str] = []
         new_sources: list[str] = []
@@ -204,7 +158,6 @@ class ResearchAgent(BaseAgent):
             if search_tool is not None:
                 result = str(search_tool.invoke(sq))
                 new_findings.append(result)
-                # Extract source URLs from "Source: <url>" lines in the result
                 for line in result.splitlines():
                     stripped = line.strip()
                     if stripped.startswith("Source:"):
@@ -228,20 +181,14 @@ class ResearchAgent(BaseAgent):
             },
         )
 
-        return {**state, "context": updated_context}  # type: ignore[return-value]
+        return {"step_count": state["step_count"], "context": updated_context}
 
-    def _node_validate(self, state: AgentState) -> AgentState:
+    def _node_validate(self, state: AgentState) -> dict[str, Any]:
         """
         Node: assess the quality and sufficiency of collected findings.
 
         Writes ``state["context"]["validation_ok"]`` (bool) and
         ``state["context"]["validation_reason"]`` (str).
-
-        Args:
-            state: Current graph state.
-
-        Returns:
-            Updated state with validation result stored in context.
         """
         state = self._increment_step(state)
         self._log_step("validate", state)
@@ -251,13 +198,13 @@ class ResearchAgent(BaseAgent):
 
         if not findings:
             return {
-                **state,
+                "step_count": state["step_count"],
                 "context": {
                     **state.get("context", {}),
                     "validation_ok": False,
                     "validation_reason": "No findings retrieved.",
                 },
-            }  # type: ignore[return-value]
+            }
 
         validation_prompt = (
             f"You are a research quality assessor.\n"
@@ -281,7 +228,6 @@ class ResearchAgent(BaseAgent):
             is_sufficient: bool = bool(result.get("sufficient", True))
             reason: str = result.get("reason", "")
         except Exception:
-            # When in doubt, proceed to summarize
             is_sufficient = True
             reason = "Validation parsing failed — defaulting to sufficient."
 
@@ -291,26 +237,20 @@ class ResearchAgent(BaseAgent):
         )
 
         return {
-            **state,
+            "step_count": state["step_count"],
             "context": {
                 **state.get("context", {}),
                 "validation_ok": is_sufficient,
                 "validation_reason": reason,
             },
-        }  # type: ignore[return-value]
+        }
 
-    def _node_summarize(self, state: AgentState) -> AgentState:
+    def _node_summarize(self, state: AgentState) -> dict[str, Any]:
         """
         Node: distil validated findings into a final ``ResearchResult``.
 
         Serialises the result into ``state["context"][_CTX_RESULT]`` as a dict
         so that downstream agents (e.g. ``AnalystAgent``) can deserialise it.
-
-        Args:
-            state: Current graph state.
-
-        Returns:
-            Updated state containing the serialised ``ResearchResult``.
         """
         state = self._increment_step(state)
         self._log_step("summarize", state)
@@ -370,13 +310,13 @@ class ResearchAgent(BaseAgent):
         )
 
         return {
-            **state,
+            "step_count": state["step_count"],
             "context": {
                 **state.get("context", {}),
                 self._CTX_RESULT: result.to_dict(),
             },
             "status": "done",
-        }  # type: ignore[return-value]
+        }
 
     # ------------------------------------------------------------------
     # Conditional routing
@@ -390,12 +330,6 @@ class ResearchAgent(BaseAgent):
 
         Returns ``"research"`` when the findings are insufficient AND the
         iteration budget has not been exhausted; ``"summarize"`` otherwise.
-
-        Args:
-            state: Current graph state.
-
-        Returns:
-            Name of the next node to execute.
         """
         ctx = state.get("context", {})
         is_ok: bool = ctx.get("validation_ok", True)
@@ -415,12 +349,29 @@ class ResearchAgent(BaseAgent):
     # Public run interface
     # ------------------------------------------------------------------
 
-    def run(self, input: str) -> str:
+    def _execute(self, query: str) -> AgentState:
+        """Execute the research graph and return the final state."""
+        if not query or not query.strip():
+            raise AgentValidationError(f"[{self.name}] Query must not be empty.")
+        query = _input_validator.validate(query)
+        self._log.info("Starting research run", extra={"query": query[:120]})
+        initial_state = self._make_initial_state(query)
+        try:
+            final_state: AgentState = self._graph.invoke(
+                initial_state, config=self._get_config()
+            )
+        except Exception as exc:
+            raise AgentExecutionError(
+                f"[{self.name}] Research pipeline failed: {exc}"
+            ) from exc
+        return final_state
+
+    def run(self, query: str) -> str:
         """
         Execute the research pipeline for a given query.
 
         Args:
-            input: The research question or topic.
+            query: The research question or topic.
 
         Returns:
             The LLM-generated research summary as a string.
@@ -428,40 +379,24 @@ class ResearchAgent(BaseAgent):
         Raises:
             AgentExecutionError: On unrecoverable graph errors.
         """
-        if not input or not input.strip():
-            raise AgentValidationError(
-                "ResearchAgent.run() requires a non-empty input."
-            )
-
-        self._log.info("Starting research run", extra={"query": input[:120]})
-        initial_state = self._make_initial_state(input)
-
-        try:
-            final_state: AgentState = self._graph.invoke(
-                initial_state, config=self._get_config()
-            )
-        except Exception as exc:
-            raise AgentExecutionError(
-                f"[ResearchAgent] Graph execution failed: {exc}"
-            ) from exc
+        final_state = self._execute(query)
 
         result_dict = final_state.get("context", {}).get(self._CTX_RESULT)
         if result_dict:
             return result_dict.get("summary", "No summary generated.")
 
-        # Fallback: last AI message
         for msg in reversed(final_state.get("messages", [])):
             if isinstance(msg, AIMessage):
                 return str(msg.content)
 
         return "Research completed but no output was produced."
 
-    def run_structured(self, input: str) -> ResearchResult:
+    def run_structured(self, query: str) -> ResearchResult:
         """
         Execute the research pipeline and return the full ``ResearchResult``.
 
         Args:
-            input: The research question or topic.
+            query: The research question or topic.
 
         Returns:
             A populated ``ResearchResult`` dataclass.
@@ -470,21 +405,7 @@ class ResearchAgent(BaseAgent):
             AgentExecutionError: On unrecoverable graph errors.
             AgentValidationError: When no structured result is present.
         """
-        if not input or not input.strip():
-            raise AgentValidationError(
-                "ResearchAgent.run_structured() requires a non-empty input."
-            )
-
-        initial_state = self._make_initial_state(input)
-
-        try:
-            final_state: AgentState = self._graph.invoke(
-                initial_state, config=self._get_config()
-            )
-        except Exception as exc:
-            raise AgentExecutionError(
-                f"[ResearchAgent] Graph execution failed: {exc}"
-            ) from exc
+        final_state = self._execute(query)
 
         result_dict = final_state.get("context", {}).get(self._CTX_RESULT)
         if not result_dict:

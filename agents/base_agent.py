@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import abc
 import logging
+import random
 import time
 import uuid
 from typing import Any
@@ -28,11 +29,10 @@ from typing_extensions import TypedDict
 from core.config import get_settings
 from core.llm import get_llm
 from core.memory import create_checkpointer
+from core.security import InputValidator
 from core.tools import get_default_tools
 
-# ---------------------------------------------------------------------------
-# Logging — structured, JSON-friendly via ``extra`` dict
-# ---------------------------------------------------------------------------
+_input_validator = InputValidator()
 
 # ---------------------------------------------------------------------------
 # Custom exceptions
@@ -98,7 +98,7 @@ class BaseAgent(abc.ABC):
     Subclasses MUST implement:
 
     * ``build_graph()`` — construct and return a compiled LangGraph ``StateGraph``.
-    * ``run(input: str) -> str`` — public entry point that executes the graph.
+    * ``run(query: str) -> str`` — public entry point that executes the graph.
 
     The constructor wires up the LLM client, checkpointer, and structured
     logger automatically from the shared ``Settings`` singleton.
@@ -128,16 +128,13 @@ class BaseAgent(abc.ABC):
     ) -> None:
         self.name: str = name
         self.thread_id: str = thread_id or str(uuid.uuid4())
-        # Caller-supplied tools take precedence; fall back to the default tool set.
         self.tools: list[BaseTool] = tools if tools is not None else get_default_tools()
         self._start_time: float = time.monotonic()
 
-        # Structured logger — include agent name and thread in every record
         self._log = logging.getLogger(f"{__name__}.{name}")
 
         _settings = get_settings()
 
-        # Build LLM client — use injected instance or create from settings.
         if llm is not None:
             self.llm: BaseChatModel = llm
         else:
@@ -149,18 +146,13 @@ class BaseAgent(abc.ABC):
                     f"'{_settings.llm_provider}': {exc}"
                 ) from exc
 
-        # LLM variant with tools bound for structured tool-calling nodes.
         self.llm_with_tools: BaseChatModel = (
             self.llm.bind_tools(self.tools) if self.tools else self.llm
         )
 
-        # Build checkpointer — use injected instance or create from settings.
         self.checkpointer = (
             checkpointer if checkpointer is not None else create_checkpointer(_settings)
         )
-
-        # Compile graph (delegated to subclass)
-        self._graph = self.build_graph()
 
         self._log.info(
             "Agent initialised",
@@ -172,6 +164,8 @@ class BaseAgent(abc.ABC):
                 "tools": [t.name for t in self.tools],
             },
         )
+
+        self._graph = self.build_graph()
 
     # ------------------------------------------------------------------
     # Abstract interface
@@ -190,12 +184,12 @@ class BaseAgent(abc.ABC):
         """
 
     @abc.abstractmethod
-    def run(self, input: str) -> str:
+    def run(self, query: str) -> str:
         """
-        Execute the agent graph for the given input string.
+        Execute the agent graph for the given query string.
 
         Args:
-            input: The user query or task description.
+            query: The user query or task description.
 
         Returns:
             A string representation of the final agent output.
@@ -209,12 +203,12 @@ class BaseAgent(abc.ABC):
     # Helpers available to all subclasses
     # ------------------------------------------------------------------
 
-    def _make_initial_state(self, input: str) -> AgentState:
+    def _make_initial_state(self, query: str) -> AgentState:
         """
         Build a fresh ``AgentState`` for the start of a new run.
 
         Args:
-            input: The raw user input string.
+            query: The raw user query string.
 
         Returns:
             A fully populated ``AgentState`` dict ready to pass to the graph.
@@ -222,14 +216,14 @@ class BaseAgent(abc.ABC):
         from langchain_core.messages import HumanMessage
 
         return AgentState(
-            messages=[HumanMessage(content=input)],
+            messages=[HumanMessage(content=query)],
             context={},
             metadata={
                 "agent": self.name,
                 "thread_id": self.thread_id,
                 "run_id": str(uuid.uuid4()),
                 "started_at": time.time(),
-                "input": input,
+                "input": query,
             },
             step_count=0,
             error=None,
@@ -321,7 +315,9 @@ class BaseAgent(abc.ABC):
             except (TimeoutError, ConnectionError) as exc:
                 last_exc = exc
                 if attempt < max_retries:
-                    delay = min(base_delay * (2**attempt), max_delay)
+                    delay = min(base_delay * (2**attempt), max_delay) * (
+                        0.5 + random.random()
+                    )
                     self._log.warning(
                         "LLM call failed (attempt %d/%d), retrying in %.1fs",
                         attempt + 1,
@@ -335,7 +331,9 @@ class BaseAgent(abc.ABC):
                 if "429" in err_str or "rate" in err_str:
                     last_exc = exc
                     if attempt < max_retries:
-                        delay = min(base_delay * (2**attempt), max_delay)
+                        delay = min(base_delay * (2**attempt), max_delay) * (
+                            0.5 + random.random()
+                        )
                         self._log.warning(
                             "LLM rate limited (attempt %d/%d), retrying in %.1fs",
                             attempt + 1,
