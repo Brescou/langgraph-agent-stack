@@ -120,10 +120,15 @@ def test_client(
     mock_graph_cls = MagicMock(return_value=mock_graph_instance)
     mock_agent_cls = MagicMock(return_value=mock_agent_instance)
 
+    mock_llm = MagicMock(spec=True)
+    mock_checkpointer = MagicMock()
+
     with (
         patch("api.main.MultiAgentGraph", mock_graph_cls),
         patch("api.main.ResearchAgent", mock_agent_cls),
         patch("api.main._rate_limiter", permissive_limiter),
+        patch("api.main.get_shared_llm", return_value=mock_llm),
+        patch("api.main.get_shared_checkpointer", return_value=mock_checkpointer),
     ):
         from api.main import app
 

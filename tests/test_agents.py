@@ -13,7 +13,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
 from agents.analyst import AnalysisReport, AnalystAgent
 from agents.researcher import ResearchAgent, ResearchResult
@@ -192,6 +192,96 @@ class TestResearchAgent:
 
 
 # ---------------------------------------------------------------------------
+# Retry logic tests
+# ---------------------------------------------------------------------------
+
+
+class TestRetryLogic:
+    def test_invoke_llm_with_retry_succeeds_after_transient_errors(self) -> None:
+        """Retry logic should handle transient errors and succeed."""
+        mock_llm = MagicMock()
+        call_count = [0]
+
+        def flaky_invoke(messages):
+            call_count[0] += 1
+            if call_count[0] <= 2:
+                raise ConnectionError("Transient failure")
+            return _make_ai_message("Success")
+
+        mock_llm.invoke.side_effect = flaky_invoke
+        mock_llm.bind_tools.return_value = mock_llm
+
+        with patch("agents.base_agent.get_llm", return_value=mock_llm):
+            agent = ResearchAgent()
+            with patch("time.sleep"):
+                result = agent._invoke_llm_with_retry(
+                    [HumanMessage(content="test")], max_retries=3
+                )
+
+        assert result.content == "Success"
+        assert call_count[0] == 3
+
+    def test_invoke_llm_with_retry_raises_after_max_attempts(self) -> None:
+        """After exhausting retries, should raise AgentExecutionError."""
+        from agents.base_agent import AgentExecutionError
+
+        mock_llm = MagicMock()
+        mock_llm.invoke.side_effect = ConnectionError("Always fails")
+        mock_llm.bind_tools.return_value = mock_llm
+
+        with patch("agents.base_agent.get_llm", return_value=mock_llm):
+            agent = ResearchAgent()
+            with patch("time.sleep"):
+                with pytest.raises(AgentExecutionError, match="failed after"):
+                    agent._invoke_llm_with_retry(
+                        [HumanMessage(content="test")], max_retries=2
+                    )
+
+
+# ---------------------------------------------------------------------------
+# Research validation loop tests
+# ---------------------------------------------------------------------------
+
+
+class TestResearchValidationLoop:
+    def test_validation_loop_retries_when_insufficient(self) -> None:
+        """When validation says findings insufficient, research should re-run."""
+        llm = MagicMock()
+        llm.bind_tools.return_value = llm
+        validation_calls = [0]
+
+        def smart_invoke(messages):
+            system = str(messages[0].content).lower() if messages else ""
+            if "query expander" in system:
+                return _make_ai_message(json.dumps(["q1", "q2"]))
+            elif "quality assessor" in system:
+                validation_calls[0] += 1
+                if validation_calls[0] <= 1:
+                    return _make_ai_message(
+                        json.dumps({"sufficient": False, "reason": "Need more data"})
+                    )
+                return _make_ai_message(
+                    json.dumps({"sufficient": True, "reason": "Good enough"})
+                )
+            elif "summariser" in system:
+                return _make_ai_message(
+                    json.dumps({"summary": "Final summary", "confidence": 0.9})
+                )
+            return _make_ai_message(
+                json.dumps({"summary": "Default", "confidence": 0.5})
+            )
+
+        llm.invoke.side_effect = smart_invoke
+
+        with patch("agents.base_agent.get_llm", return_value=llm):
+            agent = ResearchAgent()
+            result = agent.run_structured("Test query for validation loop")
+
+        assert isinstance(result, ResearchResult)
+        assert validation_calls[0] == 2
+
+
+# ---------------------------------------------------------------------------
 # AnalystAgent tests
 # ---------------------------------------------------------------------------
 
@@ -286,3 +376,17 @@ class TestAnalystAgent:
 
         with pytest.raises(AgentValidationError):
             agent.run("")
+
+    def test_analyst_run_string_input(self) -> None:
+        """AnalystAgent.run() with a plain string should work."""
+        mock_llm = _build_analyst_llm()
+        with patch("agents.base_agent.get_llm", return_value=mock_llm):
+            agent = AnalystAgent()
+            output = agent.run(
+                '{"query": "What is AI?", "summary": "AI overview",'
+                ' "findings": ["f1"], "sources": ["s1"],'
+                ' "confidence": 0.8, "metadata": {}}'
+            )
+
+        assert isinstance(output, str)
+        assert len(output) > 0

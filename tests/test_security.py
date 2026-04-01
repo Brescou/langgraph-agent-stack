@@ -59,7 +59,7 @@ class TestInputValidator:
     def test_input_validator_injection_template_syntax(self) -> None:
         """Jinja2/template injection syntax must be rejected."""
         with pytest.raises(ValueError):
-            self.validator.validate("{{config}}")
+            self.validator.validate("{{config.__class__.__mro__}}")
 
     def test_input_validator_injection_ssrf_localhost(self) -> None:
         """SSRF payloads targeting localhost must be rejected."""
@@ -250,6 +250,19 @@ class TestSanitizeLogData:
         result = sanitize_log_data(data)
         assert result == data
 
+    def test_sanitize_list_of_dicts_with_sensitive_keys(self) -> None:
+        """sanitize_log_data should recurse into dicts inside lists."""
+        data = {
+            "items": [
+                {"name": "safe", "api_key": "secret123"},
+                {"name": "also safe", "password": "hunter2"},
+            ]
+        }
+        result = sanitize_log_data(data)
+        assert result["items"][0]["api_key"] == "***REDACTED***"
+        assert result["items"][1]["password"] == "***REDACTED***"
+        assert result["items"][0]["name"] == "safe"
+
 
 # ---------------------------------------------------------------------------
 # validate_api_key_format
@@ -331,3 +344,31 @@ class TestValidateApiKeyFormat:
     def test_generic_provider_key_too_short(self) -> None:
         """Keys shorter than 8 chars must return False for unknown providers."""
         assert validate_api_key_format("short", provider="google") is False
+
+
+# ---------------------------------------------------------------------------
+# RateLimiter eviction
+# ---------------------------------------------------------------------------
+
+
+class TestRateLimiterEviction:
+    """Tests for stale-bucket eviction in RateLimiter."""
+
+    def test_stale_buckets_are_evicted(self) -> None:
+        """After the window expires, stale IP buckets should be cleaned up."""
+        import core.security
+
+        limiter = RateLimiter(max_requests=5, window_seconds=10.0)
+        for i in range(150):
+            limiter.is_allowed(f"192.168.1.{i % 256}")
+
+        original_monotonic = core.security.time.monotonic
+        with patch.object(
+            core.security.time,
+            "monotonic",
+            return_value=original_monotonic() + 20.0,
+        ):
+            for i in range(150):
+                limiter.is_allowed(f"10.0.0.{i % 256}")
+
+        assert limiter.is_allowed("192.168.1.1")

@@ -7,13 +7,18 @@ Each test is fully isolated — the ``test_client`` fixture is function-scoped.
 
 from __future__ import annotations
 
+import json
 import os
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
 
-from agents.base_agent import AgentExecutionError, AgentTimeoutError
+from agents.base_agent import (
+    AgentExecutionError,
+    AgentTimeoutError,
+    AgentValidationError,
+)
 
 # ---------------------------------------------------------------------------
 # GET /health
@@ -180,6 +185,8 @@ def test_rate_limiting() -> None:
     with (
         patch("api.main.MultiAgentGraph", mock_graph_cls),
         patch("api.main._rate_limiter", tight_limiter),
+        patch("api.main.get_shared_llm", return_value=MagicMock(spec=True)),
+        patch("api.main.get_shared_checkpointer", return_value=MagicMock()),
     ):
         from api.main import app
 
@@ -280,6 +287,8 @@ def _auth_client_ctx(
                 patch("api.main.MultiAgentGraph", mock_graph_cls),
                 patch("api.main.ResearchAgent", mock_agent_cls),
                 patch("api.main._rate_limiter", permissive),
+                patch("api.main.get_shared_llm", return_value=MagicMock(spec=True)),
+                patch("api.main.get_shared_checkpointer", return_value=MagicMock()),
             ):
                 from api.main import app
 
@@ -345,3 +354,78 @@ def test_auth_disabled_when_no_api_key(test_client: TestClient) -> None:
     # test_client fixture has no API_KEY set — /run should return 200 (mocked)
     response = test_client.post("/run", json={"query": "What is quantum computing?"})
     assert response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# SSE event parsing
+# ---------------------------------------------------------------------------
+
+
+def test_run_stream_events_are_valid_json(test_client: TestClient) -> None:
+    """Each SSE data line in /run/stream must be valid JSON with a 'type' field."""
+    response = test_client.post("/run/stream", json={"query": "test query"})
+    assert response.status_code == 200
+
+    events = []
+    for line in response.text.strip().split("\n"):
+        line = line.strip()
+        if line.startswith("data: "):
+            payload = json.loads(line[6:])
+            assert "type" in payload
+            events.append(payload)
+
+    event_types = [e["type"] for e in events]
+    assert "status" in event_types
+
+
+# ---------------------------------------------------------------------------
+# Validation / error-path coverage
+# ---------------------------------------------------------------------------
+
+
+def test_run_validation_error_returns_400(test_client: TestClient) -> None:
+    """POST /run must return 400 when pipeline raises AgentValidationError."""
+    with patch("api.main.MultiAgentGraph") as mock_cls:
+        inst = MagicMock()
+        inst.run.side_effect = AgentValidationError("Bad query")
+        mock_cls.return_value = inst
+        response = test_client.post("/run", json={"query": "What is AI?"})
+
+    assert response.status_code == 400
+
+
+def test_root_redirects_to_docs(test_client: TestClient) -> None:
+    """GET / should redirect to /docs."""
+    response = test_client.get("/", follow_redirects=False)
+    assert response.status_code in (301, 302, 307, 308)
+
+
+def test_research_agent_error_returns_500(test_client: TestClient) -> None:
+    """POST /research must return 500 when ResearchAgent raises AgentExecutionError."""
+    with patch("api.main.ResearchAgent") as mock_cls:
+        inst = MagicMock()
+        inst.run_structured.side_effect = AgentExecutionError("Research failed")
+        mock_cls.return_value = inst
+        response = test_client.post(
+            "/research", json={"query": "Explain distributed systems."}
+        )
+
+    assert response.status_code == 500
+    assert "detail" in response.json()
+
+
+def test_run_returns_503_when_llm_not_configured() -> None:
+    """POST /run returns 503 when LLM provider is not available."""
+    from core.security import RateLimiter
+
+    permissive = RateLimiter(max_requests=10_000, window_seconds=60.0)
+    with (
+        patch("api.main._rate_limiter", permissive),
+        patch("api.main.get_shared_llm", return_value=None),
+    ):
+        from api.main import app
+
+        with TestClient(app, raise_server_exceptions=False) as client:
+            response = client.post("/run", json={"query": "test"})
+
+    assert response.status_code == 503

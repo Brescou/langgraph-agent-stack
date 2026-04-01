@@ -209,3 +209,58 @@ def test_save_run_empty_query_raises(memory: ConversationMemory) -> None:
     """save_run with an empty query must raise ValueError."""
     with pytest.raises(ValueError, match="query must not be empty"):
         memory.save_run(_make_run_id(), "   ", {})
+
+
+# ---------------------------------------------------------------------------
+# list_runs_by_session
+# ---------------------------------------------------------------------------
+
+
+def test_list_runs_by_session(memory: ConversationMemory) -> None:
+    """list_runs_by_session should only return runs matching the session_id."""
+    memory.save_run("run-1", "query 1", {"result": "r1"}, {"session_id": "session-A"})
+    memory.save_run("run-2", "query 2", {"result": "r2"}, {"session_id": "session-B"})
+    memory.save_run("run-3", "query 3", {"result": "r3"}, {"session_id": "session-A"})
+
+    runs = memory.list_runs_by_session("session-A")
+    assert len(runs) == 2
+    for run in runs:
+        assert run["metadata"]["session_id"] == "session-A"
+
+
+def test_list_runs_by_session_empty(memory: ConversationMemory) -> None:
+    """list_runs_by_session for nonexistent session returns empty list."""
+    runs = memory.list_runs_by_session("no-such-session")
+    assert runs == []
+
+
+# ---------------------------------------------------------------------------
+# close() idempotent
+# ---------------------------------------------------------------------------
+
+
+def test_close_idempotent() -> None:
+    """Calling close() multiple times should not raise."""
+    mem = ConversationMemory(":memory:")
+    mem.close()
+    mem.close()  # Should not raise
+
+
+# ---------------------------------------------------------------------------
+# Corrupted JSON handling
+# ---------------------------------------------------------------------------
+
+
+def test_get_run_with_corrupted_json(memory: ConversationMemory) -> None:
+    """A run with corrupted result JSON should return an empty dict for result."""
+    run_id = _make_run_id()
+    memory._conn.execute(
+        "INSERT INTO runs (run_id, query, result_json, metadata_json, created_at) "
+        "VALUES (?, ?, ?, ?, datetime('now'))",
+        (run_id, "test query", "{invalid json", "{}"),
+    )
+    memory._conn.commit()
+
+    record = memory.get_run(run_id)
+    assert record is not None
+    assert record["result"] == {}

@@ -79,10 +79,11 @@ class TestGetVectorstoreChromaImportError:
 
 
 class TestGetVectorstorePGVectorMissingUrl:
-    def test_raises_runtime_error_when_postgres_url_missing(self):
-        """When memory_backend=postgres but postgres_url is not set, RuntimeError is raised."""
+    def test_raises_validation_error_when_postgres_url_missing(self):
+        """When memory_backend=postgres but postgres_url is not set, Settings validation fails."""
+        from pydantic import ValidationError
+
         from core.config import Settings, get_settings
-        from core.vectorstore import get_vectorstore
 
         env_override = {
             "RAG_ENABLED": "true",
@@ -92,13 +93,11 @@ class TestGetVectorstorePGVectorMissingUrl:
             "SQLITE_PATH": ":memory:",
             "ENVIRONMENT": "development",
         }
-        # Remove POSTGRES_URL so it defaults to None
         with patch.dict(os.environ, env_override, clear=False):
             os.environ.pop("POSTGRES_URL", None)
             get_settings.cache_clear()
             try:
-                settings = Settings()  # type: ignore[call-arg]
-                with pytest.raises(RuntimeError, match="POSTGRES_URL"):
-                    get_vectorstore(settings)
+                with pytest.raises(ValidationError, match="POSTGRES_URL"):
+                    Settings()  # type: ignore[call-arg]
             finally:
                 get_settings.cache_clear()

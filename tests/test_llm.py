@@ -177,3 +177,61 @@ class TestGetLlmAzure:
             )
             with pytest.raises(ValueError, match="azure_openai_endpoint"):
                 get_llm(config)
+
+
+# ---------------------------------------------------------------------------
+# ImportError handling for each provider
+# ---------------------------------------------------------------------------
+
+
+class TestGetLlmImportErrors:
+    """get_llm should raise ImportError when the provider package is missing."""
+
+    def test_openai_import_error(self) -> None:
+        """get_llm should raise ImportError when langchain_openai is missing."""
+        config = LLMConfig(provider="openai", openai_api_key="sk-test1234567890")
+        with patch.dict("sys.modules", {"langchain_openai": None}):
+            with pytest.raises(ImportError):
+                get_llm(config)
+
+    def test_google_import_error(self) -> None:
+        """get_llm should raise ImportError when langchain_google_genai is missing."""
+        config = LLMConfig(provider="google", google_api_key="test-key-abcdef")
+        with patch.dict("sys.modules", {"langchain_google_genai": None}):
+            with pytest.raises(ImportError):
+                get_llm(config)
+
+    def test_azure_import_error(self) -> None:
+        """get_llm should raise ImportError when langchain_openai is missing (Azure)."""
+        config = LLMConfig(
+            provider="azure",
+            azure_openai_api_key="azure-key",
+            azure_openai_endpoint="https://my-resource.openai.azure.com/",
+        )
+        with patch.dict("sys.modules", {"langchain_openai": None}):
+            with pytest.raises(ImportError):
+                get_llm(config)
+
+    def test_ollama_import_error(self) -> None:
+        """get_llm should raise ImportError when langchain_ollama is missing."""
+        config = LLMConfig(provider="ollama")
+        with patch.dict("sys.modules", {"langchain_ollama": None}):
+            with pytest.raises(ImportError):
+                get_llm(config)
+
+
+# ---------------------------------------------------------------------------
+# LLMConfig defaults
+# ---------------------------------------------------------------------------
+
+
+class TestLLMConfigDefaults:
+    """Verify LLMConfig provides sensible defaults."""
+
+    def test_default_anthropic_model(self) -> None:
+        config = LLMConfig(provider="anthropic", anthropic_api_key="sk-ant-test123")
+        assert "claude" in config.anthropic_model.lower()
+
+    def test_default_max_tokens(self) -> None:
+        config = LLMConfig(provider="anthropic", anthropic_api_key="sk-ant-test123")
+        assert config.max_tokens > 0

@@ -7,6 +7,7 @@ Tests verify the orchestrator's routing, state propagation, and error handling.
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -149,6 +150,25 @@ class TestMultiAgentGraphErrors:
             with pytest.raises(AgentExecutionError):
                 graph.run("What is AI?")
 
+    def test_analysis_not_called_when_research_fails(self) -> None:
+        """When research fails, AnalystAgent should never be invoked."""
+        from agents.base_agent import AgentExecutionError
+
+        mock_research_agent = MagicMock()
+        mock_research_agent.run_structured.side_effect = AgentExecutionError("fail")
+
+        mock_analyst_agent = MagicMock()
+
+        with (
+            patch("core.graph.ResearchAgent", return_value=mock_research_agent),
+            patch("core.graph.AnalystAgent", return_value=mock_analyst_agent),
+        ):
+            graph = MultiAgentGraph()
+            with pytest.raises(AgentExecutionError):
+                graph.run("What is AI?")
+
+        mock_analyst_agent.run_structured.assert_not_called()
+
     def test_analysis_failure_raises_execution_error(
         self, mock_research_result: ResearchResult
     ) -> None:
@@ -199,3 +219,32 @@ class TestMultiAgentGraphResearchOnly:
         graph = MultiAgentGraph()
         with pytest.raises(AgentValidationError):
             graph.get_research_result("")
+
+
+# ---------------------------------------------------------------------------
+# Async pipeline
+# ---------------------------------------------------------------------------
+
+
+class TestMultiAgentGraphAsync:
+    def test_arun_returns_analysis_report(
+        self,
+        mock_research_result: ResearchResult,
+        mock_analysis_report: AnalysisReport,
+    ) -> None:
+        """arun() should return an AnalysisReport via async execution."""
+        mock_research_agent = MagicMock()
+        mock_research_agent.run_structured.return_value = mock_research_result
+
+        mock_analyst_agent = MagicMock()
+        mock_analyst_agent.run_structured.return_value = mock_analysis_report
+
+        with (
+            patch("core.graph.ResearchAgent", return_value=mock_research_agent),
+            patch("core.graph.AnalystAgent", return_value=mock_analyst_agent),
+        ):
+            graph = MultiAgentGraph(run_id="async-test")
+            report = asyncio.run(graph.arun("What is AI?"))
+
+        assert isinstance(report, AnalysisReport)
+        assert report.query == "What is AI?"
