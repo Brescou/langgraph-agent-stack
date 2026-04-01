@@ -137,22 +137,21 @@ class ResearchAgent(BaseAgent):
                     HumanMessage(content=expansion_prompt),
                 ]
             )
-            sub_queries: list[str] = json.loads(
-                _extract_text_content(expansion_msg.content)
-            )
-            if not isinstance(sub_queries, list):
-                sub_queries = [query]
+            parsed = json.loads(_extract_text_content(expansion_msg.content))
+            sub_queries: list[str] = (
+                list(map(str, parsed)) if isinstance(parsed, list) else [query]
+            )  # type: ignore[assignment]
         except json.JSONDecodeError:
             logger.warning(
                 "Query expansion returned non-JSON, falling back to original query"
             )
-            sub_queries = [query]
+            sub_queries: list[str] = [query]  # type: ignore[no-redef]
         except Exception:
             logger.warning(
                 "Query expansion failed unexpectedly, falling back to original query",
                 exc_info=True,
             )
-            sub_queries = [query]
+            sub_queries: list[str] = [query]  # type: ignore[no-redef]
 
         search_tool = next((t for t in self.tools if t.name == "web_search"), None)
         new_findings: list[str] = []

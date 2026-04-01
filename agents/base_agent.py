@@ -164,7 +164,11 @@ class BaseAgent(abc.ABC):
                     f"'{_settings.llm_provider}': {exc}"
                 ) from exc
 
-        self.llm_with_tools: BaseChatModel = (
+        # Pre-bound LLM with tool schemas attached.  Not used by the
+        # built-in agents (they call _invoke_llm_with_retry directly),
+        # but available for subclasses that need tool-calling via
+        # LangChain's native bind_tools() API.
+        self.llm_with_tools: Any = (
             self.llm.bind_tools(self.tools) if self.tools else self.llm
         )
 

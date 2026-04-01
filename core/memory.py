@@ -198,7 +198,11 @@ def _create_redis_checkpointer(redis_url: str) -> Any:
 
 def _create_postgres_checkpointer(postgres_url: str | None) -> Any:
     """
-    Build an ``AsyncPostgresSaver`` checkpointer connected to ``postgres_url``.
+    Build a ``PostgresSaver`` checkpointer connected to ``postgres_url``.
+
+    Uses the **synchronous** ``PostgresSaver`` so it is compatible with
+    ``graph.invoke()`` (the main execution path).  ``setup()`` is called
+    to ensure the checkpoint tables exist.
 
     The ``POSTGRES_URL`` environment variable must be set when
     ``MEMORY_BACKEND=postgres``.  Falls back to ``MemorySaver`` when the
@@ -211,7 +215,7 @@ def _create_postgres_checkpointer(postgres_url: str | None) -> Any:
             ``MemorySaver`` is returned.
 
     Returns:
-        An ``AsyncPostgresSaver`` instance, or a ``MemorySaver`` on import
+        A ``PostgresSaver`` instance, or a ``MemorySaver`` on import
         failure or missing URL.
     """
     if not postgres_url:
@@ -224,14 +228,15 @@ def _create_postgres_checkpointer(postgres_url: str | None) -> Any:
         )
 
     try:
-        from langgraph.checkpoint.postgres.aio import (
-            AsyncPostgresSaver,  # type: ignore[import]
+        from langgraph.checkpoint.postgres import (
+            PostgresSaver,  # type: ignore[import]
         )
 
-        checkpointer = AsyncPostgresSaver.from_conn_string(postgres_url)
+        checkpointer = PostgresSaver.from_conn_string(postgres_url)
+        checkpointer.setup()
         logger.info(
-            "Checkpointer: AsyncPostgresSaver initialised",
-            extra={"url": postgres_url.split("@")[-1]},  # omit credentials
+            "Checkpointer: PostgresSaver initialised (tables created)",
+            extra={"url": postgres_url.split("@")[-1]},
         )
         return checkpointer
 

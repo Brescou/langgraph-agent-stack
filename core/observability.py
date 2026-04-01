@@ -54,6 +54,50 @@ class RequestIdFilter(logging.Filter):
         return True
 
 
+class SanitizingFilter(logging.Filter):
+    """Redact sensitive keys in log record extras before serialisation.
+
+    Delegates to ``core.security.sanitize_log_data`` which recursively
+    strips passwords, tokens, API keys, and URLs with embedded credentials.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        from core.security import sanitize_log_data
+
+        if hasattr(record, "__dict__"):
+            for key in list(record.__dict__):
+                if key.startswith("_") or key in {
+                    "name",
+                    "msg",
+                    "args",
+                    "created",
+                    "relativeCreated",
+                    "exc_info",
+                    "exc_text",
+                    "stack_info",
+                    "lineno",
+                    "funcName",
+                    "pathname",
+                    "filename",
+                    "module",
+                    "levelno",
+                    "levelname",
+                    "message",
+                    "msecs",
+                    "process",
+                    "processName",
+                    "thread",
+                    "threadName",
+                    "request_id",
+                    "taskName",
+                }:
+                    continue
+                value = getattr(record, key, None)
+                if isinstance(value, dict):
+                    setattr(record, key, sanitize_log_data(value))
+        return True
+
+
 # ---------------------------------------------------------------------------
 # Structured JSON logging
 # ---------------------------------------------------------------------------
@@ -90,6 +134,7 @@ def configure_logging(level: str = "INFO") -> None:
 
     handler.setFormatter(formatter)
     handler.addFilter(RequestIdFilter())
+    handler.addFilter(SanitizingFilter())
     root.addHandler(handler)
 
 

@@ -67,8 +67,11 @@ from core.memory import ConversationMemory
 # Logging — structured JSON via core.observability when available
 # ---------------------------------------------------------------------------
 from core.observability import (
+    active_pipelines,
     configure_logging,
     create_metrics_app,
+    http_request_duration_seconds,
+    http_requests_total,
     init_tracing,
     set_request_id,
 )
@@ -193,6 +196,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     _shutting_down.set()
     if _executor is not None:
         _executor.shutdown(wait=True, cancel_futures=False)
+    if _shared_checkpointer is not None and hasattr(_shared_checkpointer, "close"):
+        try:
+            _shared_checkpointer.close()
+        except Exception:
+            logger.debug("Checkpointer close failed (non-critical)", exc_info=True)
     if _shared_memory is not None:
         _shared_memory.close()
     logger.info("Shutdown complete")
@@ -419,7 +427,8 @@ async def log_requests(request: Request, call_next: Any) -> Any:
     response = await call_next(request)
     response.headers["X-Request-ID"] = request_id
 
-    elapsed_ms = (time.monotonic() - start) * 1000
+    elapsed_s = time.monotonic() - start
+    elapsed_ms = elapsed_s * 1000
     logger.info(
         "Request completed",
         extra={
@@ -430,6 +439,15 @@ async def log_requests(request: Request, call_next: Any) -> Any:
             "duration_ms": round(elapsed_ms, 2),
         },
     )
+
+    if http_requests_total is not None:
+        http_requests_total.labels(
+            method=request.method,
+            path=request.url.path,
+            status_code=str(response.status_code),
+        ).inc()
+    if http_request_duration_seconds is not None:
+        http_request_duration_seconds.labels(path=request.url.path).observe(elapsed_s)
 
     return response
 
@@ -443,6 +461,9 @@ async def _run_in_executor(fn: Any, *args: Any) -> Any:
     """
     Execute a blocking callable in the application thread pool.
 
+    Increments / decrements the ``active_pipelines`` Prometheus gauge so
+    operators can observe in-flight pipeline concurrency.
+
     Args:
         fn: The synchronous callable to execute.
         *args: Positional arguments forwarded to ``fn``.
@@ -450,8 +471,14 @@ async def _run_in_executor(fn: Any, *args: Any) -> Any:
     Returns:
         The return value of ``fn(*args)``.
     """
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(_executor, fn, *args)
+    if active_pipelines is not None:
+        active_pipelines.inc()
+    try:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(_executor, fn, *args)
+    finally:
+        if active_pipelines is not None:
+            active_pipelines.dec()
 
 
 # ---------------------------------------------------------------------------
@@ -633,22 +660,22 @@ async def run_pipeline(
     )
 
     def _execute() -> RunResponse:
-        pipeline = MultiAgentGraph(
+        with MultiAgentGraph(
             run_id=run_id,
             llm=_shared_llm,
             checkpointer=_shared_checkpointer,
-        )
-        report = pipeline.run(query)
+        ) as pipeline:
+            report = pipeline.run(query)
 
-        if _shared_memory is not None:
-            _shared_memory.save_run(
-                run_id=run_id,
-                query=query,
-                result=vars(report) if hasattr(report, "__dict__") else {},
-                metadata={"session_id": session_id, "agent": "MultiAgentGraph"},
-            )
+            if _shared_memory is not None:
+                _shared_memory.save_run(
+                    run_id=run_id,
+                    query=query,
+                    result=vars(report) if hasattr(report, "__dict__") else {},
+                    metadata={"session_id": session_id, "agent": "MultiAgentGraph"},
+                )
 
-        return RunResponse.from_analysis_report(report, session_id=session_id)
+            return RunResponse.from_analysis_report(report, session_id=session_id)
 
     try:
         response = await _run_in_executor(_execute)
@@ -746,7 +773,7 @@ async def _stream_pipeline(
         checkpointer = get_shared_checkpointer()
 
         research_agent = ResearchAgent(
-            thread_id=session_id,
+            thread_id=run_id,
             llm=llm,
             checkpointer=checkpointer,
         )
@@ -758,7 +785,7 @@ async def _stream_pipeline(
         yield f"data: {json.dumps({'type': 'status', 'message': 'Starting analysis phase...'})}\n\n"
 
         analyst_agent = AnalystAgent(
-            thread_id=session_id,
+            thread_id=run_id,
             llm=llm,
             checkpointer=checkpointer,
         )
