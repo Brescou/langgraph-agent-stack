@@ -311,6 +311,8 @@ class ResearchAgent(BaseAgent):
             '{"summary": "...", "confidence": 0.0-1.0}'
         )
 
+        summary_text = "Summary unavailable."
+        confidence = 0.5
         try:
             summary_msg = self.llm.invoke(
                 [
@@ -319,15 +321,15 @@ class ResearchAgent(BaseAgent):
                 ]
             )
             parsed = json.loads(summary_msg.content)  # type: ignore[arg-type]
-            summary_text: str = parsed.get("summary", summary_msg.content)
-            confidence: float = float(parsed.get("confidence", 0.7))
+            summary_text = parsed.get("summary", str(summary_msg.content))
+            confidence = float(parsed.get("confidence", 0.7))
+        except json.JSONDecodeError:
+            summary_text = str(summary_msg.content)
         except Exception:
-            summary_text = (
-                str(summary_msg.content)
-                if "summary_msg" in dir()
-                else "Summary unavailable."
+            logger.warning(
+                "Summarize node parsing failed — using defaults",
+                exc_info=True,
             )
-            confidence = 0.5
 
         result = ResearchResult(
             query=str(query),

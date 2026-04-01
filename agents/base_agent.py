@@ -126,6 +126,8 @@ class BaseAgent(abc.ABC):
         name: str,
         thread_id: str | None = None,
         tools: list[BaseTool] | None = None,
+        llm: BaseChatModel | None = None,
+        checkpointer: Any | None = None,
     ) -> None:
         self.name: str = name
         self.thread_id: str = thread_id or str(uuid.uuid4())
@@ -138,22 +140,27 @@ class BaseAgent(abc.ABC):
 
         _settings = get_settings()
 
-        # Build LLM client
-        try:
-            self.llm: BaseChatModel = get_llm(_settings.llm_config)
-        except (ImportError, ValueError) as exc:
-            raise AgentConfigurationError(
-                f"[{self.name}] Failed to initialise LLM provider "
-                f"'{_settings.llm_provider}': {exc}"
-            ) from exc
+        # Build LLM client — use injected instance or create from settings.
+        if llm is not None:
+            self.llm: BaseChatModel = llm
+        else:
+            try:
+                self.llm = get_llm(_settings.llm_config)
+            except (ImportError, ValueError) as exc:
+                raise AgentConfigurationError(
+                    f"[{self.name}] Failed to initialise LLM provider "
+                    f"'{_settings.llm_provider}': {exc}"
+                ) from exc
 
         # LLM variant with tools bound for structured tool-calling nodes.
         self.llm_with_tools: BaseChatModel = (
             self.llm.bind_tools(self.tools) if self.tools else self.llm
         )
 
-        # Build checkpointer via the shared factory
-        self.checkpointer = create_checkpointer(_settings)
+        # Build checkpointer — use injected instance or create from settings.
+        self.checkpointer = (
+            checkpointer if checkpointer is not None else create_checkpointer(_settings)
+        )
 
         # Compile graph (delegated to subclass)
         self._graph = self.build_graph()
