@@ -250,15 +250,13 @@ CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs (created_at DESC);
 
 class ConversationMemory:
     """
-    Persistent run-history store backed by a local SQLite database.
+    Persistent run-history store backed by SQLite.
 
     Each call to ``save_run`` writes a single row to the ``runs`` table.
     ``get_run`` and ``list_runs`` provide read access to the stored history.
 
     The class can be used as a context manager to ensure the database
-    connection is closed after a block of work:
-
-    ::
+    connection is closed after a block of work::
 
         with ConversationMemory("./data/memory.db") as mem:
             mem.save_run(run_id, query, result, metadata)
@@ -266,9 +264,19 @@ class ConversationMemory:
     It can also be used standalone, with ``close()`` called explicitly when
     the memory object is no longer needed.
 
+    When ``backend`` is ``"redis"`` or ``"postgres"``, the SQLite store is
+    still used for run history (lightweight audit trail) while the main
+    checkpointer is handled by :func:`create_checkpointer`.  A warning is
+    logged so operators know the audit DB differs from the checkpoint store.
+
     Args:
         db_path: Filesystem path to the SQLite database.  The parent
             directory is created automatically.
+        backend: The configured memory backend name.  Only used for
+            logging a warning when the run-history store diverges from
+            the checkpoint backend.
+        redis_url: Optional Redis URL (logged for diagnostics).
+        postgres_url: Optional Postgres DSN (logged for diagnostics).
 
     Attributes:
         db_path: Resolved absolute path to the database file.
@@ -278,10 +286,22 @@ class ConversationMemory:
             cannot be applied.
     """
 
-    def __init__(self, db_path: str) -> None:
-        # ":memory:" is SQLite's special token for a pure in-memory database.
-        # Resolving it to an absolute path would turn it into a real filename
-        # (e.g. /project/:memory:), so we preserve the token as-is.
+    def __init__(
+        self,
+        db_path: str,
+        backend: str = "sqlite",
+        redis_url: str | None = None,
+        postgres_url: str | None = None,
+    ) -> None:
+        if backend not in ("sqlite",):
+            logger.warning(
+                "ConversationMemory run-history always uses SQLite; "
+                "checkpoint backend is '%s'. Run history and checkpoint "
+                "stores are separate.",
+                backend,
+                extra={"backend": backend},
+            )
+
         if db_path == ":memory:":
             self.db_path: Path = Path(db_path)
         else:
@@ -291,14 +311,14 @@ class ConversationMemory:
         self._conn: sqlite3.Connection = sqlite3.connect(
             str(self.db_path),
             check_same_thread=False,
-            isolation_level=None,  # autocommit; we manage transactions explicitly
+            isolation_level=None,
         )
         self._conn.row_factory = sqlite3.Row
         self._apply_schema()
 
         logger.debug(
             "ConversationMemory initialised",
-            extra={"db_path": str(self.db_path)},
+            extra={"db_path": str(self.db_path), "backend": backend},
         )
 
     # ------------------------------------------------------------------

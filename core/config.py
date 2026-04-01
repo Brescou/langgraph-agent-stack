@@ -48,7 +48,8 @@ class Settings(BaseSettings):
 
     Attributes:
         anthropic_api_key: Anthropic API key for ChatAnthropic.
-        model_name: LLM model identifier.
+        llm_provider: Active LLM provider name.
+        anthropic_model: Anthropic model identifier.
         max_tokens: Maximum tokens per LLM response.
         memory_backend: Storage backend for agent memory/checkpoints.
         redis_url: Redis connection URL (required when memory_backend=redis).

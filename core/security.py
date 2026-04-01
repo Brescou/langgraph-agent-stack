@@ -5,9 +5,10 @@ This module provides four focused primitives that harden the application against
 the most common attack vectors at the API layer and in structured logging:
 
 ``InputValidator``
-    Validates and sanitises free-text queries.  Enforces a maximum byte length,
-    rejects null bytes, and detects a configurable set of dangerous patterns
-    (prompt injection, SSRF-style payloads, template injection, path traversal).
+    Validates and sanitises free-text queries.  Enforces a maximum character
+    length, rejects null bytes, and detects a configurable set of dangerous
+    patterns (prompt injection, SSRF-style payloads, template injection,
+    path traversal).
 
 ``RateLimiter``
     In-memory sliding-window rate limiter keyed by client IP.  Designed to be
@@ -18,9 +19,10 @@ the most common attack vectors at the API layer and in structured logging:
     tokens, and passwords are never emitted to log sinks in plaintext.
 
 ``validate_api_key_format``
-    Checks that a string matches the Anthropic API key format (``sk-ant-``
-    prefix) before it is handed to the SDK, catching common misconfiguration
-    errors early.
+    Checks that a string matches the expected API key format for the given
+    LLM provider before it is handed to the SDK, catching common
+    misconfiguration errors early.  Supports Anthropic, OpenAI, and a
+    generic fallback for other providers.
 
 All public functions and classes carry complete type hints and docstrings.
 """
@@ -240,10 +242,7 @@ class RateLimiter:
 
         Must be called while ``self._lock`` is held.
         """
-        stale = [
-            ip for ip, dq in self._buckets.items()
-            if not dq or dq[-1] < cutoff
-        ]
+        stale = [ip for ip, dq in self._buckets.items() if not dq or dq[-1] < cutoff]
         for ip in stale:
             del self._buckets[ip]
 
@@ -285,7 +284,7 @@ _SENSITIVE_RE: re.Pattern[str] = re.compile(
             "pwd",
             "credential",
             "authorization",
-            "auth",
+            "auth_token",
         )
     )
     + r")(?![a-z0-9])"
@@ -341,33 +340,43 @@ def _is_sensitive_key(key: str) -> bool:
 # validate_api_key_format
 # ---------------------------------------------------------------------------
 
-# Anthropic API keys begin with "sk-ant-" followed by alphanumeric characters,
-# hyphens, and underscores.  The minimum length after the prefix is 10 chars.
-_ANTHROPIC_KEY_PATTERN: re.Pattern[str] = re.compile(r"^sk-ant-[A-Za-z0-9\-_]{10,}$")
+_API_KEY_PATTERNS: dict[str, re.Pattern[str]] = {
+    "anthropic": re.compile(r"^sk-ant-[A-Za-z0-9\-_]{10,}$"),
+    "openai": re.compile(r"^sk-[A-Za-z0-9\-_]{20,}$"),
+    "azure": re.compile(r"^[A-Fa-f0-9]{32}$"),
+}
+
+_GENERIC_KEY_PATTERN: re.Pattern[str] = re.compile(r"^[A-Za-z0-9\-_]{8,}$")
 
 
-def validate_api_key_format(key: str) -> bool:
+def validate_api_key_format(key: str, provider: str = "anthropic") -> bool:
     """
-    Check whether ``key`` matches the expected Anthropic API key format.
+    Check whether ``key`` matches the expected API key format for ``provider``.
 
-    The expected format is: ``sk-ant-`` followed by at least 10 alphanumeric
-    characters, hyphens, or underscores.
+    Supported providers and their expected formats:
 
-    This is a structural check only — it does not verify the key against the
-    Anthropic API.  Use it at startup to catch copy-paste errors and unset
-    placeholder values before the first real API call is attempted.
+    * ``anthropic`` — ``sk-ant-`` prefix + 10+ alphanumeric chars.
+    * ``openai``    — ``sk-`` prefix + 20+ alphanumeric chars.
+    * ``azure``     — 32-character hexadecimal string.
+    * Other providers fall back to a generic check (8+ alphanumeric chars).
+
+    This is a structural check only — it does not verify the key against
+    the provider's API.  Use it at startup to catch copy-paste errors and
+    unset placeholder values before the first real API call is attempted.
 
     Args:
         key: The API key string to check.
+        provider: LLM provider name (e.g. ``"anthropic"``, ``"openai"``).
 
     Returns:
         ``True`` if ``key`` matches the expected format, ``False`` otherwise.
 
     Example::
 
-        if not validate_api_key_format(settings.anthropic_api_key):
-            raise RuntimeError("ANTHROPIC_API_KEY does not match expected format.")
+        if not validate_api_key_format(settings.anthropic_api_key, "anthropic"):
+            raise RuntimeError("API key does not match expected format.")
     """
     if not isinstance(key, str):
         return False
-    return bool(_ANTHROPIC_KEY_PATTERN.match(key))
+    pattern = _API_KEY_PATTERNS.get(provider, _GENERIC_KEY_PATTERN)
+    return bool(pattern.match(key))

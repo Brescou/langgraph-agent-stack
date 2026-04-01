@@ -34,6 +34,7 @@ from agents.base_agent import AgentError, AgentExecutionError, AgentValidationEr
 from agents.researcher import ResearchAgent, ResearchResult
 from core.config import get_settings
 from core.memory import create_checkpointer
+from core.observability import trace_span
 
 logger = logging.getLogger(__name__)
 
@@ -163,39 +164,40 @@ class MultiAgentGraph:
             extra={"run_id": self.run_id, "query": query[:120]},
         )
 
-        try:
-            agent = ResearchAgent(
-                thread_id=f"{self.run_id}-research",
-                llm=self._llm,
-                checkpointer=self._checkpointer,
-            )
-            result: ResearchResult = agent.run_structured(query)
-            logger.info(
-                "Pipeline: research phase complete",
-                extra={
-                    "run_id": self.run_id,
-                    "confidence": result.confidence,
-                    "findings": len(result.findings),
-                },
-            )
-            return {
-                **state,
-                "research_result": result.to_dict(),
-                "status": "research_done",
-                "error": None,
-            }  # type: ignore[return-value]
+        with trace_span("research_node", {"run_id": self.run_id}):
+            try:
+                agent = ResearchAgent(
+                    thread_id=f"{self.run_id}-research",
+                    llm=self._llm,
+                    checkpointer=self._checkpointer,
+                )
+                result: ResearchResult = agent.run_structured(query)
+                logger.info(
+                    "Pipeline: research phase complete",
+                    extra={
+                        "run_id": self.run_id,
+                        "confidence": result.confidence,
+                        "findings": len(result.findings),
+                    },
+                )
+                return {
+                    **state,
+                    "research_result": result.to_dict(),
+                    "status": "research_done",
+                    "error": None,
+                }  # type: ignore[return-value]
 
-        except AgentError as exc:
-            logger.error(
-                "Pipeline: research phase failed",
-                extra={"run_id": self.run_id, "error": str(exc)},
-            )
-            return {
-                **state,
-                "research_result": None,
-                "status": "error",
-                "error": str(exc),
-            }  # type: ignore[return-value]
+            except AgentError as exc:
+                logger.error(
+                    "Pipeline: research phase failed",
+                    extra={"run_id": self.run_id, "error": str(exc)},
+                )
+                return {
+                    **state,
+                    "research_result": None,
+                    "status": "error",
+                    "error": str(exc),
+                }  # type: ignore[return-value]
 
     def _analysis_node(self, state: OrchestratorState) -> OrchestratorState:
         """
@@ -226,39 +228,54 @@ class MultiAgentGraph:
 
         try:
             research_result = ResearchResult(**research_dict)
-            agent = AnalystAgent(
-                thread_id=f"{self.run_id}-analysis",
-                llm=self._llm,
-                checkpointer=self._checkpointer,
-            )
-            report: AnalysisReport = agent.run_structured(research_result)
-
-            logger.info(
-                "Pipeline: analysis phase complete",
-                extra={
-                    "run_id": self.run_id,
-                    "confidence": report.confidence,
-                    "insights": len(report.key_insights),
-                },
-            )
-            return {
-                **state,
-                "analysis_report": report.to_dict(),
-                "status": "analysis_done",
-                "error": None,
-            }  # type: ignore[return-value]
-
-        except AgentError as exc:
+        except (TypeError, KeyError, ValueError) as exc:
+            err = f"Failed to deserialise ResearchResult: {exc}"
             logger.error(
-                "Pipeline: analysis phase failed",
-                extra={"run_id": self.run_id, "error": str(exc)},
+                "Pipeline: analysis phase failed (bad research_result)",
+                extra={"run_id": self.run_id, "error": err},
             )
             return {
                 **state,
                 "analysis_report": None,
                 "status": "error",
-                "error": str(exc),
+                "error": err,
             }  # type: ignore[return-value]
+
+        with trace_span("analysis_node", {"run_id": self.run_id}):
+            try:
+                agent = AnalystAgent(
+                    thread_id=f"{self.run_id}-analysis",
+                    llm=self._llm,
+                    checkpointer=self._checkpointer,
+                )
+                report: AnalysisReport = agent.run_structured(research_result)
+
+                logger.info(
+                    "Pipeline: analysis phase complete",
+                    extra={
+                        "run_id": self.run_id,
+                        "confidence": report.confidence,
+                        "insights": len(report.key_insights),
+                    },
+                )
+                return {
+                    **state,
+                    "analysis_report": report.to_dict(),
+                    "status": "analysis_done",
+                    "error": None,
+                }  # type: ignore[return-value]
+
+            except AgentError as exc:
+                logger.error(
+                    "Pipeline: analysis phase failed",
+                    extra={"run_id": self.run_id, "error": str(exc)},
+                )
+                return {
+                    **state,
+                    "analysis_report": None,
+                    "status": "error",
+                    "error": str(exc),
+                }  # type: ignore[return-value]
 
     # ------------------------------------------------------------------
     # Conditional routing
@@ -343,7 +360,12 @@ class MultiAgentGraph:
                 "[MultiAgentGraph] Pipeline completed without an AnalysisReport."
             )
 
-        report = AnalysisReport(**report_dict)
+        try:
+            report = AnalysisReport(**report_dict)
+        except (TypeError, KeyError, ValueError) as exc:
+            raise AgentExecutionError(
+                f"[MultiAgentGraph] Failed to deserialise AnalysisReport: {exc}"
+            ) from exc
         logger.info(
             "MultiAgentGraph.run() completed",
             extra={
