@@ -303,3 +303,28 @@ def test_create_checkpointer_postgres_missing_url():
     from langgraph.checkpoint.memory import MemorySaver
 
     assert isinstance(result, MemorySaver)
+
+
+def test_create_checkpointer_postgres_sync_with_setup():
+    """PostgresSaver (sync) is used and setup() is called on creation."""
+    from unittest.mock import MagicMock, patch
+
+    mock_saver = MagicMock()
+    mock_pg_module = MagicMock()
+    mock_pg_module.PostgresSaver.from_conn_string.return_value = mock_saver
+
+    with patch.dict(
+        "sys.modules",
+        {"langgraph.checkpoint.postgres": mock_pg_module},
+    ):
+        from core.memory import _create_postgres_checkpointer
+
+        result = _create_postgres_checkpointer(
+            "postgresql+psycopg://u:p@localhost:5432/db"
+        )
+
+    assert result is mock_saver
+    mock_pg_module.PostgresSaver.from_conn_string.assert_called_once_with(
+        "postgresql+psycopg://u:p@localhost:5432/db"
+    )
+    mock_saver.setup.assert_called_once()

@@ -192,6 +192,8 @@ def test_run_agent_error(test_client: TestClient) -> None:
     with patch("api.main.MultiAgentGraph") as mock_graph_cls:
         mock_graph_instance = MagicMock()
         mock_graph_instance.run.side_effect = AgentExecutionError("Pipeline failed")
+        mock_graph_instance.__enter__ = MagicMock(return_value=mock_graph_instance)
+        mock_graph_instance.__exit__ = MagicMock(return_value=False)
         mock_graph_cls.return_value = mock_graph_instance
 
         response = test_client.post(
@@ -207,6 +209,8 @@ def test_run_timeout_error(test_client: TestClient) -> None:
     with patch("api.main.MultiAgentGraph") as mock_graph_cls:
         mock_graph_instance = MagicMock()
         mock_graph_instance.run.side_effect = AgentTimeoutError("Step budget exceeded")
+        mock_graph_instance.__enter__ = MagicMock(return_value=mock_graph_instance)
+        mock_graph_instance.__exit__ = MagicMock(return_value=False)
         mock_graph_cls.return_value = mock_graph_instance
 
         response = test_client.post(
@@ -286,6 +290,8 @@ def test_rate_limiting() -> None:
         research_summary="r",
         metadata={},
     )
+    mock_graph_instance.__enter__ = MagicMock(return_value=mock_graph_instance)
+    mock_graph_instance.__exit__ = MagicMock(return_value=False)
     mock_graph_cls = MagicMock(return_value=mock_graph_instance)
 
     with (
@@ -462,6 +468,8 @@ def _auth_client_ctx(
         permissive = RateLimiter(max_requests=10_000, window_seconds=60.0)
         mock_graph_instance = MagicMock()
         mock_graph_instance.run.return_value = mock_analysis_report
+        mock_graph_instance.__enter__ = MagicMock(return_value=mock_graph_instance)
+        mock_graph_instance.__exit__ = MagicMock(return_value=False)
         mock_graph_cls = MagicMock(return_value=mock_graph_instance)
         mock_agent_cls = MagicMock(return_value=MagicMock())
 
@@ -594,6 +602,8 @@ def test_run_validation_error_returns_400(test_client: TestClient) -> None:
     with patch("api.main.MultiAgentGraph") as mock_cls:
         inst = MagicMock()
         inst.run.side_effect = AgentValidationError("Bad query")
+        inst.__enter__ = MagicMock(return_value=inst)
+        inst.__exit__ = MagicMock(return_value=False)
         mock_cls.return_value = inst
         response = test_client.post("/run", json={"query": "What is AI?"})
 

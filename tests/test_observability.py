@@ -79,6 +79,45 @@ class TestGetTracer:
             assert get_tracer() is sentinel
 
 
+class TestSanitizingFilter:
+    """Tests for ``SanitizingFilter``."""
+
+    def test_redacts_sensitive_dict_extras(self) -> None:
+        from core.observability import SanitizingFilter
+
+        filt = SanitizingFilter()
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="test",
+            args=None,
+            exc_info=None,
+        )
+        record.extra_data = {"password": "s3cret", "user": "alice"}  # type: ignore[attr-defined]
+        filt.filter(record)
+        assert record.extra_data["password"] == "***REDACTED***"  # type: ignore[attr-defined]
+        assert record.extra_data["user"] == "alice"  # type: ignore[attr-defined]
+
+    def test_leaves_non_dict_extras_untouched(self) -> None:
+        from core.observability import SanitizingFilter
+
+        filt = SanitizingFilter()
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="test",
+            args=None,
+            exc_info=None,
+        )
+        record.run_id = "abc-123"  # type: ignore[attr-defined]
+        filt.filter(record)
+        assert record.run_id == "abc-123"  # type: ignore[attr-defined]
+
+
 class TestTraceSpan:
     """Tests for ``trace_span``."""
 

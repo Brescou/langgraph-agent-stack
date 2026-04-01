@@ -114,6 +114,8 @@ def test_client(
 
     mock_graph_instance = MagicMock()
     mock_graph_instance.run.return_value = mock_analysis_report
+    mock_graph_instance.__enter__ = MagicMock(return_value=mock_graph_instance)
+    mock_graph_instance.__exit__ = MagicMock(return_value=False)
 
     mock_researcher_instance = MagicMock()
     mock_researcher_instance.run_structured.return_value = mock_research_result
