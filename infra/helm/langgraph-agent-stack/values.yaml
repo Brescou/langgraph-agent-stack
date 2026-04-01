@@ -41,11 +41,11 @@ config:
 # Persistent storage for SQLite data (only relevant when memoryBackend=sqlite).
 # Enable this to survive pod restarts; disabled by default (uses emptyDir).
 persistence:
-  enabled: false
-  storageClass: ""
+  enabled: true
+  mountPath: /app/data
   size: 1Gi
-  accessModes:
-    - ReadWriteOnce
+  storageClass: ""
+  accessMode: ReadWriteOnce
 
 llm:
   provider: anthropic
@@ -97,3 +97,8 @@ podDisruptionBudget:
 namespace:
   create: true
   name: langgraph-agents
+
+serviceMonitor:
+  enabled: false
+  namespace: monitoring
+  interval: 30s

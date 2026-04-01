@@ -91,7 +91,7 @@ spec:
 
           securityContext:
             allowPrivilegeEscalation: {{ .Values.securityContext.allowPrivilegeEscalation }}
-            readOnlyRootFilesystem: {{ .Values.securityContext.readOnlyRootFilesystem }}
+            readOnlyRootFilesystem: {{ not .Values.persistence.enabled }}
             capabilities:
               drop:
                 {{- toYaml .Values.securityContext.capabilities.drop | nindent 16 }}
@@ -99,16 +99,16 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
-            - name: app-data
-              mountPath: /app/data
+            {{- if .Values.persistence.enabled }}
+            - name: data
+              mountPath: {{ .Values.persistence.mountPath }}
+            {{- end }}
 
       volumes:
         - name: tmp
           emptyDir: {}
-        - name: app-data
-          {{- if .Values.persistence.enabled }}
+        {{- if .Values.persistence.enabled }}
+        - name: data
           persistentVolumeClaim:
             claimName: {{ include "langgraph-agent-stack.fullname" . }}-data
-          {{- else }}
-          emptyDir: {}
-          {{- end }}
+        {{- end }}

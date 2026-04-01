@@ -8,7 +8,7 @@ metadata:
     {{- include "langgraph-agent-stack.labels" . | nindent 4 }}
 spec:
   accessModes:
-    {{- toYaml .Values.persistence.accessModes | nindent 4 }}
+    - {{ .Values.persistence.accessMode }}
   {{- if .Values.persistence.storageClass }}
   storageClassName: {{ .Values.persistence.storageClass | quote }}
   {{- end }}

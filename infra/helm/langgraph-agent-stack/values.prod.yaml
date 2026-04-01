@@ -19,5 +19,8 @@ autoscaling:
   enabled: true
   maxReplicas: 10
 
+persistence:
+  enabled: false  # prod utilise Redis ou Postgres
+
 secrets:
   existingSecret: langgraph-secrets
