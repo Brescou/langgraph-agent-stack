@@ -96,6 +96,7 @@ class MultiAgentGraph:
         checkpointer: Any | None = None,
     ) -> None:
         self.run_id: str = run_id or str(uuid.uuid4())
+        self._llm = llm
         self._checkpointer = checkpointer or create_checkpointer(get_settings())
         self._graph = self._build_graph()
 
@@ -163,7 +164,11 @@ class MultiAgentGraph:
         )
 
         try:
-            agent = ResearchAgent(thread_id=f"{self.run_id}-research")
+            agent = ResearchAgent(
+                thread_id=f"{self.run_id}-research",
+                llm=self._llm,
+                checkpointer=self._checkpointer,
+            )
             result: ResearchResult = agent.run_structured(query)
             logger.info(
                 "Pipeline: research phase complete",
@@ -221,7 +226,11 @@ class MultiAgentGraph:
 
         try:
             research_result = ResearchResult(**research_dict)
-            agent = AnalystAgent(thread_id=f"{self.run_id}-analysis")
+            agent = AnalystAgent(
+                thread_id=f"{self.run_id}-analysis",
+                llm=self._llm,
+                checkpointer=self._checkpointer,
+            )
             report: AnalysisReport = agent.run_structured(research_result)
 
             logger.info(
@@ -389,5 +398,9 @@ class MultiAgentGraph:
                 "MultiAgentGraph.get_research_result() requires a non-empty query."
             )
 
-        agent = ResearchAgent(thread_id=f"{self.run_id}-research-only")
+        agent = ResearchAgent(
+            thread_id=f"{self.run_id}-research-only",
+            llm=self._llm,
+            checkpointer=self._checkpointer,
+        )
         return agent.run_structured(query.strip())

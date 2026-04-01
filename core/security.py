@@ -198,6 +198,8 @@ class RateLimiter:
         # ip -> deque of request timestamps (float, monotonic)
         self._buckets: dict[str, deque[float]] = {}
         self._lock = threading.Lock()
+        self._call_count: int = 0
+        self._EVICT_INTERVAL: int = 100
 
     def is_allowed(self, ip: str) -> bool:
         """
@@ -228,7 +230,22 @@ class RateLimiter:
                 return False
 
             bucket.append(now)
+            self._call_count += 1
+            if self._call_count % self._EVICT_INTERVAL == 0:
+                self._evict_stale(cutoff)
             return True
+
+    def _evict_stale(self, cutoff: float) -> None:
+        """Remove IP buckets whose newest timestamp is older than ``cutoff``.
+
+        Must be called while ``self._lock`` is held.
+        """
+        stale = [
+            ip for ip, dq in self._buckets.items()
+            if not dq or dq[-1] < cutoff
+        ]
+        for ip in stale:
+            del self._buckets[ip]
 
     def remaining(self, ip: str) -> int:
         """
@@ -256,7 +273,7 @@ class RateLimiter:
 # ---------------------------------------------------------------------------
 
 _SENSITIVE_RE: re.Pattern[str] = re.compile(
-    r"(?<![a-zA-Z0-9])("
+    r"(?<![a-z0-9])("
     + "|".join(
         re.escape(p)
         for p in (
@@ -271,7 +288,7 @@ _SENSITIVE_RE: re.Pattern[str] = re.compile(
             "auth",
         )
     )
-    + r")(?![a-zA-Z0-9])"
+    + r")(?![a-z0-9])"
 )
 
 _MASK = "***REDACTED***"
@@ -281,8 +298,8 @@ def sanitize_log_data(data: dict[str, Any]) -> dict[str, Any]:
     """
     Return a copy of ``data`` with sensitive values masked.
 
-    Recursively traverses nested dicts.  Any key whose lowercased name
-    contains one of the fragments in ``_SENSITIVE_KEY_FRAGMENTS`` has its
+    Recursively traverses nested dicts and lists.  Any key whose lowercased
+    name matches a sensitive word (checked via ``_SENSITIVE_RE``) has its
     value replaced with ``"***REDACTED***"``.
 
     This function is a pure transformation — it never mutates the input dict.
