@@ -19,6 +19,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.graph import END, StateGraph
 
@@ -98,8 +99,18 @@ class ResearchAgent(BaseAgent):
     _CTX_ITERATIONS = "research_iterations"
     _CTX_RESULT = "research_result"
 
-    def __init__(self, thread_id: str | None = None) -> None:
-        super().__init__(name="ResearchAgent", thread_id=thread_id)
+    def __init__(
+        self,
+        thread_id: str | None = None,
+        llm: BaseChatModel | None = None,
+        checkpointer: Any | None = None,
+    ) -> None:
+        super().__init__(
+            name="ResearchAgent",
+            thread_id=thread_id,
+            llm=llm,
+            checkpointer=checkpointer,
+        )
 
     # ------------------------------------------------------------------
     # Graph construction
