@@ -23,6 +23,7 @@ WORKDIR /build
 
 # Copy dependency manifests first to benefit from Docker layer caching
 COPY pyproject.toml .
+COPY README.md .
 # If a lockfile exists, copy it too; otherwise uv will resolve from pyproject.toml
 COPY uv.lock* ./
 

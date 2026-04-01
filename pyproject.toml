@@ -61,8 +61,8 @@ dev = [
 [tool.hatch.build.targets.wheel]
 packages = ["agents", "core", "api"]
 
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "pytest>=8",
     "pytest-asyncio>=0.24",
     "pytest-cov>=5",
