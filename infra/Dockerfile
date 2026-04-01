@@ -3,7 +3,7 @@
 # Installs uv and resolves/installs all production dependencies into a venv.
 # The resulting virtual environment is later copied to the slim runtime image.
 # =============================================================================
-FROM python:3.12-slim AS builder
+FROM python:3.12-slim@sha256:054f77c16d35200a148726d30b59971618611c5245fc0d3c64edfa2a0adaeebe AS builder
 
 # Prevent Python from writing .pyc files and enable unbuffered stdout/stderr
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -41,7 +41,7 @@ RUN uv sync --locked --no-dev --extra ${LLM_EXTRAS}
 # Minimal image that only carries the application code and pre-built venv.
 # Runs as a non-root user for defence-in-depth.
 # =============================================================================
-FROM python:3.12-slim AS runtime
+FROM python:3.12-slim@sha256:054f77c16d35200a148726d30b59971618611c5245fc0d3c64edfa2a0adaeebe AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

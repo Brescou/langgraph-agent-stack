@@ -20,6 +20,3 @@ data:
   GOOGLE_MODEL: {{ .Values.llm.googleModel | quote }}
   OLLAMA_BASE_URL: {{ .Values.llm.ollamaBaseUrl | quote }}
   OLLAMA_MODEL: {{ .Values.llm.ollamaModel | quote }}
-  {{- if eq .Values.config.memoryBackend "redis" }}
-  REDIS_URL: {{ .Values.secrets.redisUrl | default "redis://redis:6379/0" | quote }}
-  {{- end }}

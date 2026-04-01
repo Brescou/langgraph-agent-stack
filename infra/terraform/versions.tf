@@ -21,18 +21,29 @@ terraform {
   }
 }
 
-# To enable remote state (REQUIRED for team/production use), add a backend block:
-# 
+# WARNING: No backend is configured — Terraform will store state LOCALLY.
+# Local state is unsuitable for team or production use because:
+#   * State files may contain secrets (API keys, passwords)
+#   * No locking — concurrent applies can corrupt state
+#   * No history or audit trail
+#
+# REQUIRED for production: uncomment ONE of the backend blocks below.
+#
 # For GCP:
-#   backend "gcs" {
-#     bucket = "your-terraform-state-bucket"
-#     prefix = "langgraph-agent-stack"
+#   terraform {
+#     backend "gcs" {
+#       bucket = "your-terraform-state-bucket"
+#       prefix = "langgraph-agent-stack"
+#     }
 #   }
 #
 # For AWS:
-#   backend "s3" {
-#     bucket         = "your-terraform-state-bucket"
-#     key            = "langgraph-agent-stack/terraform.tfstate"
-#     region         = "us-east-1"
-#     dynamodb_table = "terraform-locks"
+#   terraform {
+#     backend "s3" {
+#       bucket         = "your-terraform-state-bucket"
+#       key            = "langgraph-agent-stack/terraform.tfstate"
+#       region         = "us-east-1"
+#       dynamodb_table = "terraform-locks"
+#       encrypt        = true
+#     }
 #   }

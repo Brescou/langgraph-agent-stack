@@ -87,6 +87,9 @@ readinessProbe:
   initialDelaySeconds: 10
   periodSeconds: 10
 
+networkPolicy:
+  enabled: false
+
 podDisruptionBudget:
   enabled: false
   minAvailable: 1
