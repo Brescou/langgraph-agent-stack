@@ -40,6 +40,112 @@ def test_health_check(test_client: TestClient) -> None:
     assert "components" in body
 
 
+def test_health_check_with_llm_initialised() -> None:
+    """GET /health returns component.llm.status=ok when the LLM is initialised.
+
+    Regression test: LLMProvider is a Literal (str), not an Enum.
+    Calling .value on it would raise AttributeError.
+    """
+    import api.main as api_module
+    from core.security import RateLimiter
+
+    permissive = RateLimiter(max_requests=10_000, window_seconds=60.0)
+    mock_llm = MagicMock(spec=True)
+    mock_checkpointer = MagicMock()
+    mock_memory = MagicMock()
+    mock_memory.db_path = ":memory:"
+
+    with (
+        patch("api.main._rate_limiter", permissive),
+        patch("api.main.get_shared_llm", return_value=mock_llm),
+        patch("api.main.get_shared_checkpointer", return_value=mock_checkpointer),
+    ):
+        from api.main import app
+
+        with TestClient(app, raise_server_exceptions=False) as client:
+            saved = (
+                api_module._shared_llm,
+                api_module._shared_checkpointer,
+                api_module._shared_memory,
+            )
+            api_module._shared_llm = mock_llm
+            api_module._shared_checkpointer = mock_checkpointer
+            api_module._shared_memory = mock_memory
+            try:
+                response = client.get("/health")
+            finally:
+                (
+                    api_module._shared_llm,
+                    api_module._shared_checkpointer,
+                    api_module._shared_memory,
+                ) = saved
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["components"]["llm"]["status"] == "ok"
+    assert body["components"]["llm"]["detail"] == "anthropic"
+
+
+# ---------------------------------------------------------------------------
+# GET /ready
+# ---------------------------------------------------------------------------
+
+
+def test_ready_returns_200_when_initialised(test_client: TestClient) -> None:
+    """GET /ready must return 200 when LLM and checkpointer are initialised."""
+    response = test_client.get("/ready")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ready"
+
+
+def test_ready_returns_503_when_llm_not_initialised() -> None:
+    """GET /ready must return 503 when the LLM is not initialised."""
+    from core.security import RateLimiter
+
+    permissive = RateLimiter(max_requests=10_000, window_seconds=60.0)
+
+    with (
+        patch("api.main._rate_limiter", permissive),
+        patch("api.main.get_shared_llm", return_value=None),
+        patch("api.main.get_shared_checkpointer", return_value=MagicMock()),
+    ):
+        from api.main import app
+
+        with TestClient(app, raise_server_exceptions=False) as client:
+            response = client.get("/ready")
+
+    assert response.status_code == 503
+    assert "not ready" in response.json()["detail"].lower()
+
+
+def test_ready_returns_503_when_shutting_down() -> None:
+    """GET /ready must return 503 when the server is shutting down."""
+    import api.main as api_module
+    from core.security import RateLimiter
+
+    permissive = RateLimiter(max_requests=10_000, window_seconds=60.0)
+
+    with (
+        patch("api.main._rate_limiter", permissive),
+        patch("api.main.get_shared_llm", return_value=MagicMock(spec=True)),
+        patch("api.main.get_shared_checkpointer", return_value=MagicMock()),
+    ):
+        from api.main import app
+
+        with TestClient(app, raise_server_exceptions=False) as client:
+            api_module._shutting_down.set()
+            try:
+                response = client.get("/ready")
+            finally:
+                api_module._shutting_down.clear()
+
+    assert response.status_code == 503
+    assert "shutting down" in response.json()["detail"].lower()
+
+
 # ---------------------------------------------------------------------------
 # POST /run
 # ---------------------------------------------------------------------------

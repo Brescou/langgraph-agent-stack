@@ -301,3 +301,213 @@ class TestCalculatorPowGuard:
         calc = next(t for t in tools if t.name == "calculator")
         result = calc.invoke({"expression": "max(3, 1, 2)"})
         assert "3" in result
+
+
+# ---------------------------------------------------------------------------
+# recall_history tool
+# ---------------------------------------------------------------------------
+
+
+class TestRecallHistoryTool:
+    """Tests for the recall_history tool created by create_memory_tool."""
+
+    def test_recall_history_no_runs(self) -> None:
+        """recall_history returns 'No previous run history' for an empty memory."""
+        from core.memory import ConversationMemory
+        from core.tools import create_memory_tool
+
+        with ConversationMemory(":memory:") as mem:
+            tool = create_memory_tool(mem)
+            result = tool.invoke("any query")
+
+        assert "No previous run history" in result
+
+    def test_recall_history_with_runs(self) -> None:
+        """recall_history returns formatted run records when runs exist."""
+        from core.memory import ConversationMemory
+        from core.tools import create_memory_tool
+
+        with ConversationMemory(":memory:") as mem:
+            mem.save_run(
+                run_id="run-001",
+                query="What is AI?",
+                result={"summary": "AI is intelligence demonstrated by machines."},
+                metadata={"session_id": "s1"},
+            )
+            mem.save_run(
+                run_id="run-002",
+                query="What is ML?",
+                result={"executive_summary": "ML is a subset of AI."},
+                metadata={"session_id": "s1"},
+            )
+            tool = create_memory_tool(mem)
+            result = tool.invoke("previous research")
+
+        assert "2 recent run(s)" in result
+        assert "run-001" in result
+        assert "run-002" in result
+        assert "AI is intelligence" in result
+        assert "ML is a subset" in result
+
+    def test_recall_history_handles_memory_error(self) -> None:
+        """recall_history returns an error message when list_runs raises."""
+        from unittest.mock import MagicMock
+
+        from core.tools import create_memory_tool
+
+        mock_mem = MagicMock()
+        mock_mem.list_runs.side_effect = RuntimeError("DB gone")
+
+        tool = create_memory_tool(mock_mem)
+        result = tool.invoke("anything")
+
+        assert "Error retrieving history" in result
+        assert "DB gone" in result
+
+    def test_recall_history_result_without_summary_key(self) -> None:
+        """recall_history handles runs whose result has no recognisable summary key."""
+        from core.memory import ConversationMemory
+        from core.tools import create_memory_tool
+
+        with ConversationMemory(":memory:") as mem:
+            mem.save_run(
+                run_id="run-003",
+                query="Test query",
+                result={"custom_field": "custom_value"},
+                metadata={},
+            )
+            tool = create_memory_tool(mem)
+            result = tool.invoke("check")
+
+        assert "1 recent run(s)" in result
+        assert "no summary available" in result
+
+
+# ---------------------------------------------------------------------------
+# Search provider branches (Tavily / SerpAPI)
+# ---------------------------------------------------------------------------
+
+
+class TestSearchProviderBranches:
+    """Tests for the Tavily and SerpAPI creation branches in create_search_tool."""
+
+    def test_tavily_provider_success(self) -> None:
+        """create_search_tool returns a Tavily tool when SEARCH_PROVIDER=tavily."""
+        import os
+        from unittest.mock import MagicMock, patch
+
+        mock_tavily_cls = MagicMock()
+        mock_tavily_instance = MagicMock()
+        mock_tavily_cls.return_value = mock_tavily_instance
+
+        mock_tavily_module = MagicMock()
+        mock_tavily_module.TavilySearchResults = mock_tavily_cls
+
+        mock_community = MagicMock()
+        mock_community.tools = MagicMock()
+        mock_community.tools.tavily_search = mock_tavily_module
+
+        with (
+            patch.dict(
+                os.environ,
+                {"SEARCH_PROVIDER": "tavily", "TAVILY_API_KEY": "test-key"},
+            ),
+            patch.dict(
+                "sys.modules",
+                {
+                    "langchain_community": mock_community,
+                    "langchain_community.tools": mock_community.tools,
+                    "langchain_community.tools.tavily_search": mock_tavily_module,
+                },
+            ),
+        ):
+            result = create_search_tool()
+
+        assert result is mock_tavily_instance
+
+    def test_tavily_provider_import_error(self) -> None:
+        """create_search_tool raises ImportError when tavily package is missing."""
+        import os
+        from unittest.mock import patch
+
+        with (
+            patch.dict(os.environ, {"SEARCH_PROVIDER": "tavily"}),
+            patch.dict(
+                "sys.modules",
+                {
+                    "langchain_community": None,
+                    "langchain_community.tools": None,
+                    "langchain_community.tools.tavily_search": None,
+                },
+            ),
+        ):
+            import pytest
+
+            with pytest.raises(ImportError, match="Tavily"):
+                create_search_tool()
+
+    def test_serpapi_provider_success(self) -> None:
+        """create_search_tool returns a SerpAPI tool when SEARCH_PROVIDER=serpapi."""
+        import os
+        from unittest.mock import MagicMock, patch
+
+        mock_wrapper_cls = MagicMock()
+        mock_wrapper_instance = MagicMock()
+        mock_wrapper_instance.run = MagicMock()
+        mock_wrapper_cls.return_value = mock_wrapper_instance
+
+        mock_utilities_module = MagicMock()
+        mock_utilities_module.SerpAPIWrapper = mock_wrapper_cls
+
+        mock_community = MagicMock()
+        mock_community.utilities = mock_utilities_module
+
+        with (
+            patch.dict(
+                os.environ,
+                {"SEARCH_PROVIDER": "serpapi", "SERPAPI_API_KEY": "test-key"},
+            ),
+            patch.dict(
+                "sys.modules",
+                {
+                    "langchain_community": mock_community,
+                    "langchain_community.utilities": mock_utilities_module,
+                },
+            ),
+        ):
+            result = create_search_tool()
+
+        assert result.name == "web_search"
+
+    def test_serpapi_provider_import_error(self) -> None:
+        """create_search_tool raises ImportError when serpapi package is missing."""
+        import os
+        from unittest.mock import patch
+
+        with (
+            patch.dict(os.environ, {"SEARCH_PROVIDER": "serpapi"}),
+            patch.dict(
+                "sys.modules",
+                {
+                    "langchain_community": None,
+                    "langchain_community.utilities": None,
+                },
+            ),
+        ):
+            import pytest
+
+            with pytest.raises(ImportError, match="SerpAPI"):
+                create_search_tool()
+
+    def test_unknown_provider_falls_back_to_mock(self) -> None:
+        """An unknown SEARCH_PROVIDER falls back to the mock tool with a warning."""
+        import os
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {"SEARCH_PROVIDER": "unknown_provider"}):
+            tool = create_search_tool()
+
+        assert tool.name == "web_search"
+        result = tool.invoke("test query")
+        assert isinstance(result, str)
+        assert len(result) > 0
