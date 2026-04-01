@@ -25,9 +25,10 @@ from langchain_core.messages import BaseMessage
 from langchain_core.tools import BaseTool
 from typing_extensions import TypedDict
 
-from core.config import settings
+from core.config import get_settings
 from core.llm import get_llm
 from core.memory import create_checkpointer
+from core.tools import get_default_tools
 
 # ---------------------------------------------------------------------------
 # Logging — structured, JSON-friendly via ``extra`` dict
@@ -128,23 +129,31 @@ class BaseAgent(abc.ABC):
     ) -> None:
         self.name: str = name
         self.thread_id: str = thread_id or str(uuid.uuid4())
-        self.tools: list[BaseTool] = tools or []
+        # Caller-supplied tools take precedence; fall back to the default tool set.
+        self.tools: list[BaseTool] = tools if tools is not None else get_default_tools()
         self._start_time: float = time.monotonic()
 
         # Structured logger — include agent name and thread in every record
         self._log = logging.getLogger(f"{__name__}.{name}")
 
+        _settings = get_settings()
+
         # Build LLM client
         try:
-            self.llm: BaseChatModel = get_llm(settings.llm_config)
+            self.llm: BaseChatModel = get_llm(_settings.llm_config)
         except (ImportError, ValueError) as exc:
             raise AgentConfigurationError(
                 f"[{self.name}] Failed to initialise LLM provider "
-                f"'{settings.llm_provider}': {exc}"
+                f"'{_settings.llm_provider}': {exc}"
             ) from exc
 
+        # LLM variant with tools bound for structured tool-calling nodes.
+        self.llm_with_tools: BaseChatModel = (
+            self.llm.bind_tools(self.tools) if self.tools else self.llm
+        )
+
         # Build checkpointer via the shared factory
-        self.checkpointer = create_checkpointer(settings)
+        self.checkpointer = create_checkpointer(_settings)
 
         # Compile graph (delegated to subclass)
         self._graph = self.build_graph()
@@ -154,8 +163,8 @@ class BaseAgent(abc.ABC):
             extra={
                 "agent": self.name,
                 "thread_id": self.thread_id,
-                "llm_provider": settings.llm_provider,
-                "memory_backend": settings.memory_backend.value,
+                "llm_provider": _settings.llm_provider,
+                "memory_backend": _settings.memory_backend.value,
                 "tools": [t.name for t in self.tools],
             },
         )
@@ -246,9 +255,10 @@ class BaseAgent(abc.ABC):
             AgentTimeoutError: When ``step_count`` reaches ``max_step_count``.
         """
         new_count = state.get("step_count", 0) + 1
-        if new_count > settings.max_step_count:
+        max_steps = get_settings().max_step_count
+        if new_count > max_steps:
             raise AgentTimeoutError(
-                f"[{self.name}] Exceeded max_step_count={settings.max_step_count}"
+                f"[{self.name}] Exceeded max_step_count={max_steps}"
             )
         return {**state, "step_count": new_count}  # type: ignore[return-value]
 

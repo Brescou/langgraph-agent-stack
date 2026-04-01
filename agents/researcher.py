@@ -28,7 +28,7 @@ from agents.base_agent import (
     AgentValidationError,
     BaseAgent,
 )
-from core.config import settings
+from core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -176,16 +176,21 @@ class ResearchAgent(BaseAgent):
         except (json.JSONDecodeError, Exception):
             sub_queries = [query]
 
-        # --- Retrieval ---
+        # --- Retrieval via search tool ---
+        search_tool = next((t for t in self.tools if t.name == "web_search"), None)
         new_findings: list[str] = []
         new_sources: list[str] = []
         for sq in sub_queries[:3]:
-            snippets, src = self._mock_web_search(sq)
-            new_findings.extend(snippets)
-            new_sources.extend(src)
-
-        document_snippets = self._mock_document_retrieval(query)
-        new_findings.extend(document_snippets)
+            if search_tool is not None:
+                result = str(search_tool.invoke(sq))
+                new_findings.append(result)
+                # Extract source URLs from "Source: <url>" lines in the result
+                for line in result.splitlines():
+                    stripped = line.strip()
+                    if stripped.startswith("Source:"):
+                        src_url = stripped[len("Source:") :].strip()
+                        if src_url:
+                            new_sources.append(src_url)
 
         updated_context = {
             **state.get("context", {}),
@@ -373,8 +378,8 @@ class ResearchAgent(BaseAgent):
         ctx = state.get("context", {})
         is_ok: bool = ctx.get("validation_ok", True)
         iterations: int = ctx.get(self._CTX_ITERATIONS, 0)
-        max_iter: int = settings.max_research_iterations
 
+        max_iter: int = get_settings().max_research_iterations
         if not is_ok and iterations < max_iter:
             self._log.info(
                 "Routing back to research",
@@ -466,53 +471,3 @@ class ResearchAgent(BaseAgent):
             )
 
         return ResearchResult(**result_dict)
-
-    # ------------------------------------------------------------------
-    # Mock tools (replace with real implementations as needed)
-    # ------------------------------------------------------------------
-
-    def _mock_web_search(self, query: str) -> tuple[list[str], list[str]]:
-        """
-        Placeholder web search tool.
-
-        Replace the body of this method with a call to a real search provider
-        (Tavily, Bing, SerpAPI, …) without altering the signature.
-
-        Args:
-            query: The search query string.
-
-        Returns:
-            A 2-tuple of (snippets, sources) where snippets are text excerpts
-            and sources are URL/identifier strings.
-        """
-        snippets = [
-            f"[MOCK] Web result for '{query}': "
-            "This is a representative paragraph of text that a real search engine "
-            "would return. It contains relevant information about the query topic.",
-            f"[MOCK] Secondary result for '{query}': "
-            "Additional context and supporting details that complement the primary "
-            "finding with different perspectives.",
-        ]
-        sources = [
-            f"https://example.com/search?q={query.replace(' ', '+')}",
-            f"https://news.example.com/{query.replace(' ', '-').lower()}",
-        ]
-        return snippets, sources
-
-    def _mock_document_retrieval(self, query: str) -> list[str]:
-        """
-        Placeholder document retrieval tool.
-
-        Replace with a real vector-store lookup (Chroma, Pinecone, Weaviate, …).
-
-        Args:
-            query: The semantic search query.
-
-        Returns:
-            A list of relevant document excerpts.
-        """
-        return [
-            f"[MOCK] Document excerpt related to '{query}': "
-            "This paragraph represents a chunk retrieved from an internal knowledge "
-            "base or vector store. It provides domain-specific context.",
-        ]
