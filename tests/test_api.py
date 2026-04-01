@@ -7,6 +7,8 @@ Each test is fully isolated — the ``test_client`` fixture is function-scoped.
 
 from __future__ import annotations
 
+import os
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
@@ -200,3 +202,147 @@ def test_security_headers(test_client: TestClient) -> None:
 
     assert response.headers.get("x-content-type-options") == "nosniff"
     assert response.headers.get("x-frame-options") == "DENY"
+
+
+# ---------------------------------------------------------------------------
+# POST /run/stream
+# ---------------------------------------------------------------------------
+
+
+def test_run_stream_returns_sse(test_client: TestClient) -> None:
+    """POST /run/stream should return 200 with text/event-stream content-type."""
+    response = test_client.post("/run/stream", json={"query": "test query"})
+    assert response.status_code == 200
+    assert "text/event-stream" in response.headers.get("content-type", "")
+
+
+def test_run_stream_empty_query_returns_400(test_client: TestClient) -> None:
+    """POST /run/stream with a whitespace-only query should return 400."""
+    response = test_client.post("/run/stream", json={"query": "   "})
+    assert response.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# GET /sessions/{session_id}/history
+# ---------------------------------------------------------------------------
+
+
+def test_get_session_history_returns_history_response(test_client: TestClient) -> None:
+    """GET /sessions/{id}/history should return 200 with a HistoryResponse."""
+    response = test_client.get("/sessions/test-session-abc/history")
+    assert response.status_code == 200
+    data = response.json()
+    assert "session_id" in data
+    assert "entries" in data
+    assert "total" in data
+    assert data["session_id"] == "test-session-abc"
+    assert isinstance(data["entries"], list)
+
+
+def test_get_session_history_unknown_session_returns_empty(
+    test_client: TestClient,
+) -> None:
+    """GET /sessions/{id}/history for unknown session returns empty entries."""
+    response = test_client.get("/sessions/nonexistent-session-xyz/history")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Auth middleware
+# ---------------------------------------------------------------------------
+
+
+def _auth_client_ctx(
+    mock_analysis_report: MagicMock,
+    api_key: str,
+):
+    """Context manager: TestClient with API_KEY configured via env + cache_clear."""
+    from core.config import get_settings as _gs
+    from core.security import RateLimiter
+
+    @contextmanager
+    def _ctx():
+        permissive = RateLimiter(max_requests=10_000, window_seconds=60.0)
+        mock_graph_instance = MagicMock()
+        mock_graph_instance.run.return_value = mock_analysis_report
+        mock_graph_cls = MagicMock(return_value=mock_graph_instance)
+        mock_agent_cls = MagicMock(return_value=MagicMock())
+
+        old_api_key = os.environ.pop("API_KEY", None)
+        os.environ["API_KEY"] = api_key
+        _gs.cache_clear()
+        try:
+            with (
+                patch("api.main.MultiAgentGraph", mock_graph_cls),
+                patch("api.main.ResearchAgent", mock_agent_cls),
+                patch("api.main._rate_limiter", permissive),
+            ):
+                from api.main import app
+
+                with TestClient(app, raise_server_exceptions=False) as client:
+                    yield client
+        finally:
+            os.environ.pop("API_KEY", None)
+            if old_api_key is not None:
+                os.environ["API_KEY"] = old_api_key
+            _gs.cache_clear()
+
+    return _ctx()
+
+
+def test_auth_missing_token_returns_401(
+    mock_analysis_report: MagicMock,
+) -> None:
+    """POST /run without Authorization header returns 401 when API_KEY is set."""
+    with _auth_client_ctx(mock_analysis_report, "secret-token") as client:
+        response = client.post("/run", json={"query": "test"})
+
+    assert response.status_code == 401
+    assert "detail" in response.json()
+
+
+def test_auth_wrong_token_returns_401(
+    mock_analysis_report: MagicMock,
+) -> None:
+    """POST /run with wrong Bearer token returns 401."""
+    with _auth_client_ctx(mock_analysis_report, "secret-token") as client:
+        response = client.post(
+            "/run",
+            json={"query": "test"},
+            headers={"Authorization": "Bearer wrong-token"},
+        )
+
+    assert response.status_code == 401
+
+
+def test_auth_correct_token_passes(
+    mock_analysis_report: MagicMock,
+) -> None:
+    """POST /run with correct Bearer token returns 200."""
+    with _auth_client_ctx(mock_analysis_report, "secret-token") as client:
+        response = client.post(
+            "/run",
+            json={"query": "test"},
+            headers={"Authorization": "Bearer secret-token"},
+        )
+
+    assert response.status_code == 200
+
+
+def test_auth_exempt_health_path(
+    mock_analysis_report: MagicMock,
+) -> None:
+    """GET /health must be accessible without any auth token even when API_KEY is set."""
+    with _auth_client_ctx(mock_analysis_report, "secret-token") as client:
+        response = client.get("/health")
+
+    assert response.status_code == 200
+
+
+def test_auth_disabled_when_no_api_key(test_client: TestClient) -> None:
+    """All requests pass through when API_KEY is not configured."""
+    # test_client fixture has no API_KEY set — /run should return 200 (mocked)
+    response = test_client.post("/run", json={"query": "What is quantum computing?"})
+    assert response.status_code == 200
