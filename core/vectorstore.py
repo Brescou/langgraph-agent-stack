@@ -34,6 +34,8 @@ from typing import Protocol, runtime_checkable
 
 from langchain_core.documents import Document
 
+from core.config import MemoryBackend, Settings
+
 
 @runtime_checkable
 class VectorStoreProtocol(Protocol):
@@ -70,7 +72,7 @@ class VectorStoreProtocol(Protocol):
         ...
 
 
-def get_vectorstore(settings: object) -> VectorStoreProtocol:
+def get_vectorstore(settings: Settings) -> VectorStoreProtocol:
     """
     Factory that returns the appropriate vector store based on ``settings``.
 
@@ -99,15 +101,13 @@ def get_vectorstore(settings: object) -> VectorStoreProtocol:
         ImportError: When the required backend package is not installed,
             with a hint for the correct install command.
     """
-    if not getattr(settings, "rag_enabled", False):
+    if not settings.rag_enabled:
         raise RuntimeError(
             "RAG is disabled. Set RAG_ENABLED=true in your .env to enable."
         )
 
     # Determine whether the postgres backend was requested.
-    memory_backend = getattr(settings, "memory_backend", None)
-    # Compare as string to avoid importing MemoryBackend here.
-    use_postgres = str(memory_backend).lower() == "postgres"
+    use_postgres = settings.memory_backend == MemoryBackend.POSTGRES
 
     if use_postgres:
         return _get_pgvector(settings)
@@ -145,7 +145,7 @@ def _get_chromadb() -> VectorStoreProtocol:
         ) from exc
 
 
-def _get_pgvector(settings: object) -> VectorStoreProtocol:
+def _get_pgvector(settings: Settings) -> VectorStoreProtocol:
     """
     Return a PGVector store connected to ``settings.postgres_url``.
 
@@ -163,7 +163,7 @@ def _get_pgvector(settings: object) -> VectorStoreProtocol:
         RuntimeError: When ``settings.postgres_url`` is ``None`` or empty.
         ImportError: When ``langchain-community`` is not installed.
     """
-    postgres_url: str | None = getattr(settings, "postgres_url", None)
+    postgres_url: str | None = settings.postgres_url
     if not postgres_url:
         raise RuntimeError(
             "PGVector requires POSTGRES_URL to be set. "
