@@ -34,9 +34,6 @@ from core.tools import get_default_tools
 # Logging — structured, JSON-friendly via ``extra`` dict
 # ---------------------------------------------------------------------------
 
-logger = logging.getLogger(__name__)
-
-
 # ---------------------------------------------------------------------------
 # Custom exceptions
 # ---------------------------------------------------------------------------
@@ -290,3 +287,68 @@ class BaseAgent(abc.ABC):
     def elapsed_seconds(self) -> float:
         """Return wall-clock seconds since this agent was instantiated."""
         return time.monotonic() - self._start_time
+
+    def _invoke_llm_with_retry(
+        self,
+        messages: list[BaseMessage],
+        *,
+        max_retries: int = 3,
+        base_delay: float = 1.0,
+        max_delay: float = 30.0,
+    ) -> Any:
+        """Invoke the LLM with exponential-backoff retry on transient errors.
+
+        Retries on ``TimeoutError``, ``ConnectionError``, and generic
+        ``Exception`` subclasses that indicate rate limiting (status 429).
+        Non-transient errors are re-raised immediately.
+
+        Args:
+            messages: LangChain message list to send.
+            max_retries: Maximum number of retry attempts.
+            base_delay: Initial delay in seconds before the first retry.
+            max_delay: Upper bound on the exponential delay.
+
+        Returns:
+            The LLM response (``AIMessage``).
+
+        Raises:
+            AgentExecutionError: When all retries are exhausted.
+        """
+        last_exc: Exception | None = None
+        for attempt in range(max_retries + 1):
+            try:
+                return self.llm.invoke(messages)
+            except (TimeoutError, ConnectionError) as exc:
+                last_exc = exc
+                if attempt < max_retries:
+                    delay = min(base_delay * (2**attempt), max_delay)
+                    self._log.warning(
+                        "LLM call failed (attempt %d/%d), retrying in %.1fs",
+                        attempt + 1,
+                        max_retries + 1,
+                        delay,
+                        extra={"error": str(exc)},
+                    )
+                    time.sleep(delay)
+            except Exception as exc:
+                err_str = str(exc).lower()
+                if "429" in err_str or "rate" in err_str:
+                    last_exc = exc
+                    if attempt < max_retries:
+                        delay = min(base_delay * (2**attempt), max_delay)
+                        self._log.warning(
+                            "LLM rate limited (attempt %d/%d), retrying in %.1fs",
+                            attempt + 1,
+                            max_retries + 1,
+                            delay,
+                            extra={"error": str(exc)},
+                        )
+                        time.sleep(delay)
+                    continue
+                raise AgentExecutionError(
+                    f"[{self.name}] LLM call failed: {exc}"
+                ) from exc
+
+        raise AgentExecutionError(
+            f"[{self.name}] LLM call failed after {max_retries + 1} attempts: {last_exc}"
+        ) from last_exc

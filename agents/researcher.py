@@ -184,7 +184,16 @@ class ResearchAgent(BaseAgent):
             sub_queries: list[str] = json.loads(expansion_msg.content)  # type: ignore[arg-type]
             if not isinstance(sub_queries, list):
                 sub_queries = [query]
-        except (json.JSONDecodeError, Exception):
+        except json.JSONDecodeError:
+            logger.warning(
+                "Query expansion returned non-JSON, falling back to original query"
+            )
+            sub_queries = [query]
+        except Exception:
+            logger.warning(
+                "Query expansion failed unexpectedly, falling back to original query",
+                exc_info=True,
+            )
             sub_queries = [query]
 
         # --- Retrieval via search tool ---
@@ -206,7 +215,7 @@ class ResearchAgent(BaseAgent):
         updated_context = {
             **state.get("context", {}),
             self._CTX_FINDINGS: existing + new_findings,
-            self._CTX_SOURCES: list(set(sources + new_sources)),
+            self._CTX_SOURCES: list(dict.fromkeys(sources + new_sources)),
             self._CTX_ITERATIONS: iterations + 1,
         }
 
