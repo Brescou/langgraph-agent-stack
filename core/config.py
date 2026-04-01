@@ -201,6 +201,15 @@ class Settings(BaseSettings):
         description="Deployment environment tag used for log correlation.",
     )
 
+    rate_limit_backend: Literal["memory", "redis"] = Field(
+        default="memory",
+        validation_alias="RATE_LIMIT_BACKEND",
+        description=(
+            "Rate-limiter backend. 'memory' (default) is per-process; "
+            "'redis' shares state across replicas (requires REDIS_URL)."
+        ),
+    )
+
     api_key: str | None = Field(
         default=None,
         validation_alias="API_KEY",

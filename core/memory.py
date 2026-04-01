@@ -561,6 +561,24 @@ class ConversationMemory:
         return [self._row_to_dict(row) for row in rows]
 
     # ------------------------------------------------------------------
+    # Health check
+    # ------------------------------------------------------------------
+
+    def health_check(self) -> tuple[str, str]:
+        """Verify SQLite connectivity with a simple query.
+
+        Returns:
+            Tuple of ``(status, detail)`` where status is ``"ok"`` or
+            ``"degraded"``.
+        """
+        try:
+            with self._lock:
+                self._conn.execute("SELECT 1").fetchone()
+            return ("ok", str(self.db_path))
+        except Exception as exc:
+            return ("degraded", f"SQLite unreachable: {exc}")
+
+    # ------------------------------------------------------------------
     # Resource management
     # ------------------------------------------------------------------
 

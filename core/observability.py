@@ -287,6 +287,14 @@ try:
         "active_pipelines",
         "Currently running agent pipelines",
     )
+    server_shutting_down = Gauge(
+        "server_shutting_down",
+        "1 when the server is draining and rejecting new requests, 0 otherwise",
+    )
+    requests_rejected_during_shutdown = Counter(
+        "requests_rejected_during_shutdown_total",
+        "Requests rejected with 503 because the server is shutting down",
+    )
 
     def create_metrics_app() -> Any:
         """Return ASGI app for /metrics endpoint."""
@@ -299,6 +307,8 @@ except ImportError:
     http_request_duration_seconds = None  # type: ignore[assignment]
     llm_requests_total = None  # type: ignore[assignment]
     active_pipelines = None  # type: ignore[assignment]
+    server_shutting_down = None  # type: ignore[assignment]
+    requests_rejected_during_shutdown = None  # type: ignore[assignment]
     _PROMETHEUS_AVAILABLE = False
 
     def create_metrics_app() -> Any:

@@ -29,11 +29,14 @@ All public functions and classes carry complete type hints and docstrings.
 
 from __future__ import annotations
 
+import logging
 import re
 import threading
 import time
 from collections import deque
-from typing import Any
+from typing import Any, Literal, Protocol, runtime_checkable
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # InputValidator
@@ -144,8 +147,21 @@ class InputValidator:
 
 
 # ---------------------------------------------------------------------------
-# RateLimiter
+# RateLimiter — interface + implementations
 # ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class RateLimiterBackend(Protocol):
+    """Protocol for rate-limiter backends (in-memory or distributed)."""
+
+    def is_allowed(self, ip: str) -> bool:
+        """Return True if the request from *ip* is within the rate limit."""
+        ...
+
+    def remaining(self, ip: str) -> int:
+        """Return the number of requests remaining for *ip*."""
+        ...
 
 
 class RateLimiter:
@@ -267,6 +283,118 @@ class RateLimiter:
             bucket = self._buckets.get(ip, deque())
             active = sum(1 for ts in bucket if ts >= cutoff)
             return max(0, self.max_requests - active)
+
+
+InMemoryRateLimiter = RateLimiter
+
+
+class RedisRateLimiter:
+    """Distributed sliding-window rate limiter backed by Redis.
+
+    Uses a sorted set per IP with timestamps as scores.  The Lua script
+    atomically prunes expired entries, checks the count, and adds the new
+    timestamp — all in a single round-trip.
+
+    Args:
+        redis_url: Redis connection string.
+        max_requests: Maximum requests per window per IP.
+        window_seconds: Length of the sliding window in seconds.
+    """
+
+    _LUA_SCRIPT = """
+    local key = KEYS[1]
+    local now = tonumber(ARGV[1])
+    local window = tonumber(ARGV[2])
+    local max_req = tonumber(ARGV[3])
+    local cutoff = now - window
+
+    redis.call('ZREMRANGEBYSCORE', key, '-inf', cutoff)
+    local count = redis.call('ZCARD', key)
+
+    if count >= max_req then
+        return 0
+    end
+
+    redis.call('ZADD', key, now, now .. '-' .. math.random(1000000))
+    redis.call('EXPIRE', key, math.ceil(window) + 1)
+    return max_req - count - 1
+    """
+
+    def __init__(
+        self,
+        redis_url: str,
+        max_requests: int = 60,
+        window_seconds: float = 60.0,
+    ) -> None:
+        try:
+            import redis as redis_lib
+
+            self._redis = redis_lib.Redis.from_url(redis_url, decode_responses=True)
+            self._script = self._redis.register_script(self._LUA_SCRIPT)
+        except ImportError as exc:
+            raise ImportError(
+                "redis package required for RATE_LIMIT_BACKEND=redis. "
+                "Install with: uv sync --extra redis"
+            ) from exc
+
+        self.max_requests = max_requests
+        self.window_seconds = window_seconds
+        self._prefix = "ratelimit:"
+
+    def is_allowed(self, ip: str) -> bool:
+        """Check the rate limit for *ip* using Redis."""
+        now = time.time()
+        key = f"{self._prefix}{ip}"
+        result = self._script(
+            keys=[key],
+            args=[now, self.window_seconds, self.max_requests],
+        )
+        return int(result) >= 0 if result != 0 else False
+
+    def remaining(self, ip: str) -> int:
+        """Return remaining requests for *ip* in the current window."""
+        now = time.time()
+        cutoff = now - self.window_seconds
+        key = f"{self._prefix}{ip}"
+        try:
+            self._redis.zremrangebyscore(key, "-inf", cutoff)
+            count = self._redis.zcard(key)
+            return max(0, self.max_requests - int(count))
+        except Exception:
+            return self.max_requests
+
+
+def create_rate_limiter(
+    backend: Literal["memory", "redis"] = "memory",
+    redis_url: str = "",
+    max_requests: int = 60,
+    window_seconds: float = 60.0,
+) -> RateLimiterBackend:
+    """Factory: build a rate limiter matching the configured backend.
+
+    Args:
+        backend: ``"memory"`` (default, per-process) or ``"redis"``
+            (shared across replicas).
+        redis_url: Required when ``backend="redis"``.
+        max_requests: Requests allowed per window per IP.
+        window_seconds: Sliding window duration.
+
+    Returns:
+        A rate-limiter instance satisfying ``RateLimiterBackend``.
+    """
+    if backend == "redis":
+        if not redis_url:
+            logger.warning(
+                "RATE_LIMIT_BACKEND=redis but REDIS_URL is not set — "
+                "falling back to in-memory rate limiter."
+            )
+            return RateLimiter(max_requests=max_requests, window_seconds=window_seconds)
+        return RedisRateLimiter(
+            redis_url=redis_url,
+            max_requests=max_requests,
+            window_seconds=window_seconds,
+        )
+    return RateLimiter(max_requests=max_requests, window_seconds=window_seconds)
 
 
 # ---------------------------------------------------------------------------
