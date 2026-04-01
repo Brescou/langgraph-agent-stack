@@ -39,7 +39,7 @@ The following controls ship enabled and require no operator action.
 - **Security HTTP headers** are set on every response:
   - `X-Content-Type-Options: nosniff` — prevents MIME-type sniffing.
   - `X-Frame-Options: DENY` — blocks clickjacking via iframe embedding.
-  - `X-XSS-Protection: 1; mode=block` — legacy XSS filter for older browsers.
+  - `Content-Security-Policy: default-src 'self'` — restricts script and resource loading to the same origin (replaces deprecated `X-XSS-Protection`).
   - `Referrer-Policy: strict-origin-when-cross-origin` — limits referrer leakage.
   - `Cache-Control: no-store` — prevents caching of LLM responses.
   - The `Server` header is removed to avoid advertising the runtime stack.
@@ -458,7 +458,7 @@ responsibly.
 
 ### How to report
 
-1. Open a [GitHub Security Advisory](https://github.com/your-org/langgraph-agent-stack/security/advisories/new)
+1. Open a [GitHub Security Advisory](https://github.com/brescou/langgraph-agent-stack/security/advisories/new)
    in this repository.
 2. Include:
    - A description of the vulnerability and its potential impact.

@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `/ready` readiness probe endpoint — separate from `/health` liveness probe
+- Fail-fast checkpointer in production (`_fallback_or_raise` in `core/memory.py`)
+- OTel `insecure=True` conditional on `OTEL_EXPORTER_OTLP_INSECURE` or localhost endpoint
+- LLM retry with backoff activated in all 6 agent graph nodes
+- `Content-Security-Policy: default-src 'self'` header (replaces deprecated `X-XSS-Protection`)
+- Tests: SSE done event validation, timeout error event, shutdown 503 guard, rate limiting on /research, auth exempt paths, Redis/Postgres checkpointer mocks, populated session history
+- Tests: all 5 security headers asserted (CSP, Referrer-Policy, Cache-Control, X-Frame-Options, X-Content-Type-Options)
+
+### Changed
+- `_node_validate` defaults to `is_sufficient=False` on error (fail-close instead of fail-open)
+- `/research` endpoint uses `session_id` as `thread_id` (unified with `/run/stream`)
+- `GET /sessions/{id}/history` now runs `list_runs_by_session` via `_run_in_executor`
+- `ResearchRequest.session_id` gains `max_length=128` + alphanumeric pattern validation
+- `MultiAgentGraph` executor uses `get_settings().thread_pool_max_workers`
+- Helm `readinessProbe` points to `/ready` instead of `/health`
+- CI Docker cache key content-based (`hashFiles`) instead of commit SHA
+- Security workflow `pip-audit` syncs with `--extra anthropic` to match production image
+- `analyst.py` except blocks now log `exc_info=True` for debugging
+- `_extract_text_content` used consistently in all fallback paths
+
+### Fixed
+- `_APP_VERSION` and `Chart.yaml` aligned to `0.2.0`
+- `Chart.yaml` maintainer `your-name` → `brescou`
+- `docs/security.md` link `your-org` → `brescou`
+- Terraform secrets: `data` → `string_data` (GKE and EKS modules)
+- Helm ConfigMap: conditional `REDIS_URL` when `memoryBackend=redis`
+- `CLAUDE.md` directory tree: added `core/observability.py`
+- Dockerfile: documented `--build-arg LLM_EXTRAS` for Redis/Postgres production builds
+
 ## [0.2.0] - 2026-04-01
 
 ### Added
