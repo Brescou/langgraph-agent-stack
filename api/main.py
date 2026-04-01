@@ -66,7 +66,12 @@ from core.memory import ConversationMemory
 # ---------------------------------------------------------------------------
 # Logging — structured JSON via core.observability when available
 # ---------------------------------------------------------------------------
-from core.observability import configure_logging, init_tracing
+from core.observability import (
+    configure_logging,
+    create_metrics_app,
+    init_tracing,
+    set_request_id,
+)
 from core.security import InputValidator, RateLimiter
 
 configure_logging(level=get_settings().log_level.value)
@@ -139,12 +144,25 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     global _start_time, _executor, _shared_llm, _shared_checkpointer, _shared_memory
 
     _start_time = time.monotonic()
+
+    _settings = get_settings()
+
+    if _settings.memory_backend.value == "postgres" and not _settings.postgres_url:
+        raise RuntimeError(
+            "POSTGRES_URL is required when MEMORY_BACKEND=postgres. "
+            "Set the POSTGRES_URL environment variable."
+        )
+    if _settings.memory_backend.value == "redis" and not _settings.redis_url:
+        raise RuntimeError(
+            "REDIS_URL is required when MEMORY_BACKEND=redis. "
+            "Set the REDIS_URL environment variable."
+        )
+
     _executor = ThreadPoolExecutor(
-        max_workers=get_settings().thread_pool_max_workers,
+        max_workers=_settings.thread_pool_max_workers,
         thread_name_prefix="agent-worker",
     )
 
-    _settings = get_settings()
     init_tracing()
     _init_llm_and_checkpointer(_settings)
 
@@ -229,20 +247,24 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Mount Prometheus metrics endpoint — exempt from auth and rate limiting
+_metrics_app = create_metrics_app()
+if _metrics_app is not None:
+    app.mount("/metrics", _metrics_app)
+
 # ---------------------------------------------------------------------------
 # CORS — wildcard for open-source template; tighten for production
 # ---------------------------------------------------------------------------
 
+_cors_origins = get_settings().cors_origins
+
 app.add_middleware(
     CORSMiddleware,
-    # Wildcard is intentional for an open-source template.  In production,
-    # replace "*" with an explicit list of trusted origins:
-    #   allow_origins=["https://your-frontend.example.com"]
-    # Never combine allow_origins=["*"] with allow_credentials=True.
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type", "Authorization"],
+    allow_origins=_cors_origins if _cors_origins else ["*"],
+    allow_credentials=bool(_cors_origins),  # False si wildcard
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+    expose_headers=["X-Request-ID"],
 )
 
 
@@ -266,6 +288,12 @@ async def add_security_headers(request: Request, call_next: Any) -> Any:
     response.headers["Content-Security-Policy"] = "default-src 'self'"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Cache-Control"] = "no-store"
+    # HSTS is only meaningful over HTTPS — restrict to production to avoid
+    # breaking local HTTP development and test environments.
+    if get_settings().environment == "production":
+        response.headers["Strict-Transport-Security"] = (
+            "max-age=31536000; includeSubDomains; preload"
+        )
     # Remove the Server header to avoid advertising the runtime stack.
     if "server" in response.headers:
         del response.headers["server"]
@@ -292,6 +320,7 @@ async def auth_middleware(request: Request, call_next: Any) -> Any:
         "/",
         "/health",
         "/ready",
+        "/metrics",
         "/docs",
         "/redoc",
         "/openapi.json",
@@ -341,7 +370,7 @@ async def rate_limit_middleware(request: Request, call_next: Any) -> Any:
     When a client exceeds the limit a ``429 Too Many Requests`` response is
     returned immediately without forwarding the request to any handler.
     """
-    if request.url.path in {"/health", "/ready"}:
+    if request.url.path in {"/health", "/ready", "/metrics"}:
         return await call_next(request)
 
     client_ip: str = request.client.host if request.client else "unknown"
@@ -373,7 +402,8 @@ async def log_requests(request: Request, call_next: Any) -> Any:
     Logs method, path, status code, and wall-clock latency so that each
     request is traceable in aggregated log systems without extra tooling.
     """
-    request_id = str(uuid.uuid4())
+    request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+    set_request_id(request_id)
     start = time.monotonic()
 
     logger.info(
@@ -387,6 +417,7 @@ async def log_requests(request: Request, call_next: Any) -> Any:
     )
 
     response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
 
     elapsed_ms = (time.monotonic() - start) * 1000
     logger.info(
