@@ -91,9 +91,7 @@ def create_search_tool() -> BaseTool:
         return _create_serpapi_tool()
 
     if provider != "mock":
-        logger.warning(
-            "Unknown SEARCH_PROVIDER %r — using mock search tool.", provider
-        )
+        logger.warning("Unknown SEARCH_PROVIDER %r — using mock search tool.", provider)
 
     return _create_mock_search_tool()
 
@@ -447,9 +445,7 @@ def create_memory_tool(memory: ConversationMemory) -> BaseTool:
         if not runs:
             return "No previous run history found."
 
-        lines: list[str] = [
-            f"Found {len(runs)} recent run(s) in history:\n"
-        ]
+        lines: list[str] = [f"Found {len(runs)} recent run(s) in history:\n"]
         for i, run in enumerate(runs, start=1):
             result_preview = ""
             result = run.get("result", {})

@@ -7,7 +7,6 @@ validate_api_key_format.  All tests are fully isolated and synchronous.
 
 from __future__ import annotations
 
-import time
 from unittest.mock import patch
 
 import pytest
@@ -18,7 +17,6 @@ from core.security import (
     sanitize_log_data,
     validate_api_key_format,
 )
-
 
 # ---------------------------------------------------------------------------
 # InputValidator

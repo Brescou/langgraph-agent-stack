@@ -208,8 +208,7 @@ class Settings(BaseSettings):
         """Ensure the Redis URL uses a recognised scheme."""
         if not (v.startswith("redis://") or v.startswith("rediss://")):
             raise ValueError(
-                "redis_url must start with 'redis://' or 'rediss://' — "
-                f"got: {v!r}"
+                "redis_url must start with 'redis://' or 'rediss://' — " f"got: {v!r}"
             )
         return v
 

@@ -97,7 +97,9 @@ def supervisor_node(state: SupervisorState) -> dict[str, str]:
     Returns:
         Partial state update with ``next_agent`` set to the routing decision.
     """
-    assert _llm is not None, "LLM not initialised — call build_supervisor_graph() first."
+    assert (
+        _llm is not None
+    ), "LLM not initialised — call build_supervisor_graph() first."
 
     # Build the routing prompt from current conversation context
     history = state.get("messages", [])
@@ -105,9 +107,7 @@ def supervisor_node(state: SupervisorState) -> dict[str, str]:
         # First turn — seed with the original query
         history = [HumanMessage(content=state["query"])]
 
-    response = _llm.invoke(
-        [SystemMessage(content=_SUPERVISOR_SYSTEM)] + history
-    )
+    response = _llm.invoke([SystemMessage(content=_SUPERVISOR_SYSTEM)] + history)
 
     raw: str = str(response.content).strip()
 

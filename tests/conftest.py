@@ -9,7 +9,7 @@ MultiAgentGraph and ResearchAgent with MagicMock instances.
 from __future__ import annotations
 
 import os
-from typing import Generator
+from collections.abc import Generator
 from unittest.mock import MagicMock, patch
 
 import pytest

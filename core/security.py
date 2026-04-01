@@ -48,7 +48,10 @@ _DANGEROUS_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\{\{.*?\}\}", re.IGNORECASE | re.DOTALL),
     re.compile(r"\{%.*?%\}", re.IGNORECASE | re.DOTALL),
     # SSRF / internal endpoint probing
-    re.compile(r"https?://(?:169\.254\.169\.254|metadata\.google\.internal|localhost|127\.\d+\.\d+\.\d+|::1|0\.0\.0\.0)", re.IGNORECASE),
+    re.compile(
+        r"https?://(?:169\.254\.169\.254|metadata\.google\.internal|localhost|127\.\d+\.\d+\.\d+|::1|0\.0\.0\.0)",
+        re.IGNORECASE,
+    ),
     # Path traversal
     re.compile(r"(?:\.\.[\\/]){2,}", re.IGNORECASE),
     # Null bytes
@@ -305,9 +308,7 @@ def _is_sensitive_key(key: str) -> bool:
 
 # Anthropic API keys begin with "sk-ant-" followed by alphanumeric characters,
 # hyphens, and underscores.  The minimum length after the prefix is 10 chars.
-_ANTHROPIC_KEY_PATTERN: re.Pattern[str] = re.compile(
-    r"^sk-ant-[A-Za-z0-9\-_]{10,}$"
-)
+_ANTHROPIC_KEY_PATTERN: re.Pattern[str] = re.compile(r"^sk-ant-[A-Za-z0-9\-_]{10,}$")
 
 
 def validate_api_key_format(key: str) -> bool:

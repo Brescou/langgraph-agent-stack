@@ -77,7 +77,9 @@ def plan_node(state: HumanLoopState) -> dict[str, str]:
     Returns:
         Partial state update with ``proposed_action`` set.
     """
-    assert _llm is not None, "LLM not initialised — call build_human_loop_graph() first."
+    assert (
+        _llm is not None
+    ), "LLM not initialised — call build_human_loop_graph() first."
 
     system_prompt = (
         "You are an intelligent automation agent. The user gives you a task. "
@@ -142,7 +144,9 @@ def execute_node(state: HumanLoopState) -> dict[str, str]:
     Returns:
         Partial state update with ``result`` describing the execution outcome.
     """
-    assert _llm is not None, "LLM not initialised — call build_human_loop_graph() first."
+    assert (
+        _llm is not None
+    ), "LLM not initialised — call build_human_loop_graph() first."
 
     system_prompt = (
         "You are an execution engine. The following action has been reviewed and "
@@ -176,8 +180,7 @@ def rejection_node(state: HumanLoopState) -> dict[str, str]:
     """
     return {
         "result": (
-            "Action rejected by human operator. "
-            "No changes were made to any system."
+            "Action rejected by human operator. " "No changes were made to any system."
         )
     }
 

@@ -146,8 +146,7 @@ def analyst_node(state: AnalystBranchState) -> dict[str, list[str]]:
         "Be specific, evidence-based, and actionable."
     )
     human_prompt = (
-        f"Topic: {state['query']}\n\n"
-        f"Provide a focused {state['role']} analysis."
+        f"Topic: {state['query']}\n\n" f"Provide a focused {state['role']} analysis."
     )
 
     response = _llm.invoke(

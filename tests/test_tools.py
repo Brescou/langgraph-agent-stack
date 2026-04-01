@@ -7,14 +7,11 @@ get_default_tools().  No external API calls are made.
 
 from __future__ import annotations
 
-import pytest
-
 from core.tools import (
     create_calculator_tool,
     create_search_tool,
     get_default_tools,
 )
-
 
 # ---------------------------------------------------------------------------
 # Search tool

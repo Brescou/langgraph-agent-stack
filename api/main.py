@@ -113,6 +113,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # API key produces a clear startup warning rather than a cryptic SDK error
     # on the first real request.
     from core.llm import get_llm
+
     try:
         get_llm(settings.llm_config)
         logger.info("LLM provider '%s' configured successfully", settings.llm_provider)
@@ -392,7 +393,11 @@ async def run_pipeline(body: RunRequest) -> RunResponse:
     run_id = str(uuid.uuid4())
     logger.info(
         "POST /run — pipeline started",
-        extra={"run_id": run_id, "session_id": session_id, "query_preview": query[:120]},
+        extra={
+            "run_id": run_id,
+            "session_id": session_id,
+            "query_preview": query[:120],
+        },
     )
 
     def _execute() -> RunResponse:
@@ -606,7 +611,11 @@ async def run_stream(body: RunRequest, request: Request) -> StreamingResponse:
 
     logger.info(
         "POST /run/stream — pipeline started",
-        extra={"run_id": run_id, "session_id": session_id, "query_preview": query[:120]},
+        extra={
+            "run_id": run_id,
+            "session_id": session_id,
+            "query_preview": query[:120],
+        },
     )
 
     return StreamingResponse(
@@ -671,7 +680,11 @@ async def run_research(body: ResearchRequest) -> ResearchResponse:
     run_id = str(uuid.uuid4())
     logger.info(
         "POST /research — started",
-        extra={"run_id": run_id, "session_id": session_id, "query_preview": query[:120]},
+        extra={
+            "run_id": run_id,
+            "session_id": session_id,
+            "query_preview": query[:120],
+        },
     )
 
     def _execute() -> ResearchResponse:

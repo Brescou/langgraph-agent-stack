@@ -393,9 +393,7 @@ class ConversationMemory:
             raise ValueError("save_run: query must not be empty.")
 
         result_json = json.dumps(result, ensure_ascii=False, default=str)
-        metadata_json = json.dumps(
-            metadata or {}, ensure_ascii=False, default=str
-        )
+        metadata_json = json.dumps(metadata or {}, ensure_ascii=False, default=str)
         created_at = datetime.now(UTC).isoformat()
 
         with self._transaction():

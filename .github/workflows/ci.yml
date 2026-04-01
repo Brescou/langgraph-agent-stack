@@ -25,6 +25,7 @@ concurrency:
 env:
   PYTHON_VERSION: "3.12"
   UV_VERSION: "0.5.21"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 # ---------------------------------------------------------------------------
 # Job 1 — Lint

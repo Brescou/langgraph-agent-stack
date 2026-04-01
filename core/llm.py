@@ -5,6 +5,7 @@ Usage:
     from core.llm import get_llm, LLMConfig
     llm = get_llm(settings.llm_config)
 """
+
 from __future__ import annotations
 
 from typing import Literal
@@ -17,6 +18,7 @@ LLMProvider = Literal["anthropic", "openai", "google", "bedrock", "azure", "olla
 
 class LLMConfig(BaseModel):
     """Configuration for the LLM provider. All fields have sensible defaults."""
+
     provider: LLMProvider = "anthropic"
     # Anthropic
     anthropic_api_key: str | None = None
@@ -72,9 +74,7 @@ def get_llm(config: LLMConfig) -> BaseChatModel:
             try:
                 from langchain_anthropic import ChatAnthropic
             except ImportError as e:
-                raise ImportError(
-                    "Install with: uv sync --extra anthropic"
-                ) from e
+                raise ImportError("Install with: uv sync --extra anthropic") from e
             if not config.anthropic_api_key:
                 raise ValueError(
                     "anthropic_api_key is required for the 'anthropic' provider."
@@ -89,9 +89,7 @@ def get_llm(config: LLMConfig) -> BaseChatModel:
             try:
                 from langchain_openai import ChatOpenAI
             except ImportError as e:
-                raise ImportError(
-                    "Install with: uv sync --extra openai"
-                ) from e
+                raise ImportError("Install with: uv sync --extra openai") from e
             if not config.openai_api_key:
                 raise ValueError(
                     "openai_api_key is required for the 'openai' provider."
@@ -105,9 +103,7 @@ def get_llm(config: LLMConfig) -> BaseChatModel:
             try:
                 from langchain_google_genai import ChatGoogleGenerativeAI
             except ImportError as e:
-                raise ImportError(
-                    "Install with: uv sync --extra google"
-                ) from e
+                raise ImportError("Install with: uv sync --extra google") from e
             if not config.google_api_key:
                 raise ValueError(
                     "google_api_key is required for the 'google' provider."
@@ -121,9 +117,7 @@ def get_llm(config: LLMConfig) -> BaseChatModel:
             try:
                 from langchain_aws import ChatBedrock
             except ImportError as e:
-                raise ImportError(
-                    "Install with: uv sync --extra bedrock"
-                ) from e
+                raise ImportError("Install with: uv sync --extra bedrock") from e
             if not config.aws_access_key_id:
                 raise ValueError(
                     "aws_access_key_id is required for the 'bedrock' provider."
@@ -141,9 +135,7 @@ def get_llm(config: LLMConfig) -> BaseChatModel:
             try:
                 from langchain_openai import AzureChatOpenAI
             except ImportError as e:
-                raise ImportError(
-                    "Install with: uv sync --extra azure"
-                ) from e
+                raise ImportError("Install with: uv sync --extra azure") from e
             if not config.azure_openai_api_key:
                 raise ValueError(
                     "azure_openai_api_key is required for the 'azure' provider."
@@ -162,9 +154,7 @@ def get_llm(config: LLMConfig) -> BaseChatModel:
             try:
                 from langchain_ollama import ChatOllama
             except ImportError as e:
-                raise ImportError(
-                    "Install with: uv sync --extra ollama"
-                ) from e
+                raise ImportError("Install with: uv sync --extra ollama") from e
             return ChatOllama(
                 model=config.ollama_model,
                 base_url=config.ollama_base_url,

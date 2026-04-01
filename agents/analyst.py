@@ -190,13 +190,15 @@ class AnalystAgent(BaseAgent):
             f"Raw findings ({len(findings)} total, showing first 8):\n"
             + "\n".join(f"[{i+1}] {f[:300]}" for i, f in enumerate(findings[:8]))
             + "\n\nExtract the KEY INSIGHTS. Return JSON: "
-            "{\"insights\": [\"...\", ...], \"confidence\": 0.0-1.0}"
+            '{"insights": ["...", ...], "confidence": 0.0-1.0}'
         )
 
         try:
             response = self.llm.invoke(
-                [SystemMessage(content="You are a rigorous analytical thinker."),
-                 HumanMessage(content=analysis_prompt)]
+                [
+                    SystemMessage(content="You are a rigorous analytical thinker."),
+                    HumanMessage(content=analysis_prompt),
+                ]
             )
             parsed = json.loads(response.content)  # type: ignore[arg-type]
             insights: list[str] = parsed.get("insights", [])
@@ -246,13 +248,15 @@ class AnalystAgent(BaseAgent):
             "Insights to synthesise:\n"
             + "\n".join(f"- {ins}" for ins in insights)
             + "\n\nIdentify PATTERNS and IMPLICATIONS. Return JSON:\n"
-            "{\"patterns\": [\"...\", ...], \"implications\": [\"...\", ...]}"
+            '{"patterns": ["...", ...], "implications": ["...", ...]}'
         )
 
         try:
             response = self.llm.invoke(
-                [SystemMessage(content="You are a strategic pattern synthesiser."),
-                 HumanMessage(content=synthesis_prompt)]
+                [
+                    SystemMessage(content="You are a strategic pattern synthesiser."),
+                    HumanMessage(content=synthesis_prompt),
+                ]
             )
             parsed = json.loads(response.content)  # type: ignore[arg-type]
             patterns: list[str] = parsed.get("patterns", [])
@@ -316,8 +320,10 @@ class AnalystAgent(BaseAgent):
 
         try:
             exec_response = self.llm.invoke(
-                [SystemMessage(content="You are a precise executive report writer."),
-                 HumanMessage(content=exec_summary_prompt)]
+                [
+                    SystemMessage(content="You are a precise executive report writer."),
+                    HumanMessage(content=exec_summary_prompt),
+                ]
             )
             exec_summary: str = str(exec_response.content).strip()
         except Exception:

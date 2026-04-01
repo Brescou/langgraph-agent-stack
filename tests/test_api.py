@@ -9,11 +9,9 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 from fastapi.testclient import TestClient
 
 from agents.base_agent import AgentExecutionError, AgentTimeoutError
-
 
 # ---------------------------------------------------------------------------
 # GET /health
@@ -82,7 +80,9 @@ def test_run_agent_error(test_client: TestClient) -> None:
         mock_graph_instance.run.side_effect = AgentExecutionError("Pipeline failed")
         mock_graph_cls.return_value = mock_graph_instance
 
-        response = test_client.post("/run", json={"query": "What is quantum computing?"})
+        response = test_client.post(
+            "/run", json={"query": "What is quantum computing?"}
+        )
 
     assert response.status_code == 500
     assert "detail" in response.json()
@@ -95,7 +95,9 @@ def test_run_timeout_error(test_client: TestClient) -> None:
         mock_graph_instance.run.side_effect = AgentTimeoutError("Step budget exceeded")
         mock_graph_cls.return_value = mock_graph_instance
 
-        response = test_client.post("/run", json={"query": "What is quantum computing?"})
+        response = test_client.post(
+            "/run", json={"query": "What is quantum computing?"}
+        )
 
     assert response.status_code == 504
     assert "detail" in response.json()

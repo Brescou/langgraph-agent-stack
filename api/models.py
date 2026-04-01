@@ -41,9 +41,7 @@ class HistoryEntry(BaseModel):
 class HistoryResponse(BaseModel):
     """Response schema for ``GET /sessions/{session_id}/history``."""
 
-    session_id: str = Field(
-        description="The session ID whose run history is returned."
-    )
+    session_id: str = Field(description="The session ID whose run history is returned.")
     entries: list[HistoryEntry] = Field(
         description="Ordered list of run history entries (newest first)."
     )
@@ -211,7 +209,9 @@ class ResearchResponse(BaseModel):
     )
 
     @classmethod
-    def from_research_result(cls, result: Any, session_id: str = "") -> ResearchResponse:
+    def from_research_result(
+        cls, result: Any, session_id: str = ""
+    ) -> ResearchResponse:
         """
         Build a ``ResearchResponse`` from a ``ResearchResult`` dataclass instance.
 

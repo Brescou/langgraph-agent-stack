@@ -124,8 +124,8 @@ class ResearchAgent(BaseAgent):
             "validate",
             self._route_after_validate,
             {
-                "research": "research",   # insufficient — loop back
-                "summarize": "summarize", # sufficient — move on
+                "research": "research",  # insufficient — loop back
+                "summarize": "summarize",  # sufficient — move on
             },
         )
         graph.add_edge("summarize", END)
@@ -165,8 +165,10 @@ class ResearchAgent(BaseAgent):
         )
         try:
             expansion_msg = self.llm.invoke(
-                [SystemMessage(content="You are a precise research query expander."),
-                 HumanMessage(content=expansion_prompt)]
+                [
+                    SystemMessage(content="You are a precise research query expander."),
+                    HumanMessage(content=expansion_prompt),
+                ]
             )
             sub_queries: list[str] = json.loads(expansion_msg.content)  # type: ignore[arg-type]
             if not isinstance(sub_queries, list):
@@ -238,13 +240,17 @@ class ResearchAgent(BaseAgent):
             f"Retrieved {len(findings)} snippets. First 3 snippets:\n"
             + "\n".join(f"- {s[:200]}" for s in findings[:3])
             + "\n\nAre these findings sufficient to write a comprehensive answer? "
-            "Reply with a JSON object: {\"sufficient\": true/false, \"reason\": \"...\"}"
+            'Reply with a JSON object: {"sufficient": true/false, "reason": "..."}'
         )
 
         try:
             validation_msg = self.llm.invoke(
-                [SystemMessage(content="You are a strict research quality assessor."),
-                 HumanMessage(content=validation_prompt)]
+                [
+                    SystemMessage(
+                        content="You are a strict research quality assessor."
+                    ),
+                    HumanMessage(content=validation_prompt),
+                ]
             )
             result = json.loads(validation_msg.content)  # type: ignore[arg-type]
             is_sufficient: bool = bool(result.get("sufficient", True))
@@ -294,21 +300,28 @@ class ResearchAgent(BaseAgent):
             f"Based on the following {len(findings)} retrieved snippets, write a "
             "comprehensive, structured summary. Include key facts, main themes, and "
             "any conflicting information.\n\n"
-            "Snippets:\n" + "\n\n".join(f"[{i+1}] {s}" for i, s in enumerate(findings[:10]))
+            "Snippets:\n"
+            + "\n\n".join(f"[{i+1}] {s}" for i, s in enumerate(findings[:10]))
             + "\n\nProvide a JSON object with keys: "
-            "{\"summary\": \"...\", \"confidence\": 0.0-1.0}"
+            '{"summary": "...", "confidence": 0.0-1.0}'
         )
 
         try:
             summary_msg = self.llm.invoke(
-                [SystemMessage(content="You are a precise research summariser."),
-                 HumanMessage(content=summary_prompt)]
+                [
+                    SystemMessage(content="You are a precise research summariser."),
+                    HumanMessage(content=summary_prompt),
+                ]
             )
             parsed = json.loads(summary_msg.content)  # type: ignore[arg-type]
             summary_text: str = parsed.get("summary", summary_msg.content)
             confidence: float = float(parsed.get("confidence", 0.7))
         except Exception:
-            summary_text = str(summary_msg.content) if 'summary_msg' in dir() else "Summary unavailable."
+            summary_text = (
+                str(summary_msg.content)
+                if "summary_msg" in dir()
+                else "Summary unavailable."
+            )
             confidence = 0.5
 
         result = ResearchResult(
@@ -389,7 +402,9 @@ class ResearchAgent(BaseAgent):
             AgentExecutionError: On unrecoverable graph errors.
         """
         if not input or not input.strip():
-            raise AgentValidationError("ResearchAgent.run() requires a non-empty input.")
+            raise AgentValidationError(
+                "ResearchAgent.run() requires a non-empty input."
+            )
 
         self._log.info("Starting research run", extra={"query": input[:120]})
         initial_state = self._make_initial_state(input)

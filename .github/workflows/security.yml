@@ -33,6 +33,7 @@ concurrency:
 env:
   PYTHON_VERSION: "3.12"
   UV_VERSION: "0.5.21"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 # ---------------------------------------------------------------------------
 # Job 1 — Secrets scanning with gitleaks
@@ -60,7 +61,7 @@ jobs:
       # gitleaks-action writes a SARIF report when findings exist.
       # Upload it so the results surface in the GitHub Security tab.
       - name: Upload gitleaks SARIF report
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: results.sarif
@@ -180,7 +181,7 @@ jobs:
         run: |
           uv tool run bandit \
             --recursive \
-            --format text \
+            --format screen \
             --severity-level medium \
             --confidence-level medium \
             --exclude ".venv,tests" \
@@ -188,7 +189,7 @@ jobs:
         continue-on-error: true
 
       - name: Upload bandit SARIF to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: bandit-results.sarif
@@ -209,7 +210,7 @@ jobs:
         run: |
           uv tool run bandit \
             --recursive \
-            --format text \
+            --format screen \
             --severity-level high \
             --confidence-level high \
             --exclude ".venv,tests" \
