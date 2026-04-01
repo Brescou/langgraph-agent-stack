@@ -31,9 +31,9 @@ import uuid
 from collections.abc import AsyncGenerator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import FastAPI, HTTPException, Request, Response, status
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, StreamingResponse
 
@@ -53,7 +53,7 @@ from api.models import (
     RunRequest,
     RunResponse,
 )
-from core.config import settings
+from core.config import Settings, get_settings
 from core.graph import MultiAgentGraph
 from core.security import InputValidator, RateLimiter
 
@@ -62,7 +62,7 @@ from core.security import InputValidator, RateLimiter
 # ---------------------------------------------------------------------------
 
 logging.basicConfig(
-    level=settings.log_level.value,
+    level=get_settings().log_level.value,
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
 logger = logging.getLogger(__name__)
@@ -114,9 +114,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # on the first real request.
     from core.llm import get_llm
 
+    _settings = get_settings()
     try:
-        get_llm(settings.llm_config)
-        logger.info("LLM provider '%s' configured successfully", settings.llm_provider)
+        get_llm(_settings.llm_config)
+        logger.info("LLM provider '%s' configured successfully", _settings.llm_provider)
     except (ImportError, ValueError) as exc:
         logger.warning("LLM configuration warning: %s", exc)
 
@@ -124,11 +125,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         "API server starting up",
         extra={
             "version": _APP_VERSION,
-            "environment": settings.environment,
-            "host": settings.api_host,
-            "port": settings.api_port,
-            "llm_provider": settings.llm_provider,
-            "memory_backend": settings.memory_backend.value,
+            "environment": _settings.environment,
+            "host": _settings.api_host,
+            "port": _settings.api_port,
+            "llm_provider": _settings.llm_provider,
+            "memory_backend": _settings.memory_backend.value,
         },
     )
 
@@ -319,7 +320,9 @@ async def root() -> RedirectResponse:
     summary="Health check",
     response_description="Service health status and uptime information.",
 )
-async def health() -> HealthResponse:
+async def health(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> HealthResponse:
     """
     Return the current health status of the service.
 
@@ -346,7 +349,10 @@ async def health() -> HealthResponse:
     summary="Run the full Research + Analysis pipeline",
     response_description="Structured AnalysisReport produced by the full agent pipeline.",
 )
-async def run_pipeline(body: RunRequest) -> RunResponse:
+async def run_pipeline(
+    body: RunRequest,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> RunResponse:
     """
     Execute the complete multi-agent pipeline for a given query.
 
@@ -533,7 +539,7 @@ async def _stream_pipeline(
             },
         )
 
-        yield f"data: {json.dumps({'type': 'done', 'run_id': run_id, 'session_id': session_id, 'confidence': report.confidence})}\n\n"
+        yield f"data: {json.dumps({'type': 'done', 'run_id': run_id, 'session_id': session_id, 'executive_summary': report.executive_summary, 'key_insights': report.key_insights, 'patterns': report.patterns, 'implications': report.implications, 'confidence': report.confidence, 'research_summary': report.research_summary})}\n\n"
 
     except AgentTimeoutError as exc:
         logger.error(
@@ -565,7 +571,11 @@ async def _stream_pipeline(
         "and error SSE events as the pipeline progresses."
     ),
 )
-async def run_stream(body: RunRequest, request: Request) -> StreamingResponse:
+async def run_stream(
+    body: RunRequest,
+    request: Request,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> StreamingResponse:
     """
     Execute the complete multi-agent pipeline and stream progress as SSE.
 
@@ -636,7 +646,10 @@ async def run_stream(body: RunRequest, request: Request) -> StreamingResponse:
     summary="Run the Research-only pipeline",
     response_description="Structured ResearchResult produced by the ResearchAgent.",
 )
-async def run_research(body: ResearchRequest) -> ResearchResponse:
+async def run_research(
+    body: ResearchRequest,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> ResearchResponse:
     """
     Execute only the research phase of the pipeline.
 
@@ -765,14 +778,15 @@ async def run_research(body: ResearchRequest) -> ResearchResponse:
     summary="Retrieve run history for a session",
     response_description="Ordered list of run records associated with the given session ID.",
 )
-async def get_session_history(session_id: str) -> HistoryResponse:
+async def get_session_history(
+    session_id: str,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> HistoryResponse:
     """
     Return all run records associated with ``session_id``.
 
-    Scans the most recent 100 runs in ``ConversationMemory`` and filters those
-    whose ``metadata.session_id`` matches the requested session.  The results
-    are returned newest-first (the underlying ``list_runs`` query orders by
-    ``created_at DESC``).
+    Filters by ``session_id`` directly in SQL via ``json_extract`` so only
+    matching rows are loaded.  Results are ordered newest-first.
 
     Args:
         session_id: The session identifier to look up (URL path parameter).
@@ -783,7 +797,7 @@ async def get_session_history(session_id: str) -> HistoryResponse:
     from core.memory import ConversationMemory
 
     with ConversationMemory(settings.sqlite_path) as mem:
-        all_runs = mem.list_runs(limit=100)
+        runs = mem.list_runs_by_session(session_id)
         entries = [
             HistoryEntry(
                 run_id=r["run_id"],
@@ -792,8 +806,7 @@ async def get_session_history(session_id: str) -> HistoryResponse:
                 created_at=r.get("created_at", ""),
                 metadata=r.get("metadata", {}),
             )
-            for r in all_runs
-            if r.get("metadata", {}).get("session_id") == session_id
+            for r in runs
         ]
 
     logger.info(
