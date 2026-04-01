@@ -29,8 +29,10 @@ The following controls ship enabled and require no operator action.
 - Multi-stage build: development tools and the `uv` installer are discarded
   before the runtime image is assembled. Only the application code and the
   pre-built virtual environment are copied.
-- No secrets are baked into the image. The Anthropic API key and Redis URL are
-  injected at runtime via environment variables or Kubernetes Secrets.
+- No secrets are baked into the image. LLM provider API keys and Redis URL are
+  injected at runtime via environment variables or Kubernetes Secrets. The
+  template supports six LLM providers: `anthropic`, `openai`, `google`,
+  `bedrock`, `azure`, and `ollama`.
 
 ### API layer
 
@@ -47,9 +49,10 @@ The following controls ship enabled and require no operator action.
   contain prompt-injection markers, SSRF-style internal endpoint references,
   server-side template injection syntax, path traversal sequences, and null bytes
   before they reach the LLM.
-- **API key format validation** at startup: if `ANTHROPIC_API_KEY` does not match
-  the `sk-ant-...` pattern a startup warning is emitted and settings loading fails,
-  catching misconfigured placeholder values early.
+- **API key format validation**: the `validate_api_key_format` utility function
+  in `core/security` checks whether an Anthropic key matches the `sk-ant-...`
+  pattern. This is a helper available for callers to use — it is not an automatic
+  startup check.
 
 ### Logging
 
@@ -93,11 +96,20 @@ Never combine `allow_origins=["*"]` with `allow_credentials=True`.
 
 ### Authentication and authorisation
 
-The template ships with no authentication layer. All endpoints are publicly
-accessible if the service is reachable. For production deployments you should
-add one of:
+The template includes a **Bearer token authentication** middleware activated by
+setting the `API_KEY` environment variable. When `API_KEY` is set, every request
+must include an `Authorization: Bearer <token>` header whose value matches the
+configured key. The comparison uses `hmac.compare_digest` for constant-time
+evaluation, preventing timing side-channel attacks.
 
-- An API key header check via FastAPI `Depends` + `Security`.
+The following paths are exempt from authentication so they remain accessible
+without a token: `/health`, `/docs`, `/redoc`, `/openapi.json`.
+
+Leave `API_KEY` unset to disable authentication entirely (suitable for internal
+deployments behind a gateway).
+
+For stricter production environments you may additionally layer on:
+
 - An OAuth 2.0 / OIDC token validation middleware.
 - A Kubernetes `Ingress` with an auth annotation (e.g. oauth2-proxy).
 
@@ -221,15 +233,15 @@ Alternative secret management solutions:
 
 | Variable | Description |
 |---|---|
-| `ANTHROPIC_API_KEY` | Anthropic API key (`sk-ant-...`). Without this the application fails to start. |
+| `ANTHROPIC_API_KEY` | API key for the configured LLM provider. Required when `LLM_PROVIDER=anthropic` (the default). Other providers require their own key (e.g. `OPENAI_API_KEY`, `GOOGLE_API_KEY`). |
 
 ### Optional (with defaults)
 
 | Variable | Default | Description |
 |---|---|---|
-| `MODEL_NAME` | `claude-3-5-sonnet-20241022` | Claude model identifier. |
+| `ANTHROPIC_MODEL` | `claude-3-5-sonnet-20241022` | Claude model identifier. |
 | `MAX_TOKENS` | `4096` | Maximum tokens per LLM response (1–32768). |
-| `MEMORY_BACKEND` | `sqlite` | Persistence backend: `sqlite` or `redis`. |
+| `MEMORY_BACKEND` | `sqlite` | Persistence backend: `sqlite`, `redis`, or `postgres`. |
 | `SQLITE_PATH` | `./data/agent_memory.db` | SQLite file path (dev/test only). |
 | `REDIS_URL` | `redis://localhost:6379/0` | Redis connection URL. Required when `MEMORY_BACKEND=redis`. |
 | `API_HOST` | `0.0.0.0` | Bind address. Use `127.0.0.1` for local-only access. |
