@@ -110,6 +110,8 @@ class RunRequest(BaseModel):
     )
     session_id: str | None = Field(
         default=None,
+        max_length=128,
+        pattern=r"^[a-zA-Z0-9_-]+$",
         description=(
             "Optional session ID for conversation continuity. "
             "Auto-generated if absent."

@@ -140,7 +140,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     _start_time = time.monotonic()
     _executor = ThreadPoolExecutor(
-        max_workers=4,
+        max_workers=get_settings().thread_pool_max_workers,
         thread_name_prefix="agent-worker",
     )
 
@@ -539,6 +539,12 @@ async def run_pipeline(
             unrecoverable error.
         504 Gateway Timeout: When the agent exceeds its configured step budget.
     """
+    if _shutting_down.is_set():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Server is shutting down.",
+        )
+
     try:
         query = _input_validator.validate(body.query)
     except ValueError as exc:
@@ -800,6 +806,12 @@ async def run_stream(
         422 Unprocessable Entity: When the request body fails schema validation.
         400 Bad Request: When the query is empty after stripping whitespace.
     """
+    if _shutting_down.is_set():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Server is shutting down.",
+        )
+
     try:
         query = _input_validator.validate(body.query)
     except ValueError as exc:
@@ -888,6 +900,12 @@ async def run_research(
         500 Internal Server Error: When the research agent fails.
         504 Gateway Timeout: When the agent exceeds its configured step budget.
     """
+    if _shutting_down.is_set():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Server is shutting down.",
+        )
+
     try:
         query = _input_validator.validate(body.query)
     except ValueError as exc:
