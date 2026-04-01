@@ -99,9 +99,7 @@ class MultiAgentGraph:
         self.run_id: str = run_id or str(uuid.uuid4())
         self._llm = llm
         self._checkpointer = checkpointer or create_checkpointer(get_settings())
-        self._executor = ThreadPoolExecutor(
-            max_workers=get_settings().thread_pool_max_workers
-        )
+        self._executor: ThreadPoolExecutor | None = None
         self._research_agent: ResearchAgent | None = None
         self._analyst_agent: AnalystAgent | None = None
         self._graph = self._build_graph()
@@ -403,7 +401,16 @@ class MultiAgentGraph:
             AgentExecutionError: When any pipeline stage fails.
         """
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(self._executor, self.run, query)
+        return await loop.run_in_executor(self._get_executor(), self.run, query)
+
+    def _get_executor(self) -> ThreadPoolExecutor:
+        """Lazily create the thread pool on first async usage."""
+        if self._executor is None:
+            self._executor = ThreadPoolExecutor(
+                max_workers=get_settings().thread_pool_max_workers,
+                thread_name_prefix="agent-graph",
+            )
+        return self._executor
 
     def __enter__(self) -> MultiAgentGraph:
         """Support ``with MultiAgentGraph(...) as g:`` usage."""
@@ -416,8 +423,9 @@ class MultiAgentGraph:
         self.close()
 
     def close(self) -> None:
-        """Shut down the thread pool executor."""
-        self._executor.shutdown(wait=False)
+        """Shut down the thread pool executor if it was created."""
+        if self._executor is not None:
+            self._executor.shutdown(wait=False)
 
     def get_research_result(self, query: str) -> ResearchResult:
         """
