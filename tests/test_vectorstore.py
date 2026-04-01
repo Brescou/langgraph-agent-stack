@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+from unittest.mock import patch
+
 import pytest
 
 
@@ -78,16 +81,24 @@ class TestGetVectorstoreChromaImportError:
 class TestGetVectorstorePGVectorMissingUrl:
     def test_raises_runtime_error_when_postgres_url_missing(self):
         """When memory_backend=postgres but postgres_url is not set, RuntimeError is raised."""
-        from types import SimpleNamespace
-
+        from core.config import Settings, get_settings
         from core.vectorstore import get_vectorstore
 
-        # Use a plain namespace to sidestep pydantic-settings alias resolution;
-        # the factory only reads attributes via getattr, so this is sufficient.
-        settings = SimpleNamespace(
-            rag_enabled=True,
-            memory_backend="postgres",
-            postgres_url=None,
-        )
-        with pytest.raises(RuntimeError, match="POSTGRES_URL"):
-            get_vectorstore(settings)
+        env_override = {
+            "RAG_ENABLED": "true",
+            "MEMORY_BACKEND": "postgres",
+            "LLM_PROVIDER": "anthropic",
+            "ANTHROPIC_API_KEY": "sk-ant-test123456789012345",
+            "SQLITE_PATH": ":memory:",
+            "ENVIRONMENT": "development",
+        }
+        # Remove POSTGRES_URL so it defaults to None
+        with patch.dict(os.environ, env_override, clear=False):
+            os.environ.pop("POSTGRES_URL", None)
+            get_settings.cache_clear()
+            try:
+                settings = Settings()  # type: ignore[call-arg]
+                with pytest.raises(RuntimeError, match="POSTGRES_URL"):
+                    get_vectorstore(settings)
+            finally:
+                get_settings.cache_clear()

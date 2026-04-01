@@ -210,10 +210,11 @@ def test_security_headers(test_client: TestClient) -> None:
 
 
 def test_run_stream_returns_sse(test_client: TestClient) -> None:
-    """POST /run/stream should return 200 with text/event-stream content-type."""
+    """POST /run/stream should return 200 with text/event-stream and valid SSE events."""
     response = test_client.post("/run/stream", json={"query": "test query"})
     assert response.status_code == 200
     assert "text/event-stream" in response.headers.get("content-type", "")
+    assert "data: " in response.text
 
 
 def test_run_stream_empty_query_returns_400(test_client: TestClient) -> None:
@@ -270,11 +271,11 @@ def _auth_client_ctx(
         mock_graph_cls = MagicMock(return_value=mock_graph_instance)
         mock_agent_cls = MagicMock(return_value=MagicMock())
 
-        old_api_key = os.environ.pop("API_KEY", None)
-        os.environ["API_KEY"] = api_key
+        env_overlay = {"API_KEY": api_key}
         _gs.cache_clear()
         try:
             with (
+                patch.dict(os.environ, env_overlay, clear=False),
                 patch("api.main.MultiAgentGraph", mock_graph_cls),
                 patch("api.main.ResearchAgent", mock_agent_cls),
                 patch("api.main._rate_limiter", permissive),
@@ -284,9 +285,6 @@ def _auth_client_ctx(
                 with TestClient(app, raise_server_exceptions=False) as client:
                     yield client
         finally:
-            os.environ.pop("API_KEY", None)
-            if old_api_key is not None:
-                os.environ["API_KEY"] = old_api_key
             _gs.cache_clear()
 
     return _ctx()
