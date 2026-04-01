@@ -12,7 +12,7 @@ from enum import StrEnum
 from functools import lru_cache
 from typing import TYPE_CHECKING, Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from core.llm import LLMProvider
@@ -213,6 +213,12 @@ class Settings(BaseSettings):
             ollama_base_url=self.ollama_base_url,
             ollama_model=self.ollama_model,
         )
+
+    @model_validator(mode="after")
+    def _validate_backend_urls(self) -> Settings:
+        if self.memory_backend.value == "postgres" and not self.postgres_url:
+            raise ValueError("POSTGRES_URL must be set when MEMORY_BACKEND=postgres")
+        return self
 
     @field_validator("redis_url")
     @classmethod

@@ -132,6 +132,9 @@ def get_llm(config: LLMConfig) -> BaseChatModel:
                 model_id=config.bedrock_model,
                 region_name=config.aws_region,
                 max_tokens=config.max_tokens,
+                credentials_profile_name=None,
+                aws_access_key_id=config.aws_access_key_id,
+                aws_secret_access_key=config.aws_secret_access_key,
             )
 
         case "azure":

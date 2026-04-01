@@ -47,8 +47,10 @@ _DANGEROUS_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"you\s+are\s+now\s+(?:acting\s+as|a\s+)", re.IGNORECASE),
     re.compile(r"</?(system|assistant|user|human|prompt)\s*/?>", re.IGNORECASE),
     # Server-Side Template Injection
-    re.compile(r"\{\{.*?\}\}", re.IGNORECASE | re.DOTALL),
-    re.compile(r"\{%.*?%\}", re.IGNORECASE | re.DOTALL),
+    re.compile(r"\{\{.*?[|%.].*?\}\}", re.IGNORECASE | re.DOTALL),
+    re.compile(
+        r"\{%-?\s*(import|from|include|extends|block|macro|call|set)\b", re.IGNORECASE
+    ),
     # SSRF / internal endpoint probing
     re.compile(
         r"https?://(?:169\.254\.169\.254|metadata\.google\.internal|localhost|127\.\d+\.\d+\.\d+|::1|0\.0\.0\.0)",

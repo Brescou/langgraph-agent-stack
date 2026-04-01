@@ -137,6 +137,8 @@ def _get_chromadb() -> VectorStoreProtocol:
     try:
         from langchain_chroma import Chroma  # type: ignore[import]
 
+        # TODO: Pass an explicit embedding_function for production use.
+        # Without one, ChromaDB falls back to sentence-transformers default.
         return Chroma(collection_name="langgraph_rag")  # type: ignore[return-value]
 
     except ImportError as exc:
@@ -173,6 +175,7 @@ def _get_pgvector(settings: Settings) -> VectorStoreProtocol:
     try:
         from langchain_community.vectorstores import PGVector  # type: ignore[import]
 
+        # TODO: Migrate to langchain_postgres.PGVector when upgrading dependencies.
         return PGVector(  # type: ignore[return-value]
             collection_name="langgraph_rag",
             connection_string=postgres_url,

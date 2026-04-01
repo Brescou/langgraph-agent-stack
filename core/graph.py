@@ -99,6 +99,9 @@ class MultiAgentGraph:
         self.run_id: str = run_id or str(uuid.uuid4())
         self._llm = llm
         self._checkpointer = checkpointer or create_checkpointer(get_settings())
+        self._executor = ThreadPoolExecutor(max_workers=1)
+        self._research_agent: ResearchAgent | None = None
+        self._analyst_agent: AnalystAgent | None = None
         self._graph = self._build_graph()
 
         logger.info(
@@ -166,12 +169,13 @@ class MultiAgentGraph:
 
         with trace_span("research_node", {"run_id": self.run_id}):
             try:
-                agent = ResearchAgent(
-                    thread_id=f"{self.run_id}-research",
-                    llm=self._llm,
-                    checkpointer=self._checkpointer,
-                )
-                result: ResearchResult = agent.run_structured(query)
+                if self._research_agent is None:
+                    self._research_agent = ResearchAgent(
+                        thread_id=f"{self.run_id}-research",
+                        llm=self._llm,
+                        checkpointer=self._checkpointer,
+                    )
+                result: ResearchResult = self._research_agent.run_structured(query)
                 logger.info(
                     "Pipeline: research phase complete",
                     extra={
@@ -243,12 +247,15 @@ class MultiAgentGraph:
 
         with trace_span("analysis_node", {"run_id": self.run_id}):
             try:
-                agent = AnalystAgent(
-                    thread_id=f"{self.run_id}-analysis",
-                    llm=self._llm,
-                    checkpointer=self._checkpointer,
+                if self._analyst_agent is None:
+                    self._analyst_agent = AnalystAgent(
+                        thread_id=f"{self.run_id}-analysis",
+                        llm=self._llm,
+                        checkpointer=self._checkpointer,
+                    )
+                report: AnalysisReport = self._analyst_agent.run_structured(
+                    research_result
                 )
-                report: AnalysisReport = agent.run_structured(research_result)
 
                 logger.info(
                     "Pipeline: analysis phase complete",
@@ -394,9 +401,11 @@ class MultiAgentGraph:
             AgentExecutionError: When any pipeline stage fails.
         """
         loop = asyncio.get_running_loop()
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            report = await loop.run_in_executor(executor, self.run, query)
-        return report
+        return await loop.run_in_executor(self._executor, self.run, query)
+
+    def close(self) -> None:
+        """Shut down the thread pool executor."""
+        self._executor.shutdown(wait=False)
 
     def get_research_result(self, query: str) -> ResearchResult:
         """

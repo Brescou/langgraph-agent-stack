@@ -289,6 +289,16 @@ def _safe_eval(node: ast.AST) -> Any:
             raise ValueError(f"Unsupported operator: {op_type.__name__}")
         left = _safe_eval(node.left)
         right = _safe_eval(node.right)
+        if isinstance(node.op, ast.Pow):
+            if isinstance(right, (int, float)) and abs(right) > 1000:
+                raise ValueError("Exponent too large (max 1000)")
+            if (
+                isinstance(left, (int, float))
+                and abs(left) > 1000
+                and isinstance(right, (int, float))
+                and abs(right) > 1
+            ):
+                raise ValueError("Base too large for exponentiation")
         return _SAFE_OPERATORS[op_type](left, right)
 
     if isinstance(node, ast.UnaryOp):

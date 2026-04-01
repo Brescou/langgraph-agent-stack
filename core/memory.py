@@ -52,6 +52,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+import threading
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -311,9 +312,10 @@ class ConversationMemory:
         self._conn: sqlite3.Connection = sqlite3.connect(
             str(self.db_path),
             check_same_thread=False,
-            isolation_level=None,
+            isolation_level="DEFERRED",
         )
         self._conn.row_factory = sqlite3.Row
+        self._lock = threading.Lock()
         self._apply_schema()
 
         logger.debug(
@@ -367,13 +369,13 @@ class ConversationMemory:
         Raises:
             sqlite3.Error: Re-raised after rollback on failure.
         """
-        self._conn.execute("BEGIN")
-        try:
-            yield
-            self._conn.execute("COMMIT")
-        except Exception:
-            self._conn.execute("ROLLBACK")
-            raise
+        with self._lock:
+            try:
+                yield
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
 
     # ------------------------------------------------------------------
     # Write operations
