@@ -32,7 +32,25 @@ from core.memory import create_checkpointer
 from core.security import InputValidator
 from core.tools import get_default_tools
 
-_input_validator = InputValidator()
+input_validator = InputValidator()
+
+
+def _extract_text_content(content: Any) -> str:
+    """Safely extract text from an LLM message content field.
+
+    Multi-modal models may return ``list[dict]`` instead of ``str``.
+    This helper normalises both representations to a plain string so
+    that ``json.loads`` never receives an unexpected type.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(
+            block.get("text", "") if isinstance(block, dict) else str(block)
+            for block in content
+        )
+    return str(content)
+
 
 # ---------------------------------------------------------------------------
 # Custom exceptions

@@ -27,7 +27,8 @@ from agents.base_agent import (
     AgentState,
     AgentValidationError,
     BaseAgent,
-    _input_validator,
+    _extract_text_content,
+    input_validator,
 )
 from agents.models import ResearchResult  # backward-compat re-export
 from core.config import get_settings
@@ -136,7 +137,9 @@ class ResearchAgent(BaseAgent):
                     HumanMessage(content=expansion_prompt),
                 ]
             )
-            sub_queries: list[str] = json.loads(expansion_msg.content)  # type: ignore[arg-type]
+            sub_queries: list[str] = json.loads(
+                _extract_text_content(expansion_msg.content)
+            )
             if not isinstance(sub_queries, list):
                 sub_queries = [query]
         except json.JSONDecodeError:
@@ -224,7 +227,7 @@ class ResearchAgent(BaseAgent):
                     HumanMessage(content=validation_prompt),
                 ]
             )
-            result = json.loads(validation_msg.content)  # type: ignore[arg-type]
+            result = json.loads(_extract_text_content(validation_msg.content))
             is_sufficient: bool = bool(result.get("sufficient", True))
             reason: str = result.get("reason", "")
         except Exception:
@@ -280,7 +283,7 @@ class ResearchAgent(BaseAgent):
                     HumanMessage(content=summary_prompt),
                 ]
             )
-            parsed = json.loads(summary_msg.content)  # type: ignore[arg-type]
+            parsed = json.loads(_extract_text_content(summary_msg.content))
             summary_text = parsed.get("summary", str(summary_msg.content))
             confidence = float(parsed.get("confidence", 0.7))
         except json.JSONDecodeError:
@@ -353,7 +356,7 @@ class ResearchAgent(BaseAgent):
         """Execute the research graph and return the final state."""
         if not query or not query.strip():
             raise AgentValidationError(f"[{self.name}] Query must not be empty.")
-        query = _input_validator.validate(query)
+        query = input_validator.validate(query)
         self._log.info("Starting research run", extra={"query": query[:120]})
         initial_state = self._make_initial_state(query)
         try:

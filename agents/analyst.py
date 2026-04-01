@@ -31,7 +31,8 @@ from agents.base_agent import (
     AgentState,
     AgentValidationError,
     BaseAgent,
-    _input_validator,
+    _extract_text_content,
+    input_validator,
 )
 from agents.models import (
     AnalysisReport,  # backward-compat re-export
@@ -140,7 +141,7 @@ class AnalystAgent(BaseAgent):
                     HumanMessage(content=analysis_prompt),
                 ]
             )
-            parsed = json.loads(response.content)  # type: ignore[arg-type]
+            parsed = json.loads(_extract_text_content(response.content))
             insights: list[str] = parsed.get("insights", [])
             confidence: float = float(parsed.get("confidence", 0.7))
         except Exception:
@@ -192,7 +193,7 @@ class AnalystAgent(BaseAgent):
                     HumanMessage(content=synthesis_prompt),
                 ]
             )
-            parsed = json.loads(response.content)  # type: ignore[arg-type]
+            parsed = json.loads(_extract_text_content(response.content))
             patterns: list[str] = parsed.get("patterns", [])
             implications: list[str] = parsed.get("implications", [])
         except Exception:
@@ -302,7 +303,7 @@ class AnalystAgent(BaseAgent):
         """Execute the analysis graph and return the final state."""
         if not query or not query.strip():
             raise AgentValidationError(f"[{self.name}] Query must not be empty.")
-        query = _input_validator.validate(query)
+        query = input_validator.validate(query)
         initial_state = self._make_initial_state(query)
         initial_state["context"][self._CTX_RESEARCH] = research_dict
         self._log.info(
