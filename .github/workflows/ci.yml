@@ -1,11 +1,12 @@
 # ci.yml — Continuous Integration pipeline for langgraph-agent-stack
 #
 # Jobs:
-#   lint       — ruff (linting + import sort) + black (format check)
-#   typecheck  — pyright basic type checking
-#   infra-lint — helm lint + terraform validate
-#   test       — pytest with coverage via uv
-#   build      — Docker image build (push to main only)
+#   lint         — ruff (linting + import sort) + black (format check)
+#   typecheck    — pyright basic type checking
+#   infra-lint   — helm lint + terraform validate
+#   test         — pytest with coverage via uv
+#   docker-smoke — build Docker image + startup/health validation
+#   build        — Docker image build (push to main only)
 #
 # All Python dependency installation uses uv exclusively (no pip, no poetry).
 
@@ -191,7 +192,23 @@ jobs:
           retention-days: 7
 
 # ---------------------------------------------------------------------------
-# Job 5 — Build Docker image (push to main only)
+# Job 5 — Docker smoke test (build + startup validation)
+# ---------------------------------------------------------------------------
+  docker-smoke:
+    name: Docker smoke test
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    env:
+      ANTHROPIC_API_KEY: test-key-not-real
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Run smoke test (build + /health + /docs + non-root)
+        run: bash tests/smoke_test_docker.sh
+
+# ---------------------------------------------------------------------------
+# Job 6 — Build Docker image (push to main only)
 # ---------------------------------------------------------------------------
   build:
     name: Build Docker image

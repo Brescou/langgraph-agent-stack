@@ -4,6 +4,7 @@
 #   secrets-scan   — gitleaks: detect secrets and credentials committed to the repo
 #   dependency-audit — pip-audit: identify known CVEs in Python dependencies
 #   sast           — bandit: static application security testing for Python code
+#   image-scan     — trivy: container image vulnerability scan
 #
 # Triggers:
 #   push / pull_request  — on every change to the main branch
@@ -219,3 +220,54 @@ jobs:
             --confidence-level high \
             --exclude ".venv,tests" \
             api/ core/ agents/
+
+# ---------------------------------------------------------------------------
+# Job 4 — Container image vulnerability scan with Trivy
+# ---------------------------------------------------------------------------
+  image-scan:
+    name: Container image scan (Trivy)
+    runs-on: ubuntu-latest
+    env:
+      ANTHROPIC_API_KEY: test-key-not-real
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -f infra/Dockerfile -t langgraph-agent-stack:scan .
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: langgraph-agent-stack:scan
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: "HIGH,CRITICAL"
+
+      - name: Run Trivy (SARIF for GitHub Security tab)
+        uses: aquasecurity/trivy-action@master
+        if: always()
+        with:
+          image-ref: langgraph-agent-stack:scan
+          format: sarif
+          output: trivy-results.sarif
+          ignore-unfixed: true
+          severity: "HIGH,CRITICAL"
+        continue-on-error: true
+
+      - name: Upload Trivy SARIF to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif
+        continue-on-error: true
+
+      - name: Upload Trivy SARIF artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trivy-sarif-report
+          path: trivy-results.sarif
+          retention-days: 30
+          if-no-files-found: ignore

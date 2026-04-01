@@ -71,6 +71,7 @@ dev = [
     "ruff>=0.8",
     "black>=24",
     "pyright>=1.1",
+    "testcontainers>=4.0",
 ]
 
 [tool.ruff]
@@ -87,6 +88,9 @@ target-version = ["py312"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "integration: marks tests requiring Docker (deselect with '-m \"not integration\"')",
+]
 
 [tool.pyright]
 typeCheckingMode = "basic"
