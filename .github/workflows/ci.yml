@@ -126,13 +126,18 @@ jobs:
             terraform -chdir="$dir" fmt -check
           done
 
-      - name: Terraform validate
+      - name: Terraform validate modules
         run: |
           for dir in infra/terraform/modules/*/; do
             echo "--- terraform validate $dir ---"
             terraform -chdir="$dir" init -backend=false -input=false
             terraform -chdir="$dir" validate
           done
+
+      - name: Terraform validate root
+        run: |
+          terraform -chdir=infra/terraform init -backend=false -input=false
+          terraform -chdir=infra/terraform validate
 
 # ---------------------------------------------------------------------------
 # Job 4 — Test
