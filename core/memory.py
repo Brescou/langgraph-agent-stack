@@ -473,6 +473,41 @@ class ConversationMemory:
 
         return [self._row_to_dict(row) for row in rows]
 
+    def list_runs_by_session(
+        self, session_id: str, limit: int = 50
+    ) -> list[dict[str, Any]]:
+        """
+        Return run records whose metadata contains ``session_id``, newest first.
+
+        Filters in SQL using SQLite's ``json_extract`` so only matching rows
+        are loaded — avoids fetching all rows and filtering in Python.
+
+        Args:
+            session_id: The session identifier to filter by.
+            limit: Maximum number of records to return.  Must be >= 1.
+
+        Returns:
+            A list of run dicts ordered by ``created_at`` descending.
+
+        Raises:
+            ValueError: If ``session_id`` is empty or ``limit`` < 1.
+            sqlite3.Error: On database read failure.
+        """
+        if not session_id or not session_id.strip():
+            raise ValueError("list_runs_by_session: session_id must not be empty.")
+        if limit < 1:
+            raise ValueError(f"list_runs_by_session: limit must be >= 1, got {limit}.")
+
+        rows = self._conn.execute(
+            "SELECT id, run_id, query, result_json, metadata_json, created_at "
+            "FROM runs "
+            "WHERE json_extract(metadata_json, '$.session_id') = ? "
+            "ORDER BY created_at DESC LIMIT ?",
+            (session_id, limit),
+        ).fetchall()
+
+        return [self._row_to_dict(row) for row in rows]
+
     # ------------------------------------------------------------------
     # Resource management
     # ------------------------------------------------------------------

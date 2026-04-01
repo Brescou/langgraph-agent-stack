@@ -9,6 +9,7 @@ shell environment instead.
 from __future__ import annotations
 
 from enum import StrEnum
+from functools import lru_cache
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import Field, field_validator
@@ -214,7 +215,13 @@ class Settings(BaseSettings):
 
 
 # ---------------------------------------------------------------------------
-# Module-level singleton — import this everywhere instead of re-instantiating.
+# Settings factory — use get_settings() everywhere instead of a bare singleton.
+# The @lru_cache ensures only one Settings instance is created per process.
+# In tests, call get_settings.cache_clear() to force re-instantiation.
 # ---------------------------------------------------------------------------
 
-settings = Settings()  # type: ignore[call-arg]  # key comes from env
+
+@lru_cache
+def get_settings() -> Settings:
+    """Return the cached application Settings instance."""
+    return Settings()  # type: ignore[call-arg]  # key comes from env
