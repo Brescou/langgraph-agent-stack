@@ -58,12 +58,6 @@ class SupervisorState(TypedDict):
 
 
 # ---------------------------------------------------------------------------
-# Shared LLM reference
-# ---------------------------------------------------------------------------
-
-_llm: BaseChatModel | None = None
-
-# ---------------------------------------------------------------------------
 # Supervisor node
 # ---------------------------------------------------------------------------
 
@@ -84,7 +78,7 @@ Respond ONLY with the JSON object, no other text.
 """.strip()
 
 
-def supervisor_node(state: SupervisorState) -> dict[str, str]:
+def supervisor_node(state: SupervisorState, llm: BaseChatModel) -> dict[str, str]:
     """
     Node: inspect the conversation and decide which agent to call next.
 
@@ -93,25 +87,19 @@ def supervisor_node(state: SupervisorState) -> dict[str, str]:
 
     Args:
         state: Current pipeline state.
+        llm: Configured LangChain chat model.
 
     Returns:
         Partial state update with ``next_agent`` set to the routing decision.
     """
-    assert (
-        _llm is not None
-    ), "LLM not initialised — call build_supervisor_graph() first."
-
-    # Build the routing prompt from current conversation context
     history = state.get("messages", [])
     if not history:
-        # First turn — seed with the original query
         history = [HumanMessage(content=state["query"])]
 
-    response = _llm.invoke([SystemMessage(content=_SUPERVISOR_SYSTEM)] + history)
+    response = llm.invoke([SystemMessage(content=_SUPERVISOR_SYSTEM)] + history)
 
     raw: str = str(response.content).strip()
 
-    # Parse routing decision; default to FINISH on parse failure
     try:
         decision: dict = json.loads(raw)
         next_agent: str = decision.get("next", "FINISH")
@@ -143,20 +131,19 @@ _AGENT_PERSONAS: dict[str, str] = {
 }
 
 
-def _make_specialist_node(role: str):
+def _make_specialist_node(role: str, llm: BaseChatModel):
     """
     Factory: create a specialist node function for the given role.
 
     Args:
         role: One of ``"research"``, ``"code"``, or ``"data"``.
+        llm: Configured LangChain chat model.
 
     Returns:
         A node function compatible with LangGraph's ``add_node``.
     """
 
     def specialist_node(state: SupervisorState) -> dict:
-        assert _llm is not None, "LLM not initialised."
-
         persona = _AGENT_PERSONAS[role]
         query = state["query"]
         prior_output = state.get("agent_output", "")
@@ -169,7 +156,7 @@ def _make_specialist_node(role: str):
                 "Continue or refine the answer based on the above."
             )
 
-        response = _llm.invoke(
+        response = llm.invoke(
             [
                 SystemMessage(content=persona),
                 HumanMessage(content=human_content),
@@ -230,19 +217,13 @@ def build_supervisor_graph(llm: BaseChatModel) -> object:
     Returns:
         A compiled LangGraph ``StateGraph`` ready for ``.invoke()``.
     """
-    global _llm
-    _llm = llm
-
     graph: StateGraph = StateGraph(SupervisorState)
 
-    # Add supervisor node
-    graph.add_node("supervisor", supervisor_node)
+    graph.add_node("supervisor", lambda state: supervisor_node(state, llm))
 
-    # Add specialist nodes
     for role in ("research", "code", "data"):
-        graph.add_node(role, _make_specialist_node(role))
+        graph.add_node(role, _make_specialist_node(role, llm))
 
-    # Routing: supervisor -> {research, code, data, END}
     graph.add_conditional_edges(
         "supervisor",
         route_after_supervisor,
@@ -254,7 +235,6 @@ def build_supervisor_graph(llm: BaseChatModel) -> object:
         },
     )
 
-    # Each specialist loops back to supervisor
     for role in ("research", "code", "data"):
         graph.add_edge(role, "supervisor")
 

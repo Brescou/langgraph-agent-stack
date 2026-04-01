@@ -69,13 +69,6 @@ class AnalystBranchState(TypedDict):
 
 
 # ---------------------------------------------------------------------------
-# Shared LLM reference (set by build_parallel_graph)
-# ---------------------------------------------------------------------------
-
-_llm: BaseChatModel | None = None
-
-
-# ---------------------------------------------------------------------------
 # Node functions
 # ---------------------------------------------------------------------------
 
@@ -124,7 +117,7 @@ def fan_out_node(state: ParallelState) -> list[Send]:
     return [Send("analyst_node", branch) for branch in branches]
 
 
-def analyst_node(state: AnalystBranchState) -> dict[str, list[str]]:
+def analyst_node(state: AnalystBranchState, llm: BaseChatModel) -> dict[str, list[str]]:
     """
     Node: run a single analyst persona on the query.
 
@@ -134,12 +127,11 @@ def analyst_node(state: AnalystBranchState) -> dict[str, list[str]]:
 
     Args:
         state: Branch-specific state containing role, focus, and query.
+        llm: Configured LangChain chat model.
 
     Returns:
         A partial state update with a single-element ``analyses`` list.
     """
-    assert _llm is not None, "LLM not initialised — call build_parallel_graph() first."
-
     system_prompt = (
         f"You are a {state['role']}. Analyse the given topic from the perspective of "
         f"{state['focus']}. Structure your analysis with clear sections. "
@@ -149,7 +141,7 @@ def analyst_node(state: AnalystBranchState) -> dict[str, list[str]]:
         f"Topic: {state['query']}\n\n" f"Provide a focused {state['role']} analysis."
     )
 
-    response = _llm.invoke(
+    response = llm.invoke(
         [
             SystemMessage(content=system_prompt),
             HumanMessage(content=human_prompt),
@@ -160,7 +152,7 @@ def analyst_node(state: AnalystBranchState) -> dict[str, list[str]]:
     return {"analyses": [formatted]}
 
 
-def consolidate_node(state: ParallelState) -> dict[str, str]:
+def consolidate_node(state: ParallelState, llm: BaseChatModel) -> dict[str, str]:
     """
     Node: merge the three parallel analyses into a single cohesive report.
 
@@ -169,12 +161,11 @@ def consolidate_node(state: ParallelState) -> dict[str, str]:
 
     Args:
         state: Pipeline state with all three analyses populated.
+        llm: Configured LangChain chat model.
 
     Returns:
         A partial state update with ``final_report`` set.
     """
-    assert _llm is not None, "LLM not initialised — call build_parallel_graph() first."
-
     analyses_text = "\n\n---\n\n".join(state["analyses"])
 
     system_prompt = (
@@ -189,7 +180,7 @@ def consolidate_node(state: ParallelState) -> dict[str, str]:
         "Produce the consolidated executive report."
     )
 
-    response = _llm.invoke(
+    response = llm.invoke(
         [
             SystemMessage(content=system_prompt),
             HumanMessage(content=human_prompt),
@@ -219,14 +210,11 @@ def build_parallel_graph(llm: BaseChatModel) -> object:
     Returns:
         A compiled LangGraph ``StateGraph`` ready for ``.invoke()``.
     """
-    global _llm
-    _llm = llm
-
     graph: StateGraph = StateGraph(ParallelState)
 
     graph.add_node("fan_out", fan_out_node)
-    graph.add_node("analyst_node", analyst_node)
-    graph.add_node("consolidate", consolidate_node)
+    graph.add_node("analyst_node", lambda state: analyst_node(state, llm))
+    graph.add_node("consolidate", lambda state: consolidate_node(state, llm))
 
     # START -> fan_out -> [analyst_node x3 via Send] -> consolidate -> END
     graph.add_edge(START, "fan_out")

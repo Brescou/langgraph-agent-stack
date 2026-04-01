@@ -54,17 +54,11 @@ class HumanLoopState(TypedDict):
 
 
 # ---------------------------------------------------------------------------
-# Shared LLM reference
-# ---------------------------------------------------------------------------
-
-_llm: BaseChatModel | None = None
-
-# ---------------------------------------------------------------------------
 # Node functions
 # ---------------------------------------------------------------------------
 
 
-def plan_node(state: HumanLoopState) -> dict[str, str]:
+def plan_node(state: HumanLoopState, llm: BaseChatModel) -> dict[str, str]:
     """
     Node: use the LLM to propose a concrete action based on the user's request.
 
@@ -73,14 +67,11 @@ def plan_node(state: HumanLoopState) -> dict[str, str]:
 
     Args:
         state: Current pipeline state.
+        llm: Configured LangChain chat model.
 
     Returns:
         Partial state update with ``proposed_action`` set.
     """
-    assert (
-        _llm is not None
-    ), "LLM not initialised — call build_human_loop_graph() first."
-
     system_prompt = (
         "You are an intelligent automation agent. The user gives you a task. "
         "Your job is to propose a single, specific, concrete action to fulfil it. "
@@ -88,7 +79,7 @@ def plan_node(state: HumanLoopState) -> dict[str, str]:
         "and what the expected outcome is. Be explicit about any side effects."
     )
 
-    response = _llm.invoke(
+    response = llm.invoke(
         [
             SystemMessage(content=system_prompt),
             HumanMessage(content=state["query"]),
@@ -113,8 +104,6 @@ def approval_node(state: HumanLoopState) -> dict[str, bool]:
     Returns:
         Partial state update with ``human_approved`` set from the human's decision.
     """
-    # interrupt() suspends here; the dict is returned to the caller as the
-    # interrupt value.  Execution resumes with Command(resume={"approved": ...}).
     human_response: dict = interrupt(
         {
             "message": "Human approval required before executing the following action.",
@@ -130,7 +119,7 @@ def approval_node(state: HumanLoopState) -> dict[str, bool]:
     return {"human_approved": approved}
 
 
-def execute_node(state: HumanLoopState) -> dict[str, str]:
+def execute_node(state: HumanLoopState, llm: BaseChatModel) -> dict[str, str]:
     """
     Node: execute the approved action.
 
@@ -140,14 +129,11 @@ def execute_node(state: HumanLoopState) -> dict[str, str]:
 
     Args:
         state: Current pipeline state with the approved action.
+        llm: Configured LangChain chat model.
 
     Returns:
         Partial state update with ``result`` describing the execution outcome.
     """
-    assert (
-        _llm is not None
-    ), "LLM not initialised — call build_human_loop_graph() first."
-
     system_prompt = (
         "You are an execution engine. The following action has been reviewed and "
         "approved by a human operator. Simulate its execution and report the outcome "
@@ -158,7 +144,7 @@ def execute_node(state: HumanLoopState) -> dict[str, str]:
         f"Execute the following approved action:\n\n{state['proposed_action']}"
     )
 
-    response = _llm.invoke(
+    response = llm.invoke(
         [
             SystemMessage(content=system_prompt),
             HumanMessage(content=human_prompt),
@@ -226,16 +212,13 @@ def build_human_loop_graph(llm: BaseChatModel) -> tuple[object, MemorySaver]:
         pass a ``config`` with a ``thread_id`` to both ``.invoke()`` calls
         so LangGraph can restore the suspended state on resume.
     """
-    global _llm
-    _llm = llm
-
     checkpointer = MemorySaver()
 
     graph: StateGraph = StateGraph(HumanLoopState)
 
-    graph.add_node("plan", plan_node)
+    graph.add_node("plan", lambda state: plan_node(state, llm))
     graph.add_node("approval", approval_node)
-    graph.add_node("execute", execute_node)
+    graph.add_node("execute", lambda state: execute_node(state, llm))
     graph.add_node("reject", rejection_node)
 
     graph.add_edge(START, "plan")
