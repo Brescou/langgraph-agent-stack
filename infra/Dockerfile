@@ -29,14 +29,26 @@ COPY README.md .
 # If a lockfile exists, copy it too; otherwise uv will resolve from pyproject.toml
 COPY uv.lock* ./
 
-# Install production dependencies into an explicit virtual environment
+# Install production dependencies into an explicit virtual environment.
 # --locked  : respect the lockfile if present, fail if out of date
 # --no-dev  : skip development dependencies
-# LLM_EXTRAS: provider extras to include (e.g. "anthropic", "openai", "all-providers")
-# For Redis/Postgres in production, extend the extras:
-#   docker build --build-arg LLM_EXTRAS="anthropic,redis" .
+#
+# Each ARG maps to a [project.optional-dependencies] group in pyproject.toml.
+# Pass empty string "" to disable an extra.
+#
+#   docker build \
+#     --build-arg LLM_EXTRAS=anthropic \
+#     --build-arg INFRA_EXTRAS=redis \
+#     --build-arg OBS_EXTRAS=observability \
+#     -f infra/Dockerfile .
 ARG LLM_EXTRAS="anthropic"
-RUN uv sync --locked --no-dev --extra ${LLM_EXTRAS}
+ARG INFRA_EXTRAS=""
+ARG OBS_EXTRAS=""
+
+RUN uv sync --locked --no-dev \
+    --extra ${LLM_EXTRAS} \
+    ${INFRA_EXTRAS:+--extra ${INFRA_EXTRAS}} \
+    ${OBS_EXTRAS:+--extra ${OBS_EXTRAS}}
 
 # =============================================================================
 # Stage 2 — runtime

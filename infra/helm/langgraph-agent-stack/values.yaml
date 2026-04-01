@@ -39,7 +39,8 @@ config:
   maxTokens: "4096"
 
 # Persistent storage for SQLite data (only relevant when memoryBackend=sqlite).
-# Enable this to survive pod restarts; disabled by default (uses emptyDir).
+# Persistent storage for SQLite run-history.  Enabled by default so that
+# data survives pod restarts.  When disabled, an emptyDir is used instead.
 persistence:
   enabled: true
   mountPath: /app/data
@@ -65,6 +66,9 @@ secrets:
 serviceAccount:
   create: true
   name: ""
+  annotations: {}
+  # Example — AWS IRSA role for EKS:
+  #   eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/my-role
 
 podSecurityContext:
   runAsNonRoot: true
