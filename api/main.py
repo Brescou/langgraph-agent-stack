@@ -34,8 +34,10 @@ from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi import Path as FastAPIPath
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse, StreamingResponse
+from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
+from langchain_core.language_models import BaseChatModel
 
 from agents.analyst import AnalystAgent
 from agents.base_agent import (
@@ -55,6 +57,7 @@ from api.models import (
 )
 from core.config import Settings, get_settings
 from core.graph import MultiAgentGraph
+from core.memory import ConversationMemory
 from core.security import InputValidator, RateLimiter
 
 # ---------------------------------------------------------------------------
@@ -74,6 +77,9 @@ logger = logging.getLogger(__name__)
 _APP_VERSION = "0.1.0"
 _start_time: float = 0.0
 _executor: ThreadPoolExecutor | None = None
+_shared_llm: BaseChatModel | None = None
+_shared_checkpointer: Any | None = None
+_shared_memory: ConversationMemory | None = None
 
 # Security primitives — instantiated once, shared across all requests.
 # 60 requests per minute per IP is a conservative default suited for an LLM
@@ -101,7 +107,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     Shutdown:
         * Gracefully shuts down the thread pool, waiting for in-flight tasks.
     """
-    global _start_time, _executor
+    global _start_time, _executor, _shared_llm, _shared_checkpointer, _shared_memory
 
     _start_time = time.monotonic()
     _executor = ThreadPoolExecutor(
@@ -109,17 +115,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         thread_name_prefix="agent-worker",
     )
 
-    # Validate LLM configuration early so a misconfigured provider or missing
-    # API key produces a clear startup warning rather than a cryptic SDK error
-    # on the first real request.
-    from core.llm import get_llm
-
     _settings = get_settings()
+    from core.llm import get_llm
+    from core.memory import create_checkpointer
+
     try:
-        get_llm(_settings.llm_config)
+        _shared_llm = get_llm(_settings.llm_config)
+        _shared_checkpointer = create_checkpointer(_settings)
         logger.info("LLM provider '%s' configured successfully", _settings.llm_provider)
     except (ImportError, ValueError) as exc:
         logger.warning("LLM configuration warning: %s", exc)
+        _shared_llm = None
+        _shared_checkpointer = None
+
+    _shared_memory = ConversationMemory(_settings.sqlite_path)
 
     logger.info(
         "API server starting up",
@@ -138,7 +147,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("API server shutting down — draining thread pool")
     if _executor is not None:
         _executor.shutdown(wait=True)
+    if _shared_memory is not None:
+        _shared_memory.close()
     logger.info("Shutdown complete")
+
+
+# ---------------------------------------------------------------------------
+# Shared dependency accessors
+# ---------------------------------------------------------------------------
+
+
+def get_shared_llm() -> BaseChatModel | None:
+    return _shared_llm
+
+
+def get_shared_checkpointer() -> Any | None:
+    return _shared_checkpointer
+
+
+def get_shared_memory() -> ConversationMemory | None:
+    return _shared_memory
 
 
 # ---------------------------------------------------------------------------
@@ -199,6 +227,60 @@ async def add_security_headers(request: Request, call_next: Any) -> Any:
     if "server" in response.headers:
         del response.headers["server"]
     return response
+
+
+# ---------------------------------------------------------------------------
+# Auth middleware
+# ---------------------------------------------------------------------------
+
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next: Any) -> Any:
+    """
+    Optional Bearer-token authentication gate.
+
+    When ``settings.api_key`` is set, every request to a non-exempt path must
+    carry a matching ``Authorization: Bearer <token>`` header.  Exempt paths
+    (health probes, interactive docs) are always allowed through.
+
+    Disable auth entirely by leaving ``API_KEY`` unset in the environment.
+    """
+    _exempt = {
+        "/",
+        "/health",
+        "/ready",
+        "/docs",
+        "/redoc",
+        "/openapi.json",
+        "/favicon.ico",
+    }
+    if request.url.path in _exempt:
+        return await call_next(request)
+
+    _api_key = get_settings().api_key
+    if _api_key is None:
+        return await call_next(request)
+
+    auth_header = request.headers.get("Authorization", "")
+    token = (
+        auth_header.removeprefix("Bearer ").strip()
+        if auth_header.startswith("Bearer ")
+        else ""
+    )
+    if not token or token != _api_key:
+        logger.warning(
+            "Auth failed",
+            extra={
+                "path": request.url.path,
+                "client": request.client.host if request.client else "unknown",
+            },
+        )
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "Invalid or missing Bearer token."},
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return await call_next(request)
 
 
 # ---------------------------------------------------------------------------
@@ -407,20 +489,18 @@ async def run_pipeline(
     )
 
     def _execute() -> RunResponse:
-        pipeline = MultiAgentGraph(run_id=run_id)
+        pipeline = MultiAgentGraph(
+            run_id=run_id,
+            checkpointer=_shared_checkpointer,
+        )
         report = pipeline.run(query)
 
-        from core.memory import ConversationMemory
-
-        with ConversationMemory(settings.sqlite_path) as mem:
-            mem.save_run(
+        if _shared_memory is not None:
+            _shared_memory.save_run(
                 run_id=run_id,
                 query=query,
                 result=vars(report) if hasattr(report, "__dict__") else {},
-                metadata={
-                    "session_id": session_id,
-                    "agent": "MultiAgentGraph",
-                },
+                metadata={"session_id": session_id, "agent": "MultiAgentGraph"},
             )
 
         return RunResponse.from_analysis_report(report, session_id=session_id)
@@ -517,7 +597,11 @@ async def _stream_pipeline(
         yield f"data: {json.dumps({'type': 'status', 'message': 'Starting research phase...'})}\n\n"
 
         loop = asyncio.get_running_loop()
-        research_agent = ResearchAgent(thread_id=session_id)
+        research_agent = ResearchAgent(
+            thread_id=session_id,
+            llm=_shared_llm,
+            checkpointer=_shared_checkpointer,
+        )
         research_result = await loop.run_in_executor(
             _executor, research_agent.run_structured, query
         )
@@ -525,7 +609,11 @@ async def _stream_pipeline(
         yield f"data: {json.dumps({'type': 'agent_switch', 'from': 'researcher', 'to': 'analyst'})}\n\n"
         yield f"data: {json.dumps({'type': 'status', 'message': 'Starting analysis phase...'})}\n\n"
 
-        analyst_agent = AnalystAgent(thread_id=session_id)
+        analyst_agent = AnalystAgent(
+            thread_id=session_id,
+            llm=_shared_llm,
+            checkpointer=_shared_checkpointer,
+        )
         report = await loop.run_in_executor(
             _executor, analyst_agent.run_structured, research_result
         )
@@ -628,8 +716,16 @@ async def run_stream(
         },
     )
 
+    async def _guarded_stream() -> AsyncGenerator[str, None]:
+        try:
+            async with asyncio.timeout(settings.stream_timeout_seconds):
+                async for event in _stream_pipeline(query, session_id, run_id):
+                    yield event
+        except TimeoutError:
+            yield f"data: {json.dumps({'type': 'error', 'message': f'Stream timed out after {settings.stream_timeout_seconds}s'})}\n\n"
+
     return StreamingResponse(
-        _stream_pipeline(query, session_id, run_id),
+        _guarded_stream(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -701,20 +797,19 @@ async def run_research(
     )
 
     def _execute() -> ResearchResponse:
-        agent = ResearchAgent(thread_id=run_id)
+        agent = ResearchAgent(
+            thread_id=run_id,
+            llm=_shared_llm,
+            checkpointer=_shared_checkpointer,
+        )
         result = agent.run_structured(query)
 
-        from core.memory import ConversationMemory
-
-        with ConversationMemory(settings.sqlite_path) as mem:
-            mem.save_run(
+        if _shared_memory is not None:
+            _shared_memory.save_run(
                 run_id=run_id,
                 query=query,
                 result=vars(result) if hasattr(result, "__dict__") else {},
-                metadata={
-                    "session_id": session_id,
-                    "agent": "ResearchAgent",
-                },
+                metadata={"session_id": session_id, "agent": "ResearchAgent"},
             )
 
         return ResearchResponse.from_research_result(result, session_id=session_id)
@@ -779,8 +874,14 @@ async def run_research(
     response_description="Ordered list of run records associated with the given session ID.",
 )
 async def get_session_history(
-    session_id: str,
-    settings: Annotated[Settings, Depends(get_settings)],
+    session_id: Annotated[
+        str,
+        FastAPIPath(
+            min_length=1,
+            max_length=200,
+            description="Session identifier",
+        ),
+    ],
 ) -> HistoryResponse:
     """
     Return all run records associated with ``session_id``.
@@ -794,20 +895,20 @@ async def get_session_history(
     Returns:
         A ``HistoryResponse`` with the matching entries and a total count.
     """
-    from core.memory import ConversationMemory
-
-    with ConversationMemory(settings.sqlite_path) as mem:
-        runs = mem.list_runs_by_session(session_id)
-        entries = [
-            HistoryEntry(
-                run_id=r["run_id"],
-                query=r["query"],
-                result_summary=str(r.get("result", {}) or "")[:200],
-                created_at=r.get("created_at", ""),
-                metadata=r.get("metadata", {}),
-            )
-            for r in runs
-        ]
+    mem = _shared_memory
+    if mem is None:
+        return HistoryResponse(session_id=session_id, entries=[], total=0)
+    runs = mem.list_runs_by_session(session_id)
+    entries = [
+        HistoryEntry(
+            run_id=r["run_id"],
+            query=r["query"],
+            result_summary=str(r.get("result", {}) or "")[:200],
+            created_at=r.get("created_at", ""),
+            metadata=r.get("metadata", {}),
+        )
+        for r in runs
+    ]
 
     logger.info(
         "GET /sessions/%s/history — %d entries returned",
