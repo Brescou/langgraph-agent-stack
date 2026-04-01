@@ -73,9 +73,11 @@ from core.observability import (
     http_request_duration_seconds,
     http_requests_total,
     init_tracing,
+    requests_rejected_during_shutdown,
+    server_shutting_down,
     set_request_id,
 )
-from core.security import InputValidator, RateLimiter
+from core.security import InputValidator, create_rate_limiter
 
 configure_logging(level=get_settings().log_level.value)
 logger = logging.getLogger(__name__)
@@ -95,9 +97,51 @@ _shared_memory: ConversationMemory | None = None
 # 60 requests per minute per IP is a conservative default suited for an LLM
 # pipeline where each request may take several seconds.  Adjust via subclassing
 # or by passing a custom RateLimiter instance in tests.
-_rate_limiter = RateLimiter(max_requests=60, window_seconds=60.0)
+_rate_limiter = create_rate_limiter(
+    backend=get_settings().rate_limit_backend,
+    redis_url=get_settings().redis_url,
+)
 _input_validator = InputValidator(max_length=2000)
 _shutting_down = threading.Event()
+
+
+# ---------------------------------------------------------------------------
+# Checkpointer health probe
+# ---------------------------------------------------------------------------
+
+
+def _check_checkpointer_health(settings: Settings) -> tuple[str, str]:
+    """Probe the checkpointer backend for real connectivity.
+
+    Returns:
+        Tuple of ``(status, detail)`` — ``"ok"`` or ``"degraded"``.
+    """
+    backend = settings.memory_backend.value
+
+    if backend == "redis" and settings.redis_url:
+        try:
+            import redis as redis_lib
+
+            r = redis_lib.Redis.from_url(settings.redis_url, socket_timeout=2)
+            r.ping()
+            r.close()
+            return ("ok", "redis reachable")
+        except Exception as exc:
+            return ("degraded", f"redis unreachable: {exc}")
+
+    if backend == "postgres" and settings.postgres_url:
+        try:
+            import psycopg
+
+            with psycopg.connect(settings.postgres_url, connect_timeout=2) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+                    cur.fetchone()
+            return ("ok", "postgres reachable")
+        except Exception as exc:
+            return ("degraded", f"postgres unreachable: {exc}")
+
+    return ("ok", backend)
 
 
 # ---------------------------------------------------------------------------
@@ -189,11 +233,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
 
     _shutting_down.clear()
+    if server_shutting_down is not None:
+        server_shutting_down.set(0)
 
     yield  # Application is live here
 
     logger.info("API server shutting down — draining in-flight requests")
     _shutting_down.set()
+    if server_shutting_down is not None:
+        server_shutting_down.set(1)
     if _executor is not None:
         _executor.shutdown(wait=True, cancel_futures=False)
     if _shared_checkpointer is not None and hasattr(_shared_checkpointer, "close"):
@@ -452,6 +500,26 @@ async def log_requests(request: Request, call_next: Any) -> Any:
     return response
 
 
+_DRAIN_EXEMPT_PATHS = {"/health", "/ready", "/metrics"}
+
+
+@app.middleware("http")
+async def drain_middleware(request: Request, call_next: Any) -> Any:
+    """Reject new requests with 503 when the server is shutting down.
+
+    ``/health``, ``/ready``, and ``/metrics`` are exempt so Kubernetes
+    probes continue to work during the drain period.
+    """
+    if _shutting_down.is_set() and request.url.path not in _DRAIN_EXEMPT_PATHS:
+        if requests_rejected_during_shutdown is not None:
+            requests_rejected_during_shutdown.inc()
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"detail": "Server is shutting down."},
+        )
+    return await call_next(request)
+
+
 # ---------------------------------------------------------------------------
 # Helper: run a blocking callable in the thread pool
 # ---------------------------------------------------------------------------
@@ -528,17 +596,17 @@ async def health(
         )
 
     if _shared_memory is not None:
-        components["memory"] = ComponentHealth(
-            status="ok", detail=str(_shared_memory.db_path)
-        )
+        mem_status, mem_detail = _shared_memory.health_check()
+        components["memory"] = ComponentHealth(status=mem_status, detail=mem_detail)
     else:
         components["memory"] = ComponentHealth(
             status="degraded", detail="Memory store not initialised"
         )
 
     if _shared_checkpointer is not None:
+        chk_status, chk_detail = _check_checkpointer_health(settings)
         components["checkpointer"] = ComponentHealth(
-            status="ok", detail=settings.memory_backend.value
+            status=chk_status, detail=chk_detail
         )
     else:
         components["checkpointer"] = ComponentHealth(
