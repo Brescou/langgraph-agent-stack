@@ -28,8 +28,8 @@ from typing_extensions import TypedDict
 
 from core.config import get_settings
 from core.llm import get_llm
-from core.observability import llm_requests_total
 from core.memory import create_checkpointer
+from core.observability import llm_requests_total
 from core.security import InputValidator
 from core.tools import get_default_tools
 

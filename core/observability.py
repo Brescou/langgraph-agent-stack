@@ -61,31 +61,33 @@ class SanitizingFilter(logging.Filter):
     strips passwords, tokens, API keys, and URLs with embedded credentials.
     """
 
-    _PROTECTED_ATTRS = frozenset({
-        "name",
-        "msg",
-        "args",
-        "created",
-        "relativeCreated",
-        "exc_info",
-        "exc_text",
-        "stack_info",
-        "lineno",
-        "funcName",
-        "pathname",
-        "filename",
-        "module",
-        "levelno",
-        "levelname",
-        "message",
-        "msecs",
-        "process",
-        "processName",
-        "thread",
-        "threadName",
-        "request_id",
-        "taskName",
-    })
+    _PROTECTED_ATTRS = frozenset(
+        {
+            "name",
+            "msg",
+            "args",
+            "created",
+            "relativeCreated",
+            "exc_info",
+            "exc_text",
+            "stack_info",
+            "lineno",
+            "funcName",
+            "pathname",
+            "filename",
+            "module",
+            "levelno",
+            "levelname",
+            "message",
+            "msecs",
+            "process",
+            "processName",
+            "thread",
+            "threadName",
+            "request_id",
+            "taskName",
+        }
+    )
 
     def filter(self, record: logging.LogRecord) -> bool:
         from core.security import sanitize_log_data

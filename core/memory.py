@@ -22,7 +22,7 @@ Backend matrix
 |                   |                               | ``langgraph-checkpoint-   |
 |                   |                               | redis`` package.          |
 +-------------------+-------------------------------+---------------------------+
-| ``postgres``      | ``AsyncPostgresSaver``        | Requires                  |
+| ``postgres``      | ``PostgresSaver``             | Requires                  |
 |                   |                               | ``langgraph-checkpoint-   |
 |                   |                               | postgres`` package.       |
 |                   |                               | Install with:             |
@@ -103,7 +103,7 @@ def create_checkpointer(settings: Settings) -> Any:
           and ``langgraph-checkpoint-sqlite`` is installed.
         * ``RedisSaver``           — when ``memory_backend == MemoryBackend.REDIS``
           and ``langgraph-checkpoint-redis`` is installed.
-        * ``AsyncPostgresSaver``   — when ``memory_backend == MemoryBackend.POSTGRES``
+        * ``PostgresSaver``        — when ``memory_backend == MemoryBackend.POSTGRES``
           and ``langgraph-checkpoint-postgres`` is installed.
         * ``MemorySaver``          — fallback for all other cases.
     """
