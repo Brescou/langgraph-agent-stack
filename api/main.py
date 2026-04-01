@@ -76,7 +76,7 @@ logger = logging.getLogger(__name__)
 # Module-level state (populated during lifespan startup)
 # ---------------------------------------------------------------------------
 
-_APP_VERSION = "0.1.0"
+_APP_VERSION = "0.2.0"
 _start_time: float = 0.0
 _executor: ThreadPoolExecutor | None = None
 _shared_llm: BaseChatModel | None = None
@@ -263,7 +263,7 @@ async def add_security_headers(request: Request, call_next: Any) -> Any:
     response: Response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
-    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Content-Security-Policy"] = "default-src 'self'"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Cache-Control"] = "no-store"
     # Remove the Server header to avoid advertising the runtime stack.
@@ -497,6 +497,32 @@ async def health(
         environment=settings.environment,
         components=components,
     )
+
+
+@app.get(
+    "/ready",
+    status_code=status.HTTP_200_OK,
+    tags=["Operations"],
+    summary="Readiness probe",
+    response_description="Returns 200 when the service is ready to accept traffic.",
+)
+async def ready() -> dict[str, str]:
+    """Readiness probe for Kubernetes.
+
+    Returns 200 only when LLM and checkpointer are initialised.
+    Returns 503 if the service is not yet ready or is shutting down.
+    """
+    if _shutting_down.is_set():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Server is shutting down.",
+        )
+    if get_shared_llm() is None or get_shared_checkpointer() is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Service not ready: LLM or checkpointer not initialised.",
+        )
+    return {"status": "ready"}
 
 
 @app.post(
@@ -939,7 +965,7 @@ async def run_research(
 
     def _execute() -> ResearchResponse:
         agent = ResearchAgent(
-            thread_id=run_id,
+            thread_id=session_id,
             llm=_shared_llm,
             checkpointer=_shared_checkpointer,
         )
@@ -1039,7 +1065,7 @@ async def get_session_history(
     mem = _shared_memory
     if mem is None:
         return HistoryResponse(session_id=session_id, entries=[], total=0)
-    runs = mem.list_runs_by_session(session_id)
+    runs = await _run_in_executor(mem.list_runs_by_session, session_id)
     entries = [
         HistoryEntry(
             run_id=r["run_id"],
