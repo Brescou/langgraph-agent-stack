@@ -24,6 +24,7 @@ Architecture notes
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import logging
 import time
@@ -267,7 +268,7 @@ async def auth_middleware(request: Request, call_next: Any) -> Any:
         if auth_header.startswith("Bearer ")
         else ""
     )
-    if not token or token != _api_key:
+    if not token or not hmac.compare_digest(token, _api_key):
         logger.warning(
             "Auth failed",
             extra={
@@ -491,6 +492,7 @@ async def run_pipeline(
     def _execute() -> RunResponse:
         pipeline = MultiAgentGraph(
             run_id=run_id,
+            llm=_shared_llm,
             checkpointer=_shared_checkpointer,
         )
         report = pipeline.run(query)
@@ -626,6 +628,14 @@ async def _stream_pipeline(
                 "confidence": report.confidence,
             },
         )
+
+        if _shared_memory is not None:
+            _shared_memory.save_run(
+                run_id=run_id,
+                query=query,
+                result=report.to_dict(),
+                metadata={"session_id": session_id, "agent": "stream_pipeline"},
+            )
 
         yield f"data: {json.dumps({'type': 'done', 'run_id': run_id, 'session_id': session_id, 'executive_summary': report.executive_summary, 'key_insights': report.key_insights, 'patterns': report.patterns, 'implications': report.implications, 'confidence': report.confidence, 'research_summary': report.research_summary})}\n\n"
 
