@@ -433,7 +433,7 @@ All configuration is loaded from environment variables. Copy `.env.example` to `
 | `SQLITE_PATH` | `./data/agent_memory.db` | SQLite database file path |
 | `REDIS_URL` | `redis://localhost:6379/0` | Redis connection URL (required when `MEMORY_BACKEND=redis`) |
 | `POSTGRES_URL` | — | PostgreSQL DSN (required when `MEMORY_BACKEND=postgres`) |
-| `RAG_ENABLED` | `false` | Enable vector store RAG via ChromaDB |
+| `RAG_ENABLED` | `false` | Enable vector store infrastructure (not yet wired to agents — planned for v0.3.0) |
 
 ### Agent behaviour
 
@@ -592,7 +592,11 @@ No code changes required — `core/llm.py` handles instantiation.
 1. Set `MEMORY_BACKEND=postgres` and `POSTGRES_URL=postgresql+psycopg://user:pass@host:5432/dbname`.
 2. Install the PostgreSQL extras: `uv sync --extra postgres`.
 
-### Enable RAG
+### Enable RAG (experimental)
+
+> **Note:** Setting `RAG_ENABLED=true` currently provisions the vector store
+> infrastructure (ChromaDB or PGVector) but does **not** wire it into agent
+> pipelines. Full RAG integration is planned for **v0.3.0**.
 
 1. Set `RAG_ENABLED=true` in your environment.
 2. Install the RAG extras: `uv sync --extra rag`.
