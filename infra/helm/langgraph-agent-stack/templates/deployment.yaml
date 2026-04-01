@@ -99,13 +99,8 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
-            {{- if .Values.persistence.enabled }}
             - name: data
               mountPath: {{ .Values.persistence.mountPath }}
-            {{- else }}
-            - name: data
-              mountPath: {{ .Values.persistence.mountPath }}
-            {{- end }}
 
       volumes:
         - name: tmp

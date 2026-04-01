@@ -466,7 +466,7 @@ The stack includes three complementary observability pillars:
 
 | Feature | Package | Install |
 |---------|---------|---------|
-| **Structured JSON logging** | `python-json-logger` | included by default |
+| **Structured JSON logging** | `python-json-logger` | `uv sync --extra observability` |
 | **Prometheus metrics** | `prometheus-client` | `uv sync --extra observability` |
 | **OpenTelemetry tracing** | `opentelemetry-sdk` | `uv sync --extra observability` |
 
