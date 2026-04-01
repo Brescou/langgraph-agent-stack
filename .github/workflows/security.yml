@@ -26,6 +26,10 @@ on:
     # Every Monday at 06:00 UTC — catches newly disclosed CVEs between PRs
     - cron: "0 6 * * 1"
 
+permissions:
+  contents: read
+  security-events: write
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
