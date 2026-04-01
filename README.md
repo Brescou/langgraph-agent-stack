@@ -7,7 +7,7 @@
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.2%2B-orange)](https://langchain-ai.github.io/langgraph/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688)](https://fastapi.tiangolo.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![CI](https://github.com/your-org/langgraph-agent-stack/actions/workflows/ci.yml/badge.svg)](https://github.com/your-org/langgraph-agent-stack/actions/workflows/ci.yml)
+[![CI](https://github.com/brescou/langgraph-agent-stack/actions/workflows/ci.yml/badge.svg)](https://github.com/brescou/langgraph-agent-stack/actions/workflows/ci.yml)
 
 ## What is this?
 
@@ -70,7 +70,7 @@ User Query
 **1. Clone and install dependencies**
 
 ```bash
-git clone https://github.com/your-org/langgraph-agent-stack.git
+git clone https://github.com/brescou/langgraph-agent-stack.git
 cd langgraph-agent-stack
 uv sync
 ```
@@ -433,4 +433,4 @@ See `examples/README.md` for architecture details.
 
 ## License
 
-MIT © [your-org](https://github.com/your-org)
+MIT © [brescou](https://github.com/brescou)
