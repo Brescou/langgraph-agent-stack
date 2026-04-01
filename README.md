@@ -28,6 +28,7 @@ User Query
 │   POST /run/stream ────────────────────────────┐  │  │
 │   POST /research ─────────────────────────┐   │  │  │
 │   GET  /health                            │   │  │  │
+│   GET  /ready                             │   │  │  │
 │   GET  /sessions/{id}/history             │   │  │  │
 └───────────────────────────────────────────┼───┼──┼──┘
                                             │   │  │
@@ -214,6 +215,8 @@ In production, set `secrets.existingSecret` to point to a secret managed by the 
 
 Terraform modules for GKE (Autopilot) and EKS in `infra/terraform/`.
 
+> **Important:** By default, Terraform state is stored locally. For production or team use, configure a remote backend (GCS or S3) in `infra/terraform/versions.tf` before running `terraform apply`. See the comments in that file for instructions.
+
 ```bash
 cd infra/terraform
 terraform init
@@ -236,7 +239,8 @@ terraform apply -var-file=environments/dev.tfvars \
 | `POST` | `/run` | Run the full Research + Analysis pipeline. Returns a structured `AnalysisReport`. |
 | `POST` | `/run/stream` | Same pipeline streamed as Server-Sent Events. |
 | `POST` | `/research` | Run the Research phase only. Returns a `ResearchResult` without downstream analysis. |
-| `GET` | `/health` | Liveness and readiness probe. Returns service status, version, uptime, and environment. |
+| `GET` | `/health` | Liveness probe. Returns service status, version, uptime, and environment. |
+| `GET` | `/ready` | Readiness probe. Returns 200 when LLM and checkpointer are initialised; 503 otherwise. |
 | `GET` | `/sessions/{session_id}/history` | Retrieve all run records for a session, ordered newest-first. |
 
 ---
@@ -348,7 +352,7 @@ This endpoint is exempt from rate limiting so Kubernetes probes are never blocke
 
 **Bearer token authentication**
 
-Set `API_KEY` in your environment to enable authentication. When set, all requests to pipeline endpoints must include an `Authorization: Bearer <token>` header. The `/health`, `/docs`, `/redoc`, and `/openapi.json` endpoints are always exempt.
+Set `API_KEY` in your environment to enable authentication. When set, all requests to pipeline endpoints must include an `Authorization: Bearer <token>` header. The `/health`, `/ready`, `/docs`, `/redoc`, and `/openapi.json` endpoints are always exempt.
 
 ```bash
 curl -X POST http://localhost:8000/run \
@@ -358,6 +362,16 @@ curl -X POST http://localhost:8000/run \
 ```
 
 Leave `API_KEY` unset to disable authentication (suitable for internal deployments behind a gateway).
+
+**CORS**
+
+The template ships with `allow_origins=["*"]` for maximum compatibility during development. **For production deployments**, restrict this to your trusted frontend origins:
+
+```python
+allow_origins=["https://your-frontend.example.com"]
+```
+
+Never combine `allow_origins=["*"]` with `allow_credentials=True`.
 
 **Rate limiting**
 
@@ -369,7 +383,7 @@ All queries are validated by `InputValidator` before reaching agent code. Querie
 
 **Security headers**
 
-Every response includes `X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection`, `Referrer-Policy`, and `Cache-Control: no-store`. The `Server` header is stripped to avoid advertising the runtime stack.
+Every response includes `X-Content-Type-Options`, `X-Frame-Options`, `Content-Security-Policy: default-src 'self'`, `Referrer-Policy`, and `Cache-Control: no-store`. The `Server` header is stripped to avoid advertising the runtime stack.
 
 **Log sanitization**
 
@@ -476,13 +490,41 @@ Both checks run automatically in CI on every push and pull request via `.github/
 
 ### Makefile shortcuts
 
+Run `make help` to list all targets. Key commands:
+
 ```bash
-make install    # uv sync --all-extras
-make test       # uv run pytest
-make lint       # uv run ruff check .
-make check      # lint + format check (CI)
-make docker-run # docker compose up --build
-make helm-lint  # validate Helm chart
+# Development
+make install       # uv sync --all-extras
+make run           # Start API server with hot reload
+make run-ollama    # Start API server using Ollama provider
+
+# Quality
+make test          # Run test suite with verbose output
+make test-cov      # Run tests with coverage report
+make lint          # Check code style with ruff
+make format        # Format source code with black
+make check         # Lint + format check without modifying (CI mode)
+
+# Docker
+make docker-build  # Build the Docker image
+make docker-run    # Start all services with docker compose
+make docker-redis  # Start all services including Redis profile
+make docker-down   # Stop and remove all containers
+
+# Helm
+make helm-lint     # Lint the Helm chart
+make helm-dev      # Deploy to dev environment
+make helm-prod     # Deploy to production environment
+make helm-dry-run  # Simulate a Helm install
+make helm-uninstall # Uninstall the Helm release
+
+# Terraform
+make tf-init       # Initialize Terraform working directory
+make tf-plan       # Generate Terraform execution plan
+make tf-apply      # Apply the Terraform plan
+
+# Utilities
+make clean         # Remove build artifacts and caches
 ```
 
 ### Project structure

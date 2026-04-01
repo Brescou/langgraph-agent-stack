@@ -13,8 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - OTel `insecure=True` conditional on `OTEL_EXPORTER_OTLP_INSECURE` or localhost endpoint
 - LLM retry with backoff activated in all 6 agent graph nodes
 - `Content-Security-Policy: default-src 'self'` header (replaces deprecated `X-XSS-Protection`)
+- Helm NetworkPolicy template (opt-in via `networkPolicy.enabled`)
 - Tests: SSE done event validation, timeout error event, shutdown 503 guard, rate limiting on /research, auth exempt paths, Redis/Postgres checkpointer mocks, populated session history
 - Tests: all 5 security headers asserted (CSP, Referrer-Policy, Cache-Control, X-Frame-Options, X-Content-Type-Options)
+- Tests: `/ready` endpoint (200 OK, 503 LLM not init, 503 shutting down)
+- Tests: `/health` with LLM initialised — regression test for `llm_provider.value` bug
+- Tests: vectorstore happy path (Chroma + PGVector with mocked imports)
+- Tests: `recall_history` tool (empty, populated, error, no-summary-key)
+- Tests: Tavily/SerpAPI search provider branches (success + ImportError)
+- CORS production hardening documented in README Security section
+- Terraform remote state backend warning and instructions in `versions.tf`
+- All 20+ Makefile targets documented in README
 
 ### Changed
 - `_node_validate` defaults to `is_sufficient=False` on error (fail-close instead of fail-open)
@@ -27,15 +36,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Security workflow `pip-audit` syncs with `--extra anthropic` to match production image
 - `analyst.py` except blocks now log `exc_info=True` for debugging
 - `_extract_text_content` used consistently in all fallback paths
+- Rate limit middleware now excludes `/ready` alongside `/health`
 
 ### Fixed
+- **CRITICAL**: `settings.llm_provider.value` → `settings.llm_provider` — `LLMProvider` is `Literal` (str), not Enum; `.value` caused `AttributeError` on `/health`
 - `_APP_VERSION` and `Chart.yaml` aligned to `0.2.0`
 - `Chart.yaml` maintainer `your-name` → `brescou`
 - `docs/security.md` link `your-org` → `brescou`
 - Terraform secrets: `data` → `string_data` (GKE and EKS modules)
-- Helm ConfigMap: conditional `REDIS_URL` when `memoryBackend=redis`
+- Helm: moved `REDIS_URL` from ConfigMap to Secret (passwords must not be in cleartext ConfigMaps)
 - `CLAUDE.md` directory tree: added `core/observability.py`
-- Dockerfile: documented `--build-arg LLM_EXTRAS` for Redis/Postgres production builds
+- Dockerfile: pinned base images by SHA digest; documented `--build-arg LLM_EXTRAS`
 
 ## [0.2.0] - 2026-04-01
 
