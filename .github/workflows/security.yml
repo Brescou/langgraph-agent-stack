@@ -109,7 +109,7 @@ jobs:
       - name: Install production dependencies
         # Install only production deps to audit what actually ships in the image.
         # pip-audit is added as a temporary tool install, not a project dependency.
-        run: uv sync --frozen --no-dev
+        run: uv sync --frozen --no-dev --extra anthropic
 
       - name: Install pip-audit
         run: uv tool install pip-audit
