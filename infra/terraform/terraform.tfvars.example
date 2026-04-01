@@ -1,0 +1,23 @@
+# ---------------------------------------------------------------------------
+# Example variable values — copy to terraform.tfvars and fill in real values
+# ---------------------------------------------------------------------------
+
+cloud_provider = "gke"
+environment    = "dev"
+
+# LLM / application
+llm_provider      = "anthropic"
+anthropic_api_key = ""   # set via TF_VAR_anthropic_api_key or a secrets manager
+
+# Kubernetes / Helm
+namespace       = "langgraph-agents"
+helm_chart_path = "../helm/langgraph-agent-stack"
+
+# GKE-specific (required when cloud_provider = "gke")
+project_id   = "my-gcp-project"
+region       = "us-central1"
+cluster_name = "langgraph-cluster"
+
+# EKS-specific (required when cloud_provider = "eks")
+aws_region       = "us-east-1"
+eks_cluster_name = "langgraph-cluster"

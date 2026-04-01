@@ -5,6 +5,7 @@ image:
 
 config:
   environment: production
+  memoryBackend: redis
 
 resources:
   requests:

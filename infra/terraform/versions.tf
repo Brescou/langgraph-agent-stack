@@ -20,3 +20,19 @@ terraform {
     }
   }
 }
+
+# To enable remote state (REQUIRED for team/production use), add a backend block:
+# 
+# For GCP:
+#   backend "gcs" {
+#     bucket = "your-terraform-state-bucket"
+#     prefix = "langgraph-agent-stack"
+#   }
+#
+# For AWS:
+#   backend "s3" {
+#     bucket         = "your-terraform-state-bucket"
+#     key            = "langgraph-agent-stack/terraform.tfstate"
+#     region         = "us-east-1"
+#     dynamodb_table = "terraform-locks"
+#   }

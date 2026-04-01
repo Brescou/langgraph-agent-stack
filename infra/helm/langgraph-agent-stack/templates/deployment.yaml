@@ -8,7 +8,9 @@ metadata:
     app.kubernetes.io/component: api
     app.kubernetes.io/part-of: {{ include "langgraph-agent-stack.name" . }}
 spec:
+{{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
+{{- end }}
 
   selector:
     matchLabels:
@@ -38,7 +40,7 @@ spec:
       securityContext:
         runAsNonRoot: {{ .Values.podSecurityContext.runAsNonRoot }}
         runAsUser: {{ .Values.podSecurityContext.runAsUser }}
-        runAsGroup: {{ .Values.podSecurityContext.runAsUser }}
+        runAsGroup: {{ .Values.podSecurityContext.runAsGroup | default .Values.podSecurityContext.runAsUser }}
         fsGroup: {{ .Values.podSecurityContext.fsGroup }}
         seccompProfile:
           type: RuntimeDefault
@@ -47,7 +49,7 @@ spec:
 
       containers:
         - name: api
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
 
           ports:

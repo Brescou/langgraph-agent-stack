@@ -56,7 +56,7 @@ services:
       - redis
     ports:
       - "6379:6379"
-    command: redis-server --save 60 1 --loglevel warning
+    command: redis-server --save 60 1 --loglevel warning --requirepass ${REDIS_PASSWORD:-changeme}
     volumes:
       - redis-data:/data
     healthcheck:

@@ -1,0 +1,14 @@
+{{- if .Values.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "langgraph-agent-stack.fullname" . }}
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- include "langgraph-agent-stack.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "langgraph-agent-stack.selectorLabels" . | nindent 6 }}
+{{- end }}

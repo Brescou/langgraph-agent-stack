@@ -12,7 +12,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # Install uv from the official installer (no pip, no poetry)
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
-    && curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && curl -LsSf https://astral.sh/uv/${UV_VERSION}/install.sh | sh \
     && apt-get purge -y --auto-remove curl \
     && rm -rf /var/lib/apt/lists/*
 
@@ -32,7 +32,7 @@ COPY uv.lock* ./
 # --no-dev  : skip development dependencies
 # LLM_EXTRAS: provider extras to include (e.g. "anthropic", "openai", "all-providers")
 ARG LLM_EXTRAS="anthropic"
-RUN uv sync --frozen --no-dev --extra ${LLM_EXTRAS}
+RUN uv sync --locked --no-dev --extra ${LLM_EXTRAS}
 
 # =============================================================================
 # Stage 2 — runtime

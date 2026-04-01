@@ -26,7 +26,7 @@ resource "google_container_cluster" "main" {
     workload_pool = "${var.project_id}.svc.id.goog"
   }
 
-  deletion_protection = var.environment == "production" ? true : false
+  deletion_protection = var.environment == "prod" ? true : false
 }
 
 # ---------------------------------------------------------------------------
