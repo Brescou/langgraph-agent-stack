@@ -456,11 +456,12 @@ class ConversationMemory:
         Raises:
             sqlite3.Error: On database read failure.
         """
-        row = self._conn.execute(
-            "SELECT id, run_id, query, result_json, metadata_json, created_at "
-            "FROM runs WHERE run_id = ?",
-            (run_id,),
-        ).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id, run_id, query, result_json, metadata_json, created_at "
+                "FROM runs WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
 
         if row is None:
             return None
@@ -487,11 +488,12 @@ class ConversationMemory:
         if limit < 1:
             raise ValueError(f"list_runs: limit must be >= 1, got {limit}.")
 
-        rows = self._conn.execute(
-            "SELECT id, run_id, query, result_json, metadata_json, created_at "
-            "FROM runs ORDER BY created_at DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, run_id, query, result_json, metadata_json, created_at "
+                "FROM runs ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
 
         return [self._row_to_dict(row) for row in rows]
 
@@ -520,13 +522,14 @@ class ConversationMemory:
         if limit < 1:
             raise ValueError(f"list_runs_by_session: limit must be >= 1, got {limit}.")
 
-        rows = self._conn.execute(
-            "SELECT id, run_id, query, result_json, metadata_json, created_at "
-            "FROM runs "
-            "WHERE json_extract(metadata_json, '$.session_id') = ? "
-            "ORDER BY created_at DESC LIMIT ?",
-            (session_id, limit),
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, run_id, query, result_json, metadata_json, created_at "
+                "FROM runs "
+                "WHERE json_extract(metadata_json, '$.session_id') = ? "
+                "ORDER BY created_at DESC LIMIT ?",
+                (session_id, limit),
+            ).fetchall()
 
         return [self._row_to_dict(row) for row in rows]
 

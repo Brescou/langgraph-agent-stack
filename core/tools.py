@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import ast
 import logging
+import math
 import operator
 import os
 from typing import Any
@@ -376,8 +377,11 @@ def create_calculator_tool() -> BaseTool:
                 "Calculator evaluated",
                 extra={"expression": expr, "result": result},
             )
-            # Format: suppress trailing ".0" for whole-number float results
-            if isinstance(result, float) and result == int(result):
+            if (
+                isinstance(result, float)
+                and math.isfinite(result)
+                and result == int(result)
+            ):
                 return str(int(result))
             return str(result)
 

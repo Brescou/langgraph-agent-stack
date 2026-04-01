@@ -273,39 +273,6 @@ async def add_security_headers(request: Request, call_next: Any) -> Any:
 
 
 # ---------------------------------------------------------------------------
-# Rate-limiting middleware
-# ---------------------------------------------------------------------------
-
-
-@app.middleware("http")
-async def rate_limit_middleware(request: Request, call_next: Any) -> Any:
-    """
-    Enforce a per-IP sliding-window rate limit on all incoming requests.
-
-    The health endpoint is excluded so Kubernetes probes are never blocked.
-    When a client exceeds the limit a ``429 Too Many Requests`` response is
-    returned immediately without forwarding the request to any handler.
-    """
-    if request.url.path == "/health":
-        return await call_next(request)
-
-    client_ip: str = request.client.host if request.client else "unknown"
-    if not _rate_limiter.is_allowed(client_ip):
-        logger.warning(
-            "Rate limit exceeded",
-            extra={"client": client_ip, "path": request.url.path},
-        )
-        return Response(
-            content='{"detail":"Rate limit exceeded. Please slow down."}',
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            media_type="application/json",
-            headers={"Retry-After": str(int(_rate_limiter.window_seconds))},
-        )
-
-    return await call_next(request)
-
-
-# ---------------------------------------------------------------------------
 # Auth middleware
 # ---------------------------------------------------------------------------
 
@@ -356,6 +323,39 @@ async def auth_middleware(request: Request, call_next: Any) -> Any:
             content={"detail": "Invalid or missing Bearer token."},
             headers={"WWW-Authenticate": "Bearer"},
         )
+    return await call_next(request)
+
+
+# ---------------------------------------------------------------------------
+# Rate-limiting middleware
+# ---------------------------------------------------------------------------
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next: Any) -> Any:
+    """
+    Enforce a per-IP sliding-window rate limit on all incoming requests.
+
+    The health endpoint is excluded so Kubernetes probes are never blocked.
+    When a client exceeds the limit a ``429 Too Many Requests`` response is
+    returned immediately without forwarding the request to any handler.
+    """
+    if request.url.path == "/health":
+        return await call_next(request)
+
+    client_ip: str = request.client.host if request.client else "unknown"
+    if not _rate_limiter.is_allowed(client_ip):
+        logger.warning(
+            "Rate limit exceeded",
+            extra={"client": client_ip, "path": request.url.path},
+        )
+        return Response(
+            content='{"detail":"Rate limit exceeded. Please slow down."}',
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            media_type="application/json",
+            headers={"Retry-After": str(int(_rate_limiter.window_seconds))},
+        )
+
     return await call_next(request)
 
 
@@ -680,10 +680,13 @@ async def _stream_pipeline(
         yield f"data: {json.dumps({'type': 'status', 'message': 'Starting research phase...'})}\n\n"
 
         loop = asyncio.get_running_loop()
+        llm = get_shared_llm()
+        checkpointer = get_shared_checkpointer()
+
         research_agent = ResearchAgent(
             thread_id=session_id,
-            llm=_shared_llm,
-            checkpointer=_shared_checkpointer,
+            llm=llm,
+            checkpointer=checkpointer,
         )
         research_result = await loop.run_in_executor(
             _executor, research_agent.run_structured, query
@@ -694,8 +697,8 @@ async def _stream_pipeline(
 
         analyst_agent = AnalystAgent(
             thread_id=session_id,
-            llm=_shared_llm,
-            checkpointer=_shared_checkpointer,
+            llm=llm,
+            checkpointer=checkpointer,
         )
         report = await loop.run_in_executor(
             _executor, analyst_agent.run_structured, research_result
@@ -741,13 +744,13 @@ async def _stream_pipeline(
             "POST /run/stream — pipeline timeout",
             extra={"run_id": run_id, "error": str(exc)},
         )
-        yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+        yield f"data: {json.dumps({'type': 'error', 'message': 'The pipeline timed out. Try a simpler query.'})}\n\n"
     except (AgentExecutionError, AgentValidationError) as exc:
         logger.error(
             "POST /run/stream — pipeline error",
             extra={"run_id": run_id, "error": str(exc)},
         )
-        yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+        yield f"data: {json.dumps({'type': 'error', 'message': 'The pipeline encountered an error.'})}\n\n"
     except Exception as exc:
         logger.exception(
             "POST /run/stream — unexpected error",
