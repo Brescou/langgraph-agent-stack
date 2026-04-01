@@ -41,7 +41,7 @@ import ast
 import logging
 import operator
 import os
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import quote_plus
 
 from langchain_core.tools import BaseTool, tool
@@ -478,7 +478,7 @@ def create_memory_tool(memory: ConversationMemory) -> BaseTool:
 
 
 def get_default_tools(
-    memory: Optional[ConversationMemory] = None,
+    memory: ConversationMemory | None = None,
 ) -> list[BaseTool]:
     """
     Return the standard set of tools used by agents in this stack.

@@ -23,9 +23,8 @@ import asyncio
 import logging
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
-from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 from typing_extensions import TypedDict
@@ -33,7 +32,6 @@ from typing_extensions import TypedDict
 from agents.analyst import AnalysisReport, AnalystAgent
 from agents.base_agent import AgentError, AgentExecutionError, AgentValidationError
 from agents.researcher import ResearchAgent, ResearchResult
-from core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -57,9 +55,9 @@ class OrchestratorState(TypedDict, total=False):
     """
 
     query: str
-    research_result: Optional[dict[str, Any]]
-    analysis_report: Optional[dict[str, Any]]
-    error: Optional[str]
+    research_result: dict[str, Any] | None
+    analysis_report: dict[str, Any] | None
+    error: str | None
     status: str
     metadata: dict[str, Any]
 
@@ -89,7 +87,7 @@ class MultiAgentGraph:
         AgentExecutionError: When either agent fails during the pipeline run.
     """
 
-    def __init__(self, run_id: Optional[str] = None) -> None:
+    def __init__(self, run_id: str | None = None) -> None:
         self.run_id: str = run_id or str(uuid.uuid4())
         self._checkpointer = MemorySaver()
         self._graph = self._build_graph()

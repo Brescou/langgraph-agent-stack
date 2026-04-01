@@ -25,6 +25,7 @@ class MemoryBackend(StrEnum):
 
     SQLITE = "sqlite"
     REDIS = "redis"
+    POSTGRES = "postgres"
 
 
 class LogLevel(StrEnum):
@@ -120,6 +121,17 @@ class Settings(BaseSettings):
         default="./data/agent_memory.db",
         description="Path to the SQLite database file (dev/test only).",
     )
+    postgres_url: str | None = Field(
+        default=None,
+        validation_alias="POSTGRES_URL",
+        description="PostgreSQL DSN (required when memory_backend=postgres). "
+        "Example: postgresql+psycopg://user:pass@localhost:5432/dbname",
+    )
+    rag_enabled: bool = Field(
+        default=False,
+        validation_alias="RAG_ENABLED",
+        description="Enable RAG (Retrieval-Augmented Generation) via a vector store.",
+    )
 
     # --- Logging ---
     log_level: LogLevel = Field(
@@ -151,6 +163,12 @@ class Settings(BaseSettings):
         ge=1,
         le=100,
         description="Hard cap on total graph steps per agent run.",
+    )
+    stream_timeout_seconds: int = Field(
+        default=120,
+        ge=1,
+        description="Maximum wall-clock seconds allowed for a streaming SSE pipeline run.",
+        validation_alias="STREAM_TIMEOUT_SECONDS",
     )
 
     # --- Environment tag (informational) ---

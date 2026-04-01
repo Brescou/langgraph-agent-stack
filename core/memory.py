@@ -22,6 +22,13 @@ Backend matrix
 |                   |                               | ``langgraph-checkpoint-   |
 |                   |                               | redis`` package.          |
 +-------------------+-------------------------------+---------------------------+
+| ``postgres``      | ``AsyncPostgresSaver``        | Requires                  |
+|                   |                               | ``langgraph-checkpoint-   |
+|                   |                               | postgres`` package.       |
+|                   |                               | Install with:             |
+|                   |                               | ``uv sync --extra         |
+|                   |                               | postgres``                |
++-------------------+-------------------------------+---------------------------+
 | fallback / error  | ``MemorySaver``               | In-process only; loses    |
 |                   |                               | state on restart.         |
 +-------------------+-------------------------------+---------------------------+
@@ -45,12 +52,12 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-import uuid
+from collections.abc import Generator
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from types import TracebackType
-from typing import Any, Generator, Optional, Type
+from typing import Any
 
 from langgraph.checkpoint.memory import MemorySaver
 
@@ -74,17 +81,19 @@ def create_checkpointer(settings: Settings) -> Any:
 
     Args:
         settings: The application ``Settings`` instance.  Read fields:
-            ``memory_backend``, ``sqlite_path``, ``redis_url``.
+            ``memory_backend``, ``sqlite_path``, ``redis_url``, ``postgres_url``.
 
     Returns:
         A configured LangGraph ``BaseCheckpointSaver`` instance.  The exact
         concrete type depends on the resolved backend:
 
-        * ``SqliteSaver`` — when ``memory_backend == MemoryBackend.SQLITE``
+        * ``SqliteSaver``          — when ``memory_backend == MemoryBackend.SQLITE``
           and ``langgraph-checkpoint-sqlite`` is installed.
-        * ``RedisSaver``  — when ``memory_backend == MemoryBackend.REDIS``
+        * ``RedisSaver``           — when ``memory_backend == MemoryBackend.REDIS``
           and ``langgraph-checkpoint-redis`` is installed.
-        * ``MemorySaver`` — fallback for all other cases.
+        * ``AsyncPostgresSaver``   — when ``memory_backend == MemoryBackend.POSTGRES``
+          and ``langgraph-checkpoint-postgres`` is installed.
+        * ``MemorySaver``          — fallback for all other cases.
     """
     backend = settings.memory_backend
 
@@ -93,6 +102,9 @@ def create_checkpointer(settings: Settings) -> Any:
 
     if backend == MemoryBackend.REDIS:
         return _create_redis_checkpointer(settings.redis_url)
+
+    if backend == MemoryBackend.POSTGRES:
+        return _create_postgres_checkpointer(settings.postgres_url)
 
     logger.warning(
         "Unknown memory_backend %r — falling back to MemorySaver.",
@@ -166,6 +178,52 @@ def _create_redis_checkpointer(redis_url: str) -> Any:
             "langgraph-checkpoint-redis not installed — falling back to "
             "MemorySaver.  Install with: pip install langgraph-checkpoint-redis",
             extra={"redis_url": redis_url},
+        )
+        return MemorySaver()
+
+
+def _create_postgres_checkpointer(postgres_url: str | None) -> Any:
+    """
+    Build an ``AsyncPostgresSaver`` checkpointer connected to ``postgres_url``.
+
+    The ``POSTGRES_URL`` environment variable must be set when
+    ``MEMORY_BACKEND=postgres``.  Falls back to ``MemorySaver`` when the
+    ``langgraph-checkpoint-postgres`` package is not installed.
+
+    Args:
+        postgres_url: PostgreSQL DSN string, e.g.
+            ``postgresql+psycopg://user:pass@localhost:5432/dbname``.
+            When ``None`` a warning is emitted and the in-process
+            ``MemorySaver`` is returned.
+
+    Returns:
+        An ``AsyncPostgresSaver`` instance, or a ``MemorySaver`` on import
+        failure or missing URL.
+    """
+    if not postgres_url:
+        logger.warning(
+            "MEMORY_BACKEND=postgres but POSTGRES_URL is not set — "
+            "falling back to MemorySaver."
+        )
+        return MemorySaver()
+
+    try:
+        from langgraph.checkpoint.postgres.aio import (
+            AsyncPostgresSaver,  # type: ignore[import]
+        )
+
+        checkpointer = AsyncPostgresSaver.from_conn_string(postgres_url)
+        logger.info(
+            "Checkpointer: AsyncPostgresSaver initialised",
+            extra={"url": postgres_url.split("@")[-1]},  # omit credentials
+        )
+        return checkpointer
+
+    except ImportError:
+        logger.warning(
+            "langgraph-checkpoint-postgres not installed — falling back to "
+            "MemorySaver.  Install with: uv sync --extra postgres",
+            extra={"postgres_url": postgres_url.split("@")[-1]},
         )
         return MemorySaver()
 
@@ -247,15 +305,15 @@ class ConversationMemory:
     # Context manager protocol
     # ------------------------------------------------------------------
 
-    def __enter__(self) -> "ConversationMemory":
+    def __enter__(self) -> ConversationMemory:
         """Return self so the instance can be used as a context manager."""
         return self
 
     def __exit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         """Close the database connection on exit, regardless of exceptions."""
         self.close()
@@ -306,7 +364,7 @@ class ConversationMemory:
         run_id: str,
         query: str,
         result: dict[str, Any],
-        metadata: Optional[dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """
         Persist the outcome of a single agent run.
@@ -338,7 +396,7 @@ class ConversationMemory:
         metadata_json = json.dumps(
             metadata or {}, ensure_ascii=False, default=str
         )
-        created_at = datetime.now(timezone.utc).isoformat()
+        created_at = datetime.now(UTC).isoformat()
 
         with self._transaction():
             self._conn.execute(
@@ -363,7 +421,7 @@ class ConversationMemory:
     # Read operations
     # ------------------------------------------------------------------
 
-    def get_run(self, run_id: str) -> Optional[dict[str, Any]]:
+    def get_run(self, run_id: str) -> dict[str, Any] | None:
         """
         Retrieve a single run record by its ``run_id``.
 
