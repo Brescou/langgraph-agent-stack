@@ -28,7 +28,7 @@ COPY README.md .
 COPY uv.lock* ./
 
 # Install production dependencies into an explicit virtual environment
-# --frozen  : respect the lockfile if present, fail if out of date
+# --locked  : respect the lockfile if present, fail if out of date
 # --no-dev  : skip development dependencies
 # LLM_EXTRAS: provider extras to include (e.g. "anthropic", "openai", "all-providers")
 ARG LLM_EXTRAS="anthropic"
