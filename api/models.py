@@ -12,9 +12,13 @@ on the response models so the conversion logic stays co-located with the schema.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from agents.analyst import AnalysisReport
+    from agents.researcher import ResearchResult
 
 # ---------------------------------------------------------------------------
 # Session history models
@@ -59,14 +63,16 @@ class HistoryResponse(BaseModel):
 class ComponentHealth(BaseModel):
     """Health status of a single infrastructure component."""
 
-    status: str = Field(description="'ok' or 'degraded'.", examples=["ok"])
+    status: Literal["ok", "degraded"] = Field(
+        description="'ok' or 'degraded'.", examples=["ok"]
+    )
     detail: str = Field(default="", description="Additional diagnostic information.")
 
 
 class HealthResponse(BaseModel):
     """Response schema for ``GET /health``."""
 
-    status: str = Field(
+    status: Literal["ok", "degraded"] = Field(
         description="Service health status: 'ok' or 'degraded'.",
         examples=["ok"],
     )
@@ -147,7 +153,9 @@ class RunResponse(BaseModel):
     )
 
     @classmethod
-    def from_analysis_report(cls, report: Any, session_id: str = "") -> RunResponse:
+    def from_analysis_report(
+        cls, report: AnalysisReport, session_id: str = ""
+    ) -> RunResponse:
         """
         Build a ``RunResponse`` from an ``AnalysisReport`` dataclass instance.
 
@@ -221,7 +229,7 @@ class ResearchResponse(BaseModel):
 
     @classmethod
     def from_research_result(
-        cls, result: Any, session_id: str = ""
+        cls, result: ResearchResult, session_id: str = ""
     ) -> ResearchResponse:
         """
         Build a ``ResearchResponse`` from a ``ResearchResult`` dataclass instance.

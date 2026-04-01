@@ -24,6 +24,7 @@ Architecture notes
 from __future__ import annotations
 
 import asyncio
+import functools
 import hmac
 import json
 import logging
@@ -184,17 +185,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 # ---------------------------------------------------------------------------
 
 
+_init_lock = threading.Lock()
+
+
 def get_shared_llm() -> BaseChatModel | None:
     """Return the shared LLM, retrying init if the first attempt failed."""
+    global _shared_llm
     if _shared_llm is None:
-        _init_llm_and_checkpointer(get_settings())
+        with _init_lock:
+            if _shared_llm is None:
+                _init_llm_and_checkpointer(get_settings())
     return _shared_llm
 
 
 def get_shared_checkpointer() -> Any | None:
     """Return the shared checkpointer, retrying init if the first attempt failed."""
+    global _shared_checkpointer
     if _shared_checkpointer is None:
-        _init_llm_and_checkpointer(get_settings())
+        with _init_lock:
+            if _shared_checkpointer is None:
+                _init_llm_and_checkpointer(get_settings())
     return _shared_checkpointer
 
 
@@ -263,6 +273,39 @@ async def add_security_headers(request: Request, call_next: Any) -> Any:
 
 
 # ---------------------------------------------------------------------------
+# Rate-limiting middleware
+# ---------------------------------------------------------------------------
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next: Any) -> Any:
+    """
+    Enforce a per-IP sliding-window rate limit on all incoming requests.
+
+    The health endpoint is excluded so Kubernetes probes are never blocked.
+    When a client exceeds the limit a ``429 Too Many Requests`` response is
+    returned immediately without forwarding the request to any handler.
+    """
+    if request.url.path == "/health":
+        return await call_next(request)
+
+    client_ip: str = request.client.host if request.client else "unknown"
+    if not _rate_limiter.is_allowed(client_ip):
+        logger.warning(
+            "Rate limit exceeded",
+            extra={"client": client_ip, "path": request.url.path},
+        )
+        return Response(
+            content='{"detail":"Rate limit exceeded. Please slow down."}',
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            media_type="application/json",
+            headers={"Retry-After": str(int(_rate_limiter.window_seconds))},
+        )
+
+    return await call_next(request)
+
+
+# ---------------------------------------------------------------------------
 # Auth middleware
 # ---------------------------------------------------------------------------
 
@@ -313,39 +356,6 @@ async def auth_middleware(request: Request, call_next: Any) -> Any:
             content={"detail": "Invalid or missing Bearer token."},
             headers={"WWW-Authenticate": "Bearer"},
         )
-    return await call_next(request)
-
-
-# ---------------------------------------------------------------------------
-# Rate-limiting middleware
-# ---------------------------------------------------------------------------
-
-
-@app.middleware("http")
-async def rate_limit_middleware(request: Request, call_next: Any) -> Any:
-    """
-    Enforce a per-IP sliding-window rate limit on all incoming requests.
-
-    The health endpoint is excluded so Kubernetes probes are never blocked.
-    When a client exceeds the limit a ``429 Too Many Requests`` response is
-    returned immediately without forwarding the request to any handler.
-    """
-    if request.url.path == "/health":
-        return await call_next(request)
-
-    client_ip: str = request.client.host if request.client else "unknown"
-    if not _rate_limiter.is_allowed(client_ip):
-        logger.warning(
-            "Rate limit exceeded",
-            extra={"client": client_ip, "path": request.url.path},
-        )
-        return Response(
-            content='{"detail":"Rate limit exceeded. Please slow down."}',
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            media_type="application/json",
-            headers={"Retry-After": str(int(_rate_limiter.window_seconds))},
-        )
-
     return await call_next(request)
 
 
@@ -543,6 +553,12 @@ async def run_pipeline(
             detail="Query must not be empty.",
         )
 
+    if get_shared_llm() is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="LLM provider is not configured. Check server logs.",
+        )
+
     session_id = body.session_id or str(uuid.uuid4())
     run_id = str(uuid.uuid4())
     logger.info(
@@ -695,14 +711,30 @@ async def _stream_pipeline(
         )
 
         if _shared_memory is not None:
-            _shared_memory.save_run(
-                run_id=run_id,
-                query=query,
-                result=report.to_dict(),
-                metadata={"session_id": session_id, "agent": "stream_pipeline"},
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(
+                _executor,
+                functools.partial(
+                    _shared_memory.save_run,
+                    run_id=run_id,
+                    query=query,
+                    result=report.to_dict(),
+                    metadata={"session_id": session_id, "agent": "stream_pipeline"},
+                ),
             )
 
-        yield f"data: {json.dumps({'type': 'done', 'run_id': run_id, 'session_id': session_id, 'executive_summary': report.executive_summary, 'key_insights': report.key_insights, 'patterns': report.patterns, 'implications': report.implications, 'confidence': report.confidence, 'research_summary': report.research_summary})}\n\n"
+        done_payload = {
+            "type": "done",
+            "run_id": run_id,
+            "session_id": session_id,
+            "executive_summary": report.executive_summary,
+            "key_insights": report.key_insights,
+            "patterns": report.patterns,
+            "implications": report.implications,
+            "confidence": report.confidence,
+            "research_summary": report.research_summary,
+        }
+        yield f"data: {json.dumps(done_payload)}\n\n"
 
     except AgentTimeoutError as exc:
         logger.error(
@@ -779,6 +811,12 @@ async def run_stream(
             detail="Query must not be empty.",
         )
 
+    if get_shared_llm() is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="LLM provider is not configured. Check server logs.",
+        )
+
     session_id = body.session_id or str(uuid.uuid4())
     run_id = str(uuid.uuid4())
 
@@ -805,6 +843,7 @@ async def run_stream(
         headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
         },
     )
 
@@ -858,6 +897,12 @@ async def run_research(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Query must not be empty.",
+        )
+
+    if get_shared_llm() is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="LLM provider is not configured. Check server logs.",
         )
 
     session_id = body.session_id or str(uuid.uuid4())
