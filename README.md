@@ -13,6 +13,8 @@
 
 Setting up a production-grade multi-agent system from scratch means wiring together an LLM SDK, a graph orchestrator, a persistent memory backend, a hardened API layer, containerization, and Kubernetes manifests — before you write a single line of domain logic. This template does all of that for you. It is aimed at ML and Data Engineers who want a correct, deployable starting point rather than a toy notebook.
 
+The source code implements a Research + Analysis pipeline where two LangGraph agents (`ResearchAgent` and `AnalystAgent`) are orchestrated by a shared graph and served over a FastAPI REST API with SSE streaming.
+
 ## Architecture
 
 ```
@@ -20,19 +22,21 @@ User Query
     │
     ▼
 ┌─────────────────────────────────────────────────────┐
-│  FastAPI  (rate limiting · security headers · CORS)  │
+│  FastAPI  (rate limiting · auth · security headers)  │
 │                                                       │
 │   POST /run ──────────────────────────────────────┐  │
-│   POST /research ─────────────────────────────┐   │  │
-│   GET  /health                                │   │  │
-└───────────────────────────────────────────────┼───┼──┘
-                                                │   │
-                    ┌───────────────────────────┘   │
-                    ▼                               ▼
-         ┌─────────────────┐             ┌─────────────────┐
-         │  ResearchAgent  │             │  ResearchAgent  │
-         │  (LangGraph)    │             │  only           │
-         └────────┬────────┘             └─────────────────┘
+│   POST /run/stream ────────────────────────────┐  │  │
+│   POST /research ─────────────────────────┐   │  │  │
+│   GET  /health                            │   │  │  │
+│   GET  /sessions/{id}/history             │   │  │  │
+└───────────────────────────────────────────┼───┼──┼──┘
+                                            │   │  │
+                    ┌───────────────────────┘   │  │
+                    ▼                           │  │
+         ┌─────────────────┐                   │  │
+         │  ResearchAgent  │◄──────────────────┘  │
+         │  (LangGraph)    │◄─────────────────────┘
+         └────────┬────────┘
                   │ ResearchResult
                   ▼
          ┌─────────────────┐
@@ -41,10 +45,10 @@ User Query
          └────────┬────────┘
                   │ AnalysisReport
                   ▼
-         ┌─────────────────┐
-         │  Memory Backend │
-         │  SQLite / Redis │
-         └─────────────────┘
+         ┌─────────────────────────┐
+         │  Memory Backend         │
+         │  SQLite / Redis / PG    │
+         └─────────────────────────┘
 ```
 
 **Key components**
@@ -54,8 +58,8 @@ User Query
 | `ResearchAgent` | `agents/researcher.py` | Expands queries into sub-queries, retrieves information snippets, validates quality |
 | `AnalystAgent` | `agents/analyst.py` | Consumes research findings, extracts insights, identifies patterns, produces a structured report |
 | `MultiAgentGraph` | `core/graph.py` | LangGraph orchestrator that sequences the two agents with shared state |
-| `core/memory.py` | `core/memory.py` | Pluggable checkpoint backend (SQLite for development, Redis for production) |
-| `core/security.py` | `core/security.py` | Input validation, per-IP rate limiting, API key format checks |
+| `ConversationMemory` | `core/memory.py` | Pluggable checkpoint backend (SQLite, Redis, or PostgreSQL) |
+| `core/security.py` | `core/security.py` | Input validation, per-IP rate limiting, log sanitization |
 | `api/main.py` | `api/main.py` | FastAPI application with lifespan management and thread pool offloading |
 
 ## Quick Start
@@ -65,14 +69,14 @@ User Query
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/getting-started/installation/) (`curl -LsSf https://astral.sh/uv/install.sh | sh`)
 - Docker (optional, for containerized runs)
-- An [Anthropic API key](https://console.anthropic.com)
+- An API key for your chosen LLM provider
 
 **1. Clone and install dependencies**
 
 ```bash
 git clone https://github.com/brescou/langgraph-agent-stack.git
 cd langgraph-agent-stack
-uv sync
+uv sync --extra anthropic
 ```
 
 **2. Configure environment**
@@ -81,15 +85,15 @@ uv sync
 cp .env.example .env
 ```
 
-Open `.env` and set your provider and API key:
+Minimum required variables for the default Anthropic provider:
 
-```
+```env
 LLM_PROVIDER=anthropic
 ANTHROPIC_API_KEY=sk-ant-...
 ANTHROPIC_MODEL=claude-3-5-sonnet-20241022
 ```
 
-All other values have working defaults for local development.
+All other variables have working defaults for local development.
 
 **3. Start the API server**
 
@@ -97,7 +101,7 @@ All other values have working defaults for local development.
 uv run uvicorn api.main:app --reload
 ```
 
-The server starts on `http://localhost:8000`. The interactive API docs are at `http://localhost:8000/docs`.
+The server starts on `http://localhost:8000`. Interactive API docs are at `http://localhost:8000/docs`.
 
 **4. Send your first request**
 
@@ -111,15 +115,15 @@ You will receive a structured `AnalysisReport` with an executive summary, key in
 
 ## LLM Providers
 
-The template supports any LangChain-compatible LLM provider. Set `LLM_PROVIDER` in your `.env` and install the matching extra.
+Set `LLM_PROVIDER` in your `.env` and install the matching extra. Provider-specific packages are imported lazily — only the package you install is required.
 
-| Provider | `LLM_PROVIDER` | Install | Key variable |
-|----------|---------------|---------|--------------|
+| Provider | `LLM_PROVIDER` value | Install extra | Required env vars |
+|----------|----------------------|---------------|-------------------|
 | Anthropic (Claude) | `anthropic` | `uv sync --extra anthropic` | `ANTHROPIC_API_KEY` |
 | OpenAI (GPT) | `openai` | `uv sync --extra openai` | `OPENAI_API_KEY` |
 | Google (Gemini) | `google` | `uv sync --extra google` | `GOOGLE_API_KEY` |
-| AWS Bedrock | `bedrock` | `uv sync --extra bedrock` | `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` |
-| Azure OpenAI | `azure` | `uv sync --extra openai` | `AZURE_OPENAI_API_KEY` + `AZURE_OPENAI_ENDPOINT` |
+| AWS Bedrock | `bedrock` | `uv sync --extra bedrock` | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
+| Azure OpenAI | `azure` | `uv sync --extra openai` | `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT` |
 | Ollama (local) | `ollama` | `uv sync --extra ollama` | None — runs locally |
 
 ### Switching providers
@@ -130,7 +134,9 @@ LLM_PROVIDER=openai
 OPENAI_API_KEY=sk-...
 OPENAI_MODEL=gpt-4o
 ```
-`uv sync --extra openai`
+```bash
+uv sync --extra openai
+```
 
 **Ollama (no API key required):**
 ```env
@@ -138,9 +144,11 @@ LLM_PROVIDER=ollama
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=llama3.2
 ```
-`uv sync --extra ollama`
+```bash
+uv sync --extra ollama
+```
 
-> **Note:** The agents never import provider-specific code directly. The `LLMFactory` in `core/llm.py` resolves the provider at startup, so switching is a one-line `.env` change.
+Agents never import provider-specific code directly. `core/llm.py` resolves the provider at startup via `get_llm()`, so switching is a one-line `.env` change with no code modifications.
 
 ## Running with Docker
 
@@ -156,9 +164,7 @@ Start with Redis as the memory backend:
 docker compose -f infra/docker-compose.yml --profile redis up
 ```
 
-The compose file reads your `.env` file automatically. Make sure it exists before running.
-
-The application is available at `http://localhost:8000` after the health check passes (about 15 seconds on first startup).
+The compose file reads your `.env` file automatically. The application is available at `http://localhost:8000` after the health check passes (about 15 seconds on first startup).
 
 ## Kubernetes Deployment
 
@@ -202,15 +208,7 @@ helm uninstall langgraph -n langgraph-agents
 | `secrets.existingSecret` | `""` | Use an existing Secret (External Secrets Operator) |
 | `serviceAccount.create` | `true` | Create a dedicated ServiceAccount |
 
-### Production secrets
-
 In production, set `secrets.existingSecret` to point to a secret managed by the [External Secrets Operator](https://external-secrets.io) or Sealed Secrets instead of passing keys via `--set`.
-
-```yaml
-# values.prod.yaml (already configured)
-secrets:
-  existingSecret: langgraph-secrets  # chart will not create a Secret
-```
 
 ## Infrastructure as Code
 
@@ -236,20 +234,25 @@ terraform apply -var-file=environments/dev.tfvars \
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/run` | Run the full Research + Analysis pipeline. Returns a structured `AnalysisReport`. |
+| `POST` | `/run/stream` | Same pipeline streamed as Server-Sent Events. |
 | `POST` | `/research` | Run the Research phase only. Returns a `ResearchResult` without downstream analysis. |
 | `GET` | `/health` | Liveness and readiness probe. Returns service status, version, uptime, and environment. |
-| `POST` | `/run/stream` | Execute pipeline and stream results as Server-Sent Events |
-| `GET` | `/sessions/{session_id}/history` | Retrieve run history for a session |
+| `GET` | `/sessions/{session_id}/history` | Retrieve all run records for a session, ordered newest-first. |
+
+---
 
 **POST /run**
 
-```json
-// Request
-{ "query": "string (max 2000 characters)" }
+```bash
+curl -X POST http://localhost:8000/run \
+  -H "Content-Type: application/json" \
+  -d '{"query": "Latest advances in quantum computing"}'
+```
 
-// Response
+```json
 {
   "run_id": "uuid",
+  "session_id": "uuid",
   "summary": "string",
   "key_insights": ["string"],
   "patterns": ["string"],
@@ -260,34 +263,7 @@ terraform apply -var-file=environments/dev.tfvars \
 }
 ```
 
-**POST /research**
-
-```json
-// Request
-{ "query": "string (max 2000 characters)" }
-
-// Response
-{
-  "run_id": "uuid",
-  "summary": "string",
-  "findings": ["string"],
-  "sources": ["string"],
-  "confidence": 0.91,
-  "query": "string",
-  "timestamp": "ISO 8601"
-}
-```
-
-**GET /health**
-
-```json
-{
-  "status": "ok",
-  "version": "0.1.0",
-  "uptime_seconds": 142.3,
-  "environment": "development"
-}
-```
+---
 
 **POST /run/stream**
 
@@ -303,52 +279,194 @@ Events are delivered as Server-Sent Events:
 ```
 data: {"type": "status", "message": "Starting research phase..."}
 data: {"type": "agent_switch", "from": "researcher", "to": "analyst"}
-data: {"type": "done", "run_id": "...", "session_id": "...", "confidence": 0.87}
+data: {"type": "status", "message": "Starting analysis phase..."}
+data: {"type": "done", "run_id": "...", "session_id": "...", "confidence": 0.87, ...}
 ```
 
-Rate limit: 60 requests per minute per IP. Exceeding the limit returns `429 Too Many Requests` with a `Retry-After` header. The `/health` endpoint is exempt from rate limiting so Kubernetes probes are never blocked.
+The stream enforces a wall-clock timeout controlled by `STREAM_TIMEOUT_SECONDS` (default 120s). On timeout, a final `{"type": "error", "message": "Stream timed out after 120s"}` event is emitted.
+
+---
+
+**POST /research**
+
+```json
+// Request
+{ "query": "string (max 2000 characters)", "session_id": "optional uuid" }
+
+// Response
+{
+  "run_id": "uuid",
+  "session_id": "uuid",
+  "summary": "string",
+  "findings": ["string"],
+  "sources": ["string"],
+  "confidence": 0.91,
+  "query": "string",
+  "timestamp": "ISO 8601"
+}
+```
+
+---
+
+**GET /health**
+
+```json
+{
+  "status": "ok",
+  "version": "0.1.0",
+  "uptime_seconds": 142.3,
+  "environment": "development"
+}
+```
+
+This endpoint is exempt from rate limiting so Kubernetes probes are never blocked.
+
+---
+
+**GET /sessions/{session_id}/history**
+
+```json
+{
+  "session_id": "uuid",
+  "total": 3,
+  "entries": [
+    {
+      "run_id": "uuid",
+      "query": "string",
+      "result_summary": "string",
+      "created_at": "ISO 8601",
+      "metadata": {}
+    }
+  ]
+}
+```
+
+## Security
+
+**Bearer token authentication**
+
+Set `API_KEY` in your environment to enable authentication. When set, all requests to pipeline endpoints must include an `Authorization: Bearer <token>` header. The `/health`, `/docs`, `/redoc`, and `/openapi.json` endpoints are always exempt.
+
+```bash
+curl -X POST http://localhost:8000/run \
+  -H "Authorization: Bearer your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "..."}'
+```
+
+Leave `API_KEY` unset to disable authentication (suitable for internal deployments behind a gateway).
+
+**Rate limiting**
+
+60 requests per minute per IP, enforced by a per-IP sliding-window limiter. Exceeding the limit returns `429 Too Many Requests` with a `Retry-After` header.
+
+**Input validation**
+
+All queries are validated by `InputValidator` before reaching agent code. Queries exceeding 2000 characters or matching dangerous patterns are rejected with `400 Bad Request`.
+
+**Security headers**
+
+Every response includes `X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection`, `Referrer-Policy`, and `Cache-Control: no-store`. The `Server` header is stripped to avoid advertising the runtime stack.
+
+**Log sanitization**
+
+`sanitize_log_data()` in `core/security.py` recursively redacts sensitive keys (passwords, tokens, URLs with credentials) before structured log output.
 
 ## Configuration
 
 All configuration is loaded from environment variables. Copy `.env.example` to `.env` to get started.
 
-| Variable | Description | Default | Required |
-|----------|-------------|---------|----------|
-| `LLM_PROVIDER` | LLM provider to use | `anthropic` | Required |
-| `ANTHROPIC_API_KEY` | Anthropic API key | — | Required if `LLM_PROVIDER=anthropic` |
-| `ANTHROPIC_MODEL` | Claude model name | `claude-3-5-sonnet-20241022` | Optional |
-| `MAX_TOKENS` | Maximum tokens per LLM call | `4096` | No |
-| `MEMORY_BACKEND` | Memory backend: `sqlite`, `redis`, or `postgres` | `sqlite` | Optional |
-| `SQLITE_PATH` | Path to the SQLite database file | `./data/agent_memory.db` | No |
-| `REDIS_URL` | Redis connection URL | `redis://localhost:6379/0` | Only when `MEMORY_BACKEND=redis` |
-| `POSTGRES_URL` | PostgreSQL DSN | — | Required if `MEMORY_BACKEND=postgres` |
-| `API_HOST` | Host the server binds to | `0.0.0.0` | No |
-| `API_PORT` | TCP port the server listens on | `8000` | No |
-| `LOG_LEVEL` | Logging verbosity: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` | `INFO` | No |
-| `ENVIRONMENT` | Deployment environment label: `development`, `staging`, `production` | `development` | No |
-| `RAG_ENABLED` | Enable vector store RAG | `false` | Optional |
-| `STREAM_TIMEOUT_SECONDS` | SSE stream timeout | `120` | Optional |
+### Core
 
-See `.env.example` for all provider-specific variables (OpenAI, Google, Bedrock, Azure, Ollama).
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LLM_PROVIDER` | `anthropic` | LLM provider: `anthropic`, `openai`, `google`, `bedrock`, `azure`, `ollama` |
+| `MEMORY_BACKEND` | `sqlite` | Checkpoint backend: `sqlite`, `redis`, `postgres` |
+| `ENVIRONMENT` | `development` | Deployment label: `development`, `staging`, `production` |
+| `LOG_LEVEL` | `INFO` | Logging verbosity: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` |
+| `API_HOST` | `0.0.0.0` | Host the FastAPI server binds to |
+| `API_PORT` | `8000` | TCP port the FastAPI server listens on |
+| `API_KEY` | — | Bearer token for API auth. Leave unset to disable auth. |
+
+### LLM providers
+
+| Variable | Default | Used when |
+|----------|---------|-----------|
+| `ANTHROPIC_API_KEY` | — | `LLM_PROVIDER=anthropic` |
+| `ANTHROPIC_MODEL` | `claude-3-5-sonnet-20241022` | `LLM_PROVIDER=anthropic` |
+| `OPENAI_API_KEY` | — | `LLM_PROVIDER=openai` |
+| `OPENAI_MODEL` | `gpt-4o` | `LLM_PROVIDER=openai` |
+| `GOOGLE_API_KEY` | — | `LLM_PROVIDER=google` |
+| `GOOGLE_MODEL` | `gemini-1.5-pro` | `LLM_PROVIDER=google` |
+| `AWS_ACCESS_KEY_ID` | — | `LLM_PROVIDER=bedrock` |
+| `AWS_SECRET_ACCESS_KEY` | — | `LLM_PROVIDER=bedrock` |
+| `AWS_REGION` | `us-east-1` | `LLM_PROVIDER=bedrock` |
+| `BEDROCK_MODEL` | `anthropic.claude-3-5-sonnet-20241022-v2:0` | `LLM_PROVIDER=bedrock` |
+| `AZURE_OPENAI_API_KEY` | — | `LLM_PROVIDER=azure` |
+| `AZURE_OPENAI_ENDPOINT` | — | `LLM_PROVIDER=azure` |
+| `AZURE_OPENAI_DEPLOYMENT` | `gpt-4o` | `LLM_PROVIDER=azure` |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | `LLM_PROVIDER=ollama` |
+| `OLLAMA_MODEL` | `llama3.2` | `LLM_PROVIDER=ollama` |
+| `MAX_TOKENS` | `4096` | All providers |
+
+### Memory and storage
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SQLITE_PATH` | `./data/agent_memory.db` | SQLite database file path |
+| `REDIS_URL` | `redis://localhost:6379/0` | Redis connection URL (required when `MEMORY_BACKEND=redis`) |
+| `POSTGRES_URL` | — | PostgreSQL DSN (required when `MEMORY_BACKEND=postgres`) |
+| `RAG_ENABLED` | `false` | Enable vector store RAG via ChromaDB |
+
+### Agent behaviour
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MAX_RESEARCH_ITERATIONS` | `3` | Safety cap on research loop iterations (max 10) |
+| `MAX_STEP_COUNT` | `20` | Hard limit on total graph steps per run (max 100) |
+| `STREAM_TIMEOUT_SECONDS` | `120` | Wall-clock timeout for SSE streaming runs |
 
 ## Development
 
-**Run the test suite**
+### Running tests
 
 ```bash
+# Full test suite
 uv run pytest
+
+# With coverage report
+uv run pytest --cov=. --cov-report=term-missing
+
+# Single file
+uv run pytest tests/test_api.py -v
 ```
 
-87 tests across API endpoints, memory backends, security primitives, and tools. Async tests run automatically via `pytest-asyncio`.
+Tests are fully mocked — no external API calls are made. `conftest.py` patches LLM calls and memory backends for all tests.
 
-**Lint and format**
+### Test files
+
+| File | What it covers |
+|------|----------------|
+| `tests/conftest.py` | Shared fixtures, mocks, and test settings used by all test files |
+| `tests/test_api.py` | FastAPI endpoint tests, auth middleware, SSE streaming, session history |
+| `tests/test_agents.py` | `ResearchAgent` and `AnalystAgent` unit tests |
+| `tests/test_graph.py` | `MultiAgentGraph` orchestration and state transition tests |
+| `tests/test_llm.py` | `get_llm()` provider switching tests covering all 6 providers |
+| `tests/test_memory.py` | `ConversationMemory` backend tests (SQLite, Redis, PostgreSQL) |
+| `tests/test_security.py` | `InputValidator` and `RateLimiter` unit tests |
+| `tests/test_tools.py` | LangChain agent tool tests |
+| `tests/test_vectorstore.py` | Vector store integration and RAG tests |
+
+### Lint and format
 
 ```bash
-uv run ruff check .
-uv run black --check .
+uv run ruff check .          # lint
+uv run ruff check . --fix    # lint + auto-fix
+uv run black .               # format
+uv run black --check .       # format check (CI mode)
 ```
 
-Both checks run automatically in CI on every push and pull request.
+Both checks run automatically in CI on every push and pull request via `.github/workflows/ci.yml`. Security scanning (gitleaks, bandit, dependency audit) runs via `.github/workflows/security.yml`.
 
 ### Makefile shortcuts
 
@@ -361,39 +479,40 @@ make docker-run # docker compose up --build
 make helm-lint  # validate Helm chart
 ```
 
-**Project structure**
+### Project structure
 
 ```
 langgraph-agent-stack/
 ├── agents/
-│   ├── base_agent.py       # Abstract base class, error types, retry logic
-│   ├── researcher.py       # ResearchAgent implementation
-│   └── analyst.py          # AnalystAgent implementation
+│   ├── base_agent.py       # Abstract BaseAgent, error types, retry logic
+│   ├── researcher.py       # ResearchAgent — query expansion, retrieval, quality checks
+│   └── analyst.py          # AnalystAgent — insight extraction, pattern detection, reporting
 ├── core/
-│   ├── config.py           # Pydantic-settings configuration model
-│   ├── graph.py            # MultiAgentGraph — LangGraph orchestrator
-│   ├── memory.py           # SQLite / Redis checkpoint backend
-│   ├── security.py         # InputValidator, RateLimiter, key validation
-│   └── tools.py            # LangChain tools available to agents
+│   ├── config.py           # Pydantic-settings Settings model; use get_settings() not Settings()
+│   ├── graph.py            # MultiAgentGraph — LangGraph orchestrator and state definition
+│   ├── llm.py              # get_llm() — provider-agnostic LLM instantiation
+│   ├── memory.py           # ConversationMemory — SQLite / Redis / PostgreSQL checkpointing
+│   ├── security.py         # InputValidator, RateLimiter, sanitize_log_data
+│   ├── tools.py            # LangChain tools shared across agents
+│   └── vectorstore.py      # Optional RAG vector store integration
 ├── api/
-│   ├── main.py             # FastAPI application and endpoints
+│   ├── main.py             # FastAPI app, lifespan, endpoints
 │   └── models.py           # Pydantic request/response models
 ├── infra/
-│   ├── Dockerfile          # Multi-stage build (builder + runtime, non-root)
+│   ├── Dockerfile          # Multi-stage build (builder + non-root runtime)
 │   ├── docker-compose.yml  # Local stack with optional Redis profile
-│   └── k8s/
-│       ├── configmap.yaml
-│       ├── deployment.yaml # 2 replicas, liveness/readiness probes, resource limits
-│       ├── secret.yaml
-│       └── service.yaml
-├── tests/
-│   ├── test_api.py
-│   ├── test_memory.py
-│   ├── test_security.py
-│   └── test_tools.py
+│   ├── helm/               # Helm chart for Kubernetes deployment
+│   ├── k8s/                # Raw Kubernetes manifests (deployment, service, configmap, secret)
+│   └── terraform/          # Terraform modules for GKE Autopilot and EKS
+├── examples/
+│   ├── sequential/         # Linear Research → Analysis pipeline
+│   ├── parallel/           # Three analysts running simultaneously
+│   ├── supervisor/         # Dynamic routing to specialist agents
+│   └── human_in_loop/      # Pause graph execution for human approval
+├── tests/                  # Fully mocked test suite (no external API calls)
 ├── .github/workflows/
 │   ├── ci.yml              # ruff + black + pytest on push/PR
-│   └── security.yml        # Security scanning
+│   └── security.yml        # gitleaks, bandit, dependency audit
 ├── pyproject.toml
 └── .env.example
 ```
@@ -410,13 +529,23 @@ langgraph-agent-stack/
 
 Set `LLM_PROVIDER` in `.env` to one of: `anthropic`, `openai`, `google`, `bedrock`, `azure`, `ollama`.
 Install the matching extra: `uv sync --extra <provider>`.
-No code changes required — the factory in `core/llm.py` handles instantiation.
+No code changes required — `core/llm.py` handles instantiation.
 
 ### Enable Redis for production
 
 1. Set `MEMORY_BACKEND=redis` and `REDIS_URL=redis://your-host:6379/0` in your environment.
-2. Install the optional Redis extras: `uv sync --extra redis`.
-3. When deploying with Docker Compose, start with `--profile redis` to bring up the Redis service alongside the application.
+2. Install the Redis extras: `uv sync --extra redis`.
+3. When deploying with Docker Compose, start with `--profile redis` to bring up the Redis service.
+
+### Enable PostgreSQL for production
+
+1. Set `MEMORY_BACKEND=postgres` and `POSTGRES_URL=postgresql+psycopg://user:pass@host:5432/dbname`.
+2. Install the PostgreSQL extras: `uv sync --extra postgres`.
+
+### Enable RAG
+
+1. Set `RAG_ENABLED=true` in your environment.
+2. Install the RAG extras: `uv sync --extra rag`.
 
 ## Examples
 
