@@ -165,6 +165,22 @@ Start with Redis as the memory backend:
 docker compose -f infra/docker-compose.yml --profile redis up
 ```
 
+The Dockerfile supports three independent build args for extras:
+
+| Arg | Default | Description |
+|-----|---------|-------------|
+| `LLM_EXTRAS` | `anthropic` | LLM provider (`openai`, `google`, `bedrock`, `ollama`, `all-providers`) |
+| `INFRA_EXTRAS` | *(empty)* | Storage backend (`redis`, `postgres`) |
+| `OBS_EXTRAS` | *(empty)* | Observability stack (`observability` — includes Prometheus + OTel) |
+
+```bash
+docker build \
+  --build-arg LLM_EXTRAS=anthropic \
+  --build-arg INFRA_EXTRAS=redis \
+  --build-arg OBS_EXTRAS=observability \
+  -f infra/Dockerfile .
+```
+
 The compose file reads your `.env` file automatically. The application is available at `http://localhost:8000` after the health check passes (about 15 seconds on first startup).
 
 ## Kubernetes Deployment
@@ -443,6 +459,37 @@ All configuration is loaded from environment variables. Copy `.env.example` to `
 | `MAX_STEP_COUNT` | `20` | Hard limit on total graph steps per run (max 100) |
 | `STREAM_TIMEOUT_SECONDS` | `120` | Wall-clock timeout for SSE streaming runs |
 | `THREAD_POOL_MAX_WORKERS` | `4` | Size of the thread pool for blocking agent calls (1–64) |
+
+### Observability
+
+The stack includes three complementary observability pillars:
+
+| Feature | Package | Install |
+|---------|---------|---------|
+| **Structured JSON logging** | `python-json-logger` | included by default |
+| **Prometheus metrics** | `prometheus-client` | `uv sync --extra observability` |
+| **OpenTelemetry tracing** | `opentelemetry-sdk` | `uv sync --extra observability` |
+
+**Logging** — Every request is logged as a single JSON line containing
+`timestamp`, `level`, `logger`, `message`, `request_id`, and all `extra`
+fields. Sensitive keys (passwords, tokens, API keys) are automatically
+redacted by a `SanitizingFilter` before serialisation.
+
+**Prometheus metrics** — When `prometheus-client` is installed, the
+`/metrics` endpoint exposes:
+
+- `http_requests_total` — counter by method/path/status
+- `http_request_duration_seconds` — histogram by path
+- `active_pipelines` — gauge of in-flight pipeline executions
+
+To include metrics in your Docker image, build with:
+
+```bash
+docker build --build-arg LLM_EXTRAS=anthropic --build-arg OBS_EXTRAS=observability .
+```
+
+**OpenTelemetry** — Set `OTEL_ENABLED=true` and configure `OTEL_EXPORTER_OTLP_ENDPOINT`
+to ship traces to Jaeger, Tempo, or any OTLP-compatible backend.
 
 ## Development
 

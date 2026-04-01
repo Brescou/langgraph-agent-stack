@@ -1,9 +1,11 @@
 # ci.yml — Continuous Integration pipeline for langgraph-agent-stack
 #
 # Jobs:
-#   lint   — ruff (linting + import sort) + black (format check)
-#   test   — pytest with coverage via uv
-#   build  — Docker image build (push to main only)
+#   lint       — ruff (linting + import sort) + black (format check)
+#   typecheck  — pyright basic type checking
+#   infra-lint — helm lint + terraform validate
+#   test       — pytest with coverage via uv
+#   build      — Docker image build (push to main only)
 #
 # All Python dependency installation uses uv exclusively (no pip, no poetry).
 
@@ -67,7 +69,73 @@ jobs:
         run: uv run black --check .
 
 # ---------------------------------------------------------------------------
-# Job 2 — Test
+# Job 2 — Typecheck
+# ---------------------------------------------------------------------------
+  typecheck:
+    name: Typecheck (pyright)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Cache uv dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('pyproject.toml', 'uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-
+
+      - name: Install all dependencies (including dev)
+        run: uv sync --frozen
+
+      - name: Run pyright
+        run: uv run pyright
+
+# ---------------------------------------------------------------------------
+# Job 3 — Infrastructure lint
+# ---------------------------------------------------------------------------
+  infra-lint:
+    name: Infra lint (Helm + Terraform)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Helm lint
+        run: helm lint infra/helm/langgraph-agent-stack
+
+      - name: Helm template (render validation)
+        run: helm template test-release infra/helm/langgraph-agent-stack
+
+      - name: Terraform fmt check
+        run: |
+          for dir in infra/terraform/modules/*/; do
+            echo "--- terraform fmt -check $dir ---"
+            terraform -chdir="$dir" fmt -check
+          done
+
+      - name: Terraform validate
+        run: |
+          for dir in infra/terraform/modules/*/; do
+            echo "--- terraform validate $dir ---"
+            terraform -chdir="$dir" init -backend=false -input=false
+            terraform -chdir="$dir" validate
+          done
+
+# ---------------------------------------------------------------------------
+# Job 4 — Test
 # ---------------------------------------------------------------------------
   test:
     name: Test (pytest + coverage)
@@ -118,7 +186,7 @@ jobs:
           retention-days: 7
 
 # ---------------------------------------------------------------------------
-# Job 3 — Build Docker image (push to main only)
+# Job 5 — Build Docker image (push to main only)
 # ---------------------------------------------------------------------------
   build:
     name: Build Docker image
