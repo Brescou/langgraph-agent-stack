@@ -36,10 +36,12 @@ uv run python examples/supervisor/graph.py
 
 ## Expected output
 
+The supervisor routes each query to the appropriate specialist. After the specialist responds, the supervisor terminates with `FINISH`. The "Routed to" line shows the last specialist that handled the query.
+
 ```
 Query: Explain how transformer attention mechanisms work
 ------------------------------------------------------------
-Routed to: research
+Routed to: FINISH
 
 === AGENT OUTPUT ===
 Transformer attention uses scaled dot-product attention to compute a weighted
@@ -47,7 +49,7 @@ combination of value vectors...
 
 Query: Write a Python function that computes the Fibonacci sequence iteratively
 ------------------------------------------------------------
-Routed to: code
+Routed to: FINISH
 
 === AGENT OUTPUT ===
 def fibonacci(n: int) -> list[int]:
@@ -56,7 +58,7 @@ def fibonacci(n: int) -> list[int]:
 
 Query: What SQL query would I use to find the top 5 customers by total order value?
 ------------------------------------------------------------
-Routed to: data
+Routed to: FINISH
 
 === AGENT OUTPUT ===
 SELECT customer_id, SUM(order_value) AS total_value
