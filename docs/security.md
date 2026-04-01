@@ -49,6 +49,15 @@ The following controls ship enabled and require no operator action.
   contain prompt-injection markers, SSRF-style internal endpoint references,
   server-side template injection syntax, path traversal sequences, and null bytes
   before they reach the LLM.
+- **Session ID validation**: `session_id` in `RunRequest` is constrained to a
+  maximum of 128 characters and must match `^[a-zA-Z0-9_-]+$`. This prevents
+  multi-MB payloads from being persisted to the memory backend.
+- **Graceful shutdown**: When the server receives a shutdown signal, all pipeline
+  endpoints (`/run`, `/run/stream`, `/research`) immediately return
+  `503 Service Unavailable` to prevent new work from starting during drain.
+- **Multi-modal content safety**: LLM responses are normalised via
+  `_extract_text_content()` before `json.loads()` to prevent `TypeError` when
+  models return `list[dict]` content blocks instead of plain strings.
 - **API key format validation**: the `validate_api_key_format` utility function
   in `core/security` checks whether an Anthropic key matches the `sk-ant-...`
   pattern. This is a helper available for callers to use — it is not an automatic
@@ -63,7 +72,7 @@ The following controls ship enabled and require no operator action.
 
 ### Dependency management
 
-- `uv sync --frozen --no-dev` in the Dockerfile ensures the exact lockfile is
+- `uv sync --locked --no-dev` in the Dockerfile ensures the exact lockfile is
   used and development dependencies are excluded from the production image.
 - The CI pipeline runs `pip-audit` on every push/PR and weekly to catch newly
   disclosed CVEs.
@@ -251,6 +260,8 @@ Alternative secret management solutions:
 | `SEARCH_PROVIDER` | `mock` | Search tool provider: `mock`, `tavily`, or `serpapi`. |
 | `TAVILY_API_KEY` | — | Required when `SEARCH_PROVIDER=tavily`. |
 | `SERPAPI_API_KEY` | — | Required when `SEARCH_PROVIDER=serpapi`. |
+| `THREAD_POOL_MAX_WORKERS` | `4` | Size of the ThreadPoolExecutor for blocking agent calls (1–64). |
+| `STREAM_TIMEOUT_SECONDS` | `120` | Wall-clock timeout for SSE streaming runs. |
 
 ---
 

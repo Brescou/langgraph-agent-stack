@@ -17,16 +17,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Helm chart for Kubernetes deployment (`infra/helm/`)
 - Terraform modules for GKE and EKS (`infra/terraform/`)
 - Multi-agent example patterns: sequential, parallel, supervisor, human-in-the-loop
+- `agents/models.py` — decoupled `ResearchResult` and `AnalysisReport` dataclasses
+- `_extract_text_content()` helper for safe json.loads on multi-modal LLM responses
+- `MultiAgentGraph` context manager protocol (`__enter__`/`__exit__`)
+- Graceful shutdown guard — endpoints return 503 when `_shutting_down` is set
+- `session_id` validation: `max_length=128`, `pattern=^[a-zA-Z0-9_-]+$` on `RunRequest`
+- `THREAD_POOL_MAX_WORKERS` setting (default 4) for configurable thread pool sizing
+- `.dockerignore` to exclude .env, .git, tests, docs from Docker build context
+- PodDisruptionBudget template for Helm chart
+- `@model_validator` on Settings enforcing `POSTGRES_URL` when `memory_backend=postgres`
+- Exponent guard (`max 1000`) on calculator `ast.Pow` operator
+- `math.isfinite()` guard before `int(result)` in calculator tool
+- `tests/test_config.py` — settings caching, llm_config, cross-field validators
+- `tests/test_observability.py` — structured logging and OTel tracing coverage
 
 ### Changed
 - `MultiAgentGraph` now uses the configured memory backend instead of hardcoded `MemorySaver`
 - All LLM providers now honour `max_tokens` (or equivalent) from settings
 - `sanitize_log_data` now recurses into list values and checks sensitive key before type
+- Middleware registration order: rate limiter now executes before auth (brute-force protection)
+- `_stream_pipeline` uses thread-safe `get_shared_llm()`/`get_shared_checkpointer()` accessors
+- SSE error events return generic messages instead of leaking `str(exc)` internals
+- ConversationMemory read operations (`get_run`, `list_runs`, `list_runs_by_session`) protected by `_lock`
+- SQLite isolation level changed from `None` to `DEFERRED` with `threading.Lock` protection
+- `_input_validator` renamed to `input_validator` (cross-module import convention)
+- Conftest fixtures use real `ResearchResult`/`AnalysisReport` instances (function-scope)
+- LLM/checkpointer initialization uses double-checked locking with `threading.Lock`
+- Agents return partial state updates instead of full `{**state, ...}` copies
+- `run()`/`run_structured()` DRY-ed via shared `_execute()` method in both agents
+- Retry logic uses jitter (`0.5 + random.random()`) in exponential backoff
+- Dockerfile comment corrected: `--frozen` → `--locked`
+- Docker Compose Redis healthcheck uses `-a ${REDIS_PASSWORD:-changeme}`
+- Helm `replicas` field conditional on `autoscaling.enabled`
+- CI workflow: `permissions: contents: read`, Python matrix (3.12+3.13), parallel lint/test
+- `pyproject.toml` coverage threshold raised from 50% to 70%
 
 ### Fixed
 - `dir()` antipattern in `ResearchAgent._node_summarize` replaced with proper scoping
 - Redis URL no longer logged in plain text (credentials stripped)
 - `_is_sensitive_key` now uses word-boundary regex to avoid false positives
+- Redis `requirepass` now compatible with healthcheck (`-a` flag added)
+- Terraform GKE `deletion_protection` condition: `"production"` → `"prod"`
+- SSTI regex refined to avoid false positives on `{{config}}` while catching real injections
 
 ## [0.1.0] - 2026-03-01
 

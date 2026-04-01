@@ -291,7 +291,7 @@ The stream enforces a wall-clock timeout controlled by `STREAM_TIMEOUT_SECONDS` 
 
 ```json
 // Request
-{ "query": "string (max 2000 characters)", "session_id": "optional uuid" }
+{ "query": "string (max 2000 characters)", "session_id": "optional string (max 128 chars, alphanumeric/dash/underscore)" }
 
 // Response
 {
@@ -428,6 +428,7 @@ All configuration is loaded from environment variables. Copy `.env.example` to `
 | `MAX_RESEARCH_ITERATIONS` | `3` | Safety cap on research loop iterations (max 10) |
 | `MAX_STEP_COUNT` | `20` | Hard limit on total graph steps per run (max 100) |
 | `STREAM_TIMEOUT_SECONDS` | `120` | Wall-clock timeout for SSE streaming runs |
+| `THREAD_POOL_MAX_WORKERS` | `4` | Size of the thread pool for blocking agent calls (1–64) |
 
 ## Development
 
@@ -459,6 +460,8 @@ Tests are fully mocked — no external API calls are made. `conftest.py` patches
 | `tests/test_security.py` | `InputValidator` and `RateLimiter` unit tests |
 | `tests/test_tools.py` | LangChain agent tool tests |
 | `tests/test_vectorstore.py` | Vector store integration and RAG tests |
+| `tests/test_config.py` | `get_settings()` caching, `llm_config` property, cross-field validators |
+| `tests/test_observability.py` | Structured logging and OpenTelemetry tracing tests |
 
 ### Lint and format
 
@@ -488,6 +491,7 @@ make helm-lint  # validate Helm chart
 langgraph-agent-stack/
 ├── agents/
 │   ├── base_agent.py       # Abstract BaseAgent, error types, retry logic
+│   ├── models.py           # ResearchResult and AnalysisReport dataclasses
 │   ├── researcher.py       # ResearchAgent — query expansion, retrieval, quality checks
 │   └── analyst.py          # AnalystAgent — insight extraction, pattern detection, reporting
 ├── core/
@@ -495,6 +499,7 @@ langgraph-agent-stack/
 │   ├── graph.py            # MultiAgentGraph — LangGraph orchestrator and state definition
 │   ├── llm.py              # get_llm() — provider-agnostic LLM instantiation
 │   ├── memory.py           # ConversationMemory — SQLite / Redis / PostgreSQL checkpointing
+│   ├── observability.py    # Structured JSON logging and optional OpenTelemetry tracing
 │   ├── security.py         # InputValidator, RateLimiter, sanitize_log_data
 │   ├── tools.py            # LangChain tools shared across agents
 │   └── vectorstore.py      # Optional RAG vector store integration
@@ -515,6 +520,7 @@ langgraph-agent-stack/
 ├── .github/workflows/
 │   ├── ci.yml              # ruff + black + pytest on push/PR
 │   └── security.yml        # gitleaks, bandit, dependency audit
+├── .dockerignore           # Excludes .env, .git, tests, docs from Docker context
 ├── pyproject.toml
 └── .env.example
 ```
@@ -523,7 +529,7 @@ langgraph-agent-stack/
 
 ### Add a new agent
 
-1. Create `agents/my_agent.py` inheriting from `BaseAgent` in `agents/base_agent.py`. Implement the `run` and `run_structured` methods.
+1. Create `agents/my_agent.py` inheriting from `BaseAgent` in `agents/base_agent.py`. Implement `build_graph()` and `run()`. Add `run_structured()` if you need typed output (it is not abstract).
 2. Add your agent as a node in `core/graph.py` and connect its edges in the LangGraph state graph.
 3. Expose it via a new endpoint in `api/main.py` following the pattern used by `/research`.
 
