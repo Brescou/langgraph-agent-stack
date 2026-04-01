@@ -96,4 +96,6 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
 # Default command — override via docker run / k8s deployment args if needed
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Use "python -m" so the venv's python is used regardless of script shebangs
+# (shebangs bake the builder-stage path which differs from runtime).
+CMD ["python", "-m", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
