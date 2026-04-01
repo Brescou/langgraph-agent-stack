@@ -179,10 +179,13 @@ def build_sequential_graph(llm: BaseChatModel) -> object:
 
 if __name__ == "__main__":
     import sys
+    from pathlib import Path
 
-    sys.path.insert(0, "/home/brescou/Project/langgraph-agent-stack")
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-    from core.config import settings
+    from core.config import get_settings
+
+    settings = get_settings()
     from core.llm import get_llm
 
     llm = get_llm(settings.llm_config)
