@@ -17,13 +17,12 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.graph import END, StateGraph
 
 from agents.base_agent import (
-    AgentError,
     AgentExecutionError,
     AgentState,
     AgentValidationError,
@@ -99,7 +98,7 @@ class ResearchAgent(BaseAgent):
     _CTX_ITERATIONS = "research_iterations"
     _CTX_RESULT = "research_result"
 
-    def __init__(self, thread_id: Optional[str] = None) -> None:
+    def __init__(self, thread_id: str | None = None) -> None:
         super().__init__(name="ResearchAgent", thread_id=thread_id)
 
     # ------------------------------------------------------------------

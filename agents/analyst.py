@@ -21,7 +21,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.graph import END, StateGraph
@@ -33,7 +33,6 @@ from agents.base_agent import (
     BaseAgent,
 )
 from agents.researcher import ResearchResult
-from core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +130,7 @@ class AnalystAgent(BaseAgent):
     _CTX_PATTERNS = "raw_patterns"
     _CTX_REPORT = "analysis_report"
 
-    def __init__(self, thread_id: Optional[str] = None) -> None:
+    def __init__(self, thread_id: str | None = None) -> None:
         super().__init__(name="AnalystAgent", thread_id=thread_id)
 
     # ------------------------------------------------------------------
