@@ -104,4 +104,9 @@ spec:
         - name: tmp
           emptyDir: {}
         - name: app-data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "langgraph-agent-stack.fullname" . }}-data
+          {{- else }}
           emptyDir: {}
+          {{- end }}

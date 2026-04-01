@@ -32,9 +32,20 @@ autoscaling:
 config:
   logLevel: INFO
   environment: production
+  # WARNING: sqlite with emptyDir loses all data on pod restart.
+  # Use redis or postgres for durable persistence in production.
   memoryBackend: sqlite
   sqlitePath: /app/data/memory.db
   maxTokens: "4096"
+
+# Persistent storage for SQLite data (only relevant when memoryBackend=sqlite).
+# Enable this to survive pod restarts; disabled by default (uses emptyDir).
+persistence:
+  enabled: false
+  storageClass: ""
+  size: 1Gi
+  accessModes:
+    - ReadWriteOnce
 
 llm:
   provider: anthropic
