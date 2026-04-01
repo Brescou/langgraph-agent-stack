@@ -97,6 +97,7 @@ def get_llm(config: LLMConfig) -> BaseChatModel:
             return ChatOpenAI(
                 model=config.openai_model,
                 api_key=config.openai_api_key,
+                max_tokens=config.max_tokens,
             )
 
         case "google":
@@ -111,6 +112,7 @@ def get_llm(config: LLMConfig) -> BaseChatModel:
             return ChatGoogleGenerativeAI(
                 model=config.google_model,
                 google_api_key=config.google_api_key,
+                max_output_tokens=config.max_tokens,
             )
 
         case "bedrock":
@@ -129,6 +131,7 @@ def get_llm(config: LLMConfig) -> BaseChatModel:
             return ChatBedrock(
                 model_id=config.bedrock_model,
                 region_name=config.aws_region,
+                max_tokens=config.max_tokens,
             )
 
         case "azure":
@@ -148,6 +151,7 @@ def get_llm(config: LLMConfig) -> BaseChatModel:
                 azure_deployment=config.azure_openai_deployment,
                 api_key=config.azure_openai_api_key,
                 azure_endpoint=config.azure_openai_endpoint,
+                max_tokens=config.max_tokens,
             )
 
         case "ollama":
@@ -158,6 +162,7 @@ def get_llm(config: LLMConfig) -> BaseChatModel:
             return ChatOllama(
                 model=config.ollama_model,
                 base_url=config.ollama_base_url,
+                num_predict=config.max_tokens,
             )
 
         case _:

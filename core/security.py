@@ -255,9 +255,23 @@ class RateLimiter:
 # sanitize_log_data
 # ---------------------------------------------------------------------------
 
-# Key fragments (case-insensitive) whose values should be masked in log output.
-_SENSITIVE_KEY_FRAGMENTS: frozenset[str] = frozenset(
-    {"key", "token", "secret", "password", "passwd", "pwd", "credential", "auth"}
+_SENSITIVE_RE: re.Pattern[str] = re.compile(
+    r"(?<![a-zA-Z0-9])("
+    + "|".join(
+        re.escape(p)
+        for p in (
+            "key",
+            "token",
+            "secret",
+            "password",
+            "passwd",
+            "pwd",
+            "credential",
+            "authorization",
+            "auth",
+        )
+    )
+    + r")(?![a-zA-Z0-9])"
 )
 
 _MASK = "***REDACTED***"
@@ -287,19 +301,23 @@ def sanitize_log_data(data: dict[str, Any]) -> dict[str, Any]:
     """
     sanitised: dict[str, Any] = {}
     for k, v in data.items():
-        if isinstance(v, dict):
-            sanitised[k] = sanitize_log_data(v)
-        elif _is_sensitive_key(k):
+        if _is_sensitive_key(k):
             sanitised[k] = _MASK
+        elif isinstance(v, dict):
+            sanitised[k] = sanitize_log_data(v)
+        elif isinstance(v, list):
+            sanitised[k] = [
+                sanitize_log_data(item) if isinstance(item, dict) else item
+                for item in v
+            ]
         else:
             sanitised[k] = v
     return sanitised
 
 
 def _is_sensitive_key(key: str) -> bool:
-    """Return True if ``key`` (case-insensitive) contains a sensitive fragment."""
-    lower = key.lower()
-    return any(fragment in lower for fragment in _SENSITIVE_KEY_FRAGMENTS)
+    """Return True if ``key`` (case-insensitive) contains a sensitive word."""
+    return bool(_SENSITIVE_RE.search(key.lower()))
 
 
 # ---------------------------------------------------------------------------

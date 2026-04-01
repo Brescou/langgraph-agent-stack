@@ -178,6 +178,16 @@ class Settings(BaseSettings):
         description="Deployment environment tag used for log correlation.",
     )
 
+    api_key: str | None = Field(
+        default=None,
+        validation_alias="API_KEY",
+        description=(
+            "Optional Bearer token for API authentication. "
+            "When set, all requests except health/docs must include "
+            "'Authorization: Bearer <token>'. Leave empty to disable."
+        ),
+    )
+
     @property
     def llm_config(self) -> LLMConfig:
         """Build an :class:`~core.llm.LLMConfig` from the current settings."""

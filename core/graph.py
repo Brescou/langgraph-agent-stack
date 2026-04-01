@@ -25,13 +25,15 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Literal
 
-from langgraph.checkpoint.memory import MemorySaver
+from langchain_core.language_models import BaseChatModel
 from langgraph.graph import END, StateGraph
 from typing_extensions import TypedDict
 
 from agents.analyst import AnalysisReport, AnalystAgent
 from agents.base_agent import AgentError, AgentExecutionError, AgentValidationError
 from agents.researcher import ResearchAgent, ResearchResult
+from core.config import get_settings
+from core.memory import create_checkpointer
 
 logger = logging.getLogger(__name__)
 
@@ -87,9 +89,14 @@ class MultiAgentGraph:
         AgentExecutionError: When either agent fails during the pipeline run.
     """
 
-    def __init__(self, run_id: str | None = None) -> None:
+    def __init__(
+        self,
+        run_id: str | None = None,
+        llm: BaseChatModel | None = None,
+        checkpointer: Any | None = None,
+    ) -> None:
         self.run_id: str = run_id or str(uuid.uuid4())
-        self._checkpointer = MemorySaver()
+        self._checkpointer = checkpointer or create_checkpointer(get_settings())
         self._graph = self._build_graph()
 
         logger.info(

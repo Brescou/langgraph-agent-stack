@@ -169,7 +169,7 @@ def _create_redis_checkpointer(redis_url: str) -> Any:
         checkpointer = RedisSaver.from_conn_string(redis_url)
         logger.info(
             "Checkpointer: RedisSaver initialised",
-            extra={"url": redis_url},
+            extra={"url": redis_url.split("@")[-1]},
         )
         return checkpointer
 
@@ -177,7 +177,7 @@ def _create_redis_checkpointer(redis_url: str) -> Any:
         logger.warning(
             "langgraph-checkpoint-redis not installed — falling back to "
             "MemorySaver.  Install with: pip install langgraph-checkpoint-redis",
-            extra={"redis_url": redis_url},
+            extra={"redis_url": redis_url.split("@")[-1]},
         )
         return MemorySaver()
 
@@ -524,8 +524,11 @@ class ConversationMemory:
                 "ConversationMemory: connection closed",
                 extra={"db_path": str(self.db_path)},
             )
-        except Exception:
-            pass  # Already closed or never opened — silently swallow
+        except Exception as exc:
+            logger.warning(
+                "ConversationMemory.close() failed",
+                extra={"db_path": str(self.db_path), "error": str(exc)},
+            )
 
     # ------------------------------------------------------------------
     # Internal helpers
