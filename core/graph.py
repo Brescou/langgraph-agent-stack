@@ -403,6 +403,16 @@ class MultiAgentGraph:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self._executor, self.run, query)
 
+    def __enter__(self) -> MultiAgentGraph:
+        """Support ``with MultiAgentGraph(...) as g:`` usage."""
+        return self
+
+    def __exit__(
+        self, exc_type: type | None, exc_val: BaseException | None, exc_tb: Any
+    ) -> None:
+        """Ensure the thread pool executor is shut down on context exit."""
+        self.close()
+
     def close(self) -> None:
         """Shut down the thread pool executor."""
         self._executor.shutdown(wait=False)

@@ -172,6 +172,13 @@ class Settings(BaseSettings):
         description="Maximum wall-clock seconds allowed for a streaming SSE pipeline run.",
         validation_alias="STREAM_TIMEOUT_SECONDS",
     )
+    thread_pool_max_workers: int = Field(
+        default=4,
+        ge=1,
+        le=64,
+        description="Size of the ThreadPoolExecutor used for blocking agent calls.",
+        validation_alias="THREAD_POOL_MAX_WORKERS",
+    )
 
     # --- Environment tag (informational) ---
     environment: Literal["development", "staging", "production"] = Field(
