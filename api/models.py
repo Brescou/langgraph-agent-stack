@@ -56,11 +56,18 @@ class HistoryResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class ComponentHealth(BaseModel):
+    """Health status of a single infrastructure component."""
+
+    status: str = Field(description="'ok' or 'degraded'.", examples=["ok"])
+    detail: str = Field(default="", description="Additional diagnostic information.")
+
+
 class HealthResponse(BaseModel):
     """Response schema for ``GET /health``."""
 
     status: str = Field(
-        description="Service health status. Always 'ok' when the endpoint responds.",
+        description="Service health status: 'ok' or 'degraded'.",
         examples=["ok"],
     )
     version: str = Field(
@@ -74,6 +81,10 @@ class HealthResponse(BaseModel):
     environment: str = Field(
         description="Deployment environment tag (development / staging / production).",
         examples=["development"],
+    )
+    components: dict[str, ComponentHealth] = Field(
+        default_factory=dict,
+        description="Per-component health: llm, memory, checkpointer.",
     )
 
 

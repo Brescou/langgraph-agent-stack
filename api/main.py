@@ -27,6 +27,7 @@ import asyncio
 import hmac
 import json
 import logging
+import threading
 import time
 import uuid
 from collections.abc import AsyncGenerator
@@ -48,6 +49,7 @@ from agents.base_agent import (
 )
 from agents.researcher import ResearchAgent
 from api.models import (
+    ComponentHealth,
     HealthResponse,
     HistoryEntry,
     HistoryResponse,
@@ -59,16 +61,14 @@ from api.models import (
 from core.config import Settings, get_settings
 from core.graph import MultiAgentGraph
 from core.memory import ConversationMemory
+
+# ---------------------------------------------------------------------------
+# Logging — structured JSON via core.observability when available
+# ---------------------------------------------------------------------------
+from core.observability import configure_logging, init_tracing
 from core.security import InputValidator, RateLimiter
 
-# ---------------------------------------------------------------------------
-# Logging — structured JSON-friendly via ``extra`` dicts
-# ---------------------------------------------------------------------------
-
-logging.basicConfig(
-    level=get_settings().log_level.value,
-    format="%(asctime)s %(levelname)s %(name)s %(message)s",
-)
+configure_logging(level=get_settings().log_level.value)
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -88,6 +88,33 @@ _shared_memory: ConversationMemory | None = None
 # or by passing a custom RateLimiter instance in tests.
 _rate_limiter = RateLimiter(max_requests=60, window_seconds=60.0)
 _input_validator = InputValidator(max_length=2000)
+_shutting_down = threading.Event()
+
+
+# ---------------------------------------------------------------------------
+# LLM / checkpointer lazy initialisation
+# ---------------------------------------------------------------------------
+
+
+def _init_llm_and_checkpointer(settings: Settings) -> None:
+    """Attempt to create the shared LLM and checkpointer.
+
+    On failure the globals are set to ``None`` and a warning is logged.
+    Called at startup and can be re-invoked to retry after a transient error.
+    """
+    global _shared_llm, _shared_checkpointer
+
+    from core.llm import get_llm
+    from core.memory import create_checkpointer
+
+    try:
+        _shared_llm = get_llm(settings.llm_config)
+        _shared_checkpointer = create_checkpointer(settings)
+        logger.info("LLM provider '%s' configured successfully", settings.llm_provider)
+    except (ImportError, ValueError) as exc:
+        logger.warning("LLM configuration warning: %s", exc)
+        _shared_llm = None
+        _shared_checkpointer = None
 
 
 # ---------------------------------------------------------------------------
@@ -117,19 +144,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
 
     _settings = get_settings()
-    from core.llm import get_llm
-    from core.memory import create_checkpointer
+    init_tracing()
+    _init_llm_and_checkpointer(_settings)
 
-    try:
-        _shared_llm = get_llm(_settings.llm_config)
-        _shared_checkpointer = create_checkpointer(_settings)
-        logger.info("LLM provider '%s' configured successfully", _settings.llm_provider)
-    except (ImportError, ValueError) as exc:
-        logger.warning("LLM configuration warning: %s", exc)
-        _shared_llm = None
-        _shared_checkpointer = None
-
-    _shared_memory = ConversationMemory(_settings.sqlite_path)
+    _shared_memory = ConversationMemory(
+        _settings.sqlite_path,
+        backend=_settings.memory_backend.value,
+        redis_url=_settings.redis_url,
+        postgres_url=_settings.postgres_url,
+    )
 
     logger.info(
         "API server starting up",
@@ -143,11 +166,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         },
     )
 
+    _shutting_down.clear()
+
     yield  # Application is live here
 
-    logger.info("API server shutting down — draining thread pool")
+    logger.info("API server shutting down — draining in-flight requests")
+    _shutting_down.set()
     if _executor is not None:
-        _executor.shutdown(wait=True)
+        _executor.shutdown(wait=True, cancel_futures=False)
     if _shared_memory is not None:
         _shared_memory.close()
     logger.info("Shutdown complete")
@@ -159,10 +185,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 def get_shared_llm() -> BaseChatModel | None:
+    """Return the shared LLM, retrying init if the first attempt failed."""
+    if _shared_llm is None:
+        _init_llm_and_checkpointer(get_settings())
     return _shared_llm
 
 
 def get_shared_checkpointer() -> Any | None:
+    """Return the shared checkpointer, retrying init if the first attempt failed."""
+    if _shared_checkpointer is None:
+        _init_llm_and_checkpointer(get_settings())
     return _shared_checkpointer
 
 
@@ -188,7 +220,7 @@ app = FastAPI(
 )
 
 # ---------------------------------------------------------------------------
-# CORS — origins from settings; never hard-coded
+# CORS — wildcard for open-source template; tighten for production
 # ---------------------------------------------------------------------------
 
 app.add_middleware(
@@ -409,18 +441,51 @@ async def health(
     """
     Return the current health status of the service.
 
-    This endpoint is designed to be polled by load balancers and container
-    orchestration platforms (Kubernetes liveness / readiness probes).  It
-    performs no I/O and responds immediately.
+    Performs a deep health check of LLM, memory, and checkpointer components.
+    Returns ``"degraded"`` if any component is unavailable but the service
+    itself is reachable.
 
     Returns:
-        ``HealthResponse`` with status, version, uptime, and environment.
+        ``HealthResponse`` with status, version, uptime, component health,
+        and environment.
     """
+    components: dict[str, ComponentHealth] = {}
+
+    if _shared_llm is not None:
+        components["llm"] = ComponentHealth(
+            status="ok", detail=settings.llm_provider.value
+        )
+    else:
+        components["llm"] = ComponentHealth(
+            status="degraded", detail="LLM not initialised"
+        )
+
+    if _shared_memory is not None:
+        components["memory"] = ComponentHealth(
+            status="ok", detail=str(_shared_memory.db_path)
+        )
+    else:
+        components["memory"] = ComponentHealth(
+            status="degraded", detail="Memory store not initialised"
+        )
+
+    if _shared_checkpointer is not None:
+        components["checkpointer"] = ComponentHealth(
+            status="ok", detail=settings.memory_backend.value
+        )
+    else:
+        components["checkpointer"] = ComponentHealth(
+            status="degraded", detail="Checkpointer not initialised"
+        )
+
+    overall = "ok" if all(c.status == "ok" for c in components.values()) else "degraded"
+
     return HealthResponse(
-        status="ok",
+        status=overall,
         version=_APP_VERSION,
         uptime_seconds=round(time.monotonic() - _start_time, 3),
         environment=settings.environment,
+        components=components,
     )
 
 
