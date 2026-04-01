@@ -264,3 +264,42 @@ def test_get_run_with_corrupted_json(memory: ConversationMemory) -> None:
     record = memory.get_run(run_id)
     assert record is not None
     assert record["result"] == {}
+
+
+def test_create_checkpointer_redis_with_mock():
+    """create_checkpointer returns RedisSaver when redis package is available."""
+    from unittest.mock import MagicMock, patch
+
+    mock_redis_saver = MagicMock()
+    mock_redis_module = MagicMock()
+    mock_redis_module.RedisSaver.from_conn_string.return_value = mock_redis_saver
+
+    with patch.dict(
+        "sys.modules",
+        {"langgraph.checkpoint.redis": mock_redis_module},
+    ):
+        from core.memory import _create_redis_checkpointer
+
+        result = _create_redis_checkpointer("redis://localhost:6379/0")
+
+    assert result == mock_redis_saver
+    mock_redis_module.RedisSaver.from_conn_string.assert_called_once_with(
+        "redis://localhost:6379/0"
+    )
+
+
+def test_create_checkpointer_postgres_missing_url():
+    """create_checkpointer falls back when postgres_url is None in development."""
+    from unittest.mock import MagicMock, patch
+
+    mock_settings = MagicMock()
+    mock_settings.environment = "development"
+
+    with patch("core.config.get_settings", return_value=mock_settings):
+        from core.memory import _create_postgres_checkpointer
+
+        result = _create_postgres_checkpointer(None)
+
+    from langgraph.checkpoint.memory import MemorySaver
+
+    assert isinstance(result, MemorySaver)

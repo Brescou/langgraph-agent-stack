@@ -115,18 +115,23 @@ def test_client(
     mock_graph_instance = MagicMock()
     mock_graph_instance.run.return_value = mock_analysis_report
 
-    mock_agent_instance = MagicMock()
-    mock_agent_instance.run_structured.return_value = mock_research_result
+    mock_researcher_instance = MagicMock()
+    mock_researcher_instance.run_structured.return_value = mock_research_result
+
+    mock_analyst_instance = MagicMock()
+    mock_analyst_instance.run_structured.return_value = mock_analysis_report
 
     mock_graph_cls = MagicMock(return_value=mock_graph_instance)
-    mock_agent_cls = MagicMock(return_value=mock_agent_instance)
+    mock_researcher_cls = MagicMock(return_value=mock_researcher_instance)
+    mock_analyst_cls = MagicMock(return_value=mock_analyst_instance)
 
     mock_llm = MagicMock(spec=True)
     mock_checkpointer = MagicMock()
 
     with (
         patch("api.main.MultiAgentGraph", mock_graph_cls),
-        patch("api.main.ResearchAgent", mock_agent_cls),
+        patch("api.main.ResearchAgent", mock_researcher_cls),
+        patch("api.main.AnalystAgent", mock_analyst_cls),
         patch("api.main._rate_limiter", permissive_limiter),
         patch("api.main.get_shared_llm", return_value=mock_llm),
         patch("api.main.get_shared_checkpointer", return_value=mock_checkpointer),

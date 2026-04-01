@@ -199,6 +199,40 @@ def test_rate_limiting() -> None:
     assert 429 in statuses, "Expected at least one 429 Too Many Requests response"
 
 
+def test_rate_limiting_on_research() -> None:
+    """Exceeding the rate limit on POST /research must eventually return 429."""
+    from core.security import RateLimiter
+
+    tight_limiter = RateLimiter(max_requests=3, window_seconds=60.0)
+    mock_agent = MagicMock()
+    mock_agent.run_structured.return_value = MagicMock(
+        query="q",
+        summary="s",
+        findings=[],
+        sources=[],
+        confidence=0.5,
+        metadata={},
+    )
+
+    with (
+        patch("api.main.ResearchAgent", return_value=mock_agent),
+        patch("api.main._rate_limiter", tight_limiter),
+        patch("api.main.get_shared_llm", return_value=MagicMock(spec=True)),
+        patch("api.main.get_shared_checkpointer", return_value=MagicMock()),
+    ):
+        from api.main import app
+
+        with TestClient(app, raise_server_exceptions=False) as client:
+            statuses = []
+            for _ in range(10):
+                r = client.post(
+                    "/research", json={"query": "What is quantum computing?"}
+                )
+                statuses.append(r.status_code)
+
+    assert 429 in statuses, "Expected at least one 429 Too Many Requests response"
+
+
 # ---------------------------------------------------------------------------
 # Security headers
 # ---------------------------------------------------------------------------
@@ -210,6 +244,9 @@ def test_security_headers(test_client: TestClient) -> None:
 
     assert response.headers.get("x-content-type-options") == "nosniff"
     assert response.headers.get("x-frame-options") == "DENY"
+    assert response.headers.get("content-security-policy") == "default-src 'self'"
+    assert response.headers.get("referrer-policy") == "strict-origin-when-cross-origin"
+    assert response.headers.get("cache-control") == "no-store"
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +293,49 @@ def test_get_session_history_unknown_session_returns_empty(
     assert response.status_code == 200
     data = response.json()
     assert data["total"] == 0
+
+
+def test_get_session_history_with_populated_data() -> None:
+    """GET /sessions/{id}/history returns entries when runs exist for the session."""
+    from core.security import RateLimiter
+
+    permissive = RateLimiter(max_requests=10_000, window_seconds=60.0)
+
+    with (
+        patch("api.main._rate_limiter", permissive),
+        patch("api.main.get_shared_llm", return_value=MagicMock(spec=True)),
+        patch("api.main.get_shared_checkpointer", return_value=MagicMock()),
+    ):
+        from api.main import app
+
+        with TestClient(app, raise_server_exceptions=False) as client:
+            import api.main as api_module
+
+            mem = api_module._shared_memory
+            if mem is not None:
+                mem.save_run(
+                    run_id="test-run-populated-001",
+                    query="What is AI?",
+                    result={"summary": "AI is intelligence demonstrated by machines."},
+                    metadata={"session_id": "populated-session-xyz"},
+                )
+                mem.save_run(
+                    run_id="test-run-populated-002",
+                    query="What is ML?",
+                    result={"summary": "ML is a subset of AI."},
+                    metadata={"session_id": "populated-session-xyz"},
+                )
+
+            response = client.get("/sessions/populated-session-xyz/history")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] >= 2
+    assert len(data["entries"]) >= 2
+    assert data["entries"][0]["run_id"] in (
+        "test-run-populated-001",
+        "test-run-populated-002",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -349,6 +429,26 @@ def test_auth_exempt_health_path(
     assert response.status_code == 200
 
 
+def test_auth_exempt_docs_path(
+    mock_analysis_report: MagicMock,
+) -> None:
+    """GET /docs must be accessible without auth token when API_KEY is set."""
+    with _auth_client_ctx(mock_analysis_report, "secret-token") as client:
+        response = client.get("/docs")
+
+    assert response.status_code == 200
+
+
+def test_auth_exempt_openapi_path(
+    mock_analysis_report: MagicMock,
+) -> None:
+    """GET /openapi.json must be accessible without auth token when API_KEY is set."""
+    with _auth_client_ctx(mock_analysis_report, "secret-token") as client:
+        response = client.get("/openapi.json")
+
+    assert response.status_code == 200
+
+
 def test_auth_disabled_when_no_api_key(test_client: TestClient) -> None:
     """All requests pass through when API_KEY is not configured."""
     # test_client fixture has no API_KEY set — /run should return 200 (mocked)
@@ -428,4 +528,115 @@ def test_run_returns_503_when_llm_not_configured() -> None:
         with TestClient(app, raise_server_exceptions=False) as client:
             response = client.post("/run", json={"query": "test"})
 
+    assert response.status_code == 503
+
+
+# ---------------------------------------------------------------------------
+# SSE done event and timeout tests
+# ---------------------------------------------------------------------------
+
+
+def test_run_stream_done_event_has_required_fields(test_client: TestClient) -> None:
+    """The SSE 'done' event must contain run_id, session_id, confidence, executive_summary."""
+    response = test_client.post("/run/stream", json={"query": "test query"})
+    assert response.status_code == 200
+
+    done_events = []
+    for line in response.text.strip().split("\n"):
+        line = line.strip()
+        if line.startswith("data: "):
+            payload = json.loads(line[6:])
+            if payload.get("type") == "done":
+                done_events.append(payload)
+
+    assert len(done_events) == 1, "Expected exactly one 'done' event"
+    done = done_events[0]
+    assert "run_id" in done
+    assert "session_id" in done
+    assert "confidence" in done
+    assert "executive_summary" in done
+
+
+def test_run_stream_timeout_returns_error_event() -> None:
+    """When ResearchAgent.run_structured raises AgentTimeoutError, SSE emits an error event."""
+    from core.security import RateLimiter
+
+    permissive = RateLimiter(max_requests=10_000, window_seconds=60.0)
+    mock_agent = MagicMock()
+    mock_agent.run_structured.side_effect = AgentTimeoutError("Step budget exceeded")
+
+    with (
+        patch("api.main.ResearchAgent", return_value=mock_agent),
+        patch("api.main._rate_limiter", permissive),
+        patch("api.main.get_shared_llm", return_value=MagicMock(spec=True)),
+        patch("api.main.get_shared_checkpointer", return_value=MagicMock()),
+    ):
+        from api.main import app
+
+        with TestClient(app, raise_server_exceptions=False) as client:
+            response = client.post("/run/stream", json={"query": "test query"})
+
+    assert response.status_code == 200
+
+    error_events = []
+    for line in response.text.strip().split("\n"):
+        line = line.strip()
+        if line.startswith("data: "):
+            payload = json.loads(line[6:])
+            if payload.get("type") == "error":
+                error_events.append(payload)
+
+    assert len(error_events) >= 1, "Expected at least one 'error' event"
+    assert "timed out" in error_events[0]["message"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Shutdown guard — 503 on all endpoints
+# ---------------------------------------------------------------------------
+
+
+def _shutdown_client_ctx():
+    """Context manager: TestClient with _shutting_down set after lifespan init."""
+    from core.security import RateLimiter
+
+    permissive = RateLimiter(max_requests=10_000, window_seconds=60.0)
+
+    @contextmanager
+    def _ctx():
+        with (
+            patch("api.main._rate_limiter", permissive),
+            patch("api.main.get_shared_llm", return_value=MagicMock(spec=True)),
+            patch("api.main.get_shared_checkpointer", return_value=MagicMock()),
+        ):
+            import api.main as api_module
+            from api.main import app
+
+            with TestClient(app, raise_server_exceptions=False) as client:
+                api_module._shutting_down.set()
+                try:
+                    yield client
+                finally:
+                    api_module._shutting_down.clear()
+
+    return _ctx()
+
+
+def test_run_returns_503_when_shutting_down() -> None:
+    """POST /run returns 503 when _shutting_down is set."""
+    with _shutdown_client_ctx() as client:
+        response = client.post("/run", json={"query": "test"})
+    assert response.status_code == 503
+
+
+def test_stream_returns_503_when_shutting_down() -> None:
+    """POST /run/stream returns 503 when _shutting_down is set."""
+    with _shutdown_client_ctx() as client:
+        response = client.post("/run/stream", json={"query": "test"})
+    assert response.status_code == 503
+
+
+def test_research_returns_503_when_shutting_down() -> None:
+    """POST /research returns 503 when _shutting_down is set."""
+    with _shutdown_client_ctx() as client:
+        response = client.post("/research", json={"query": "test"})
     assert response.status_code == 503
