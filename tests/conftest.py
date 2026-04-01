@@ -15,6 +15,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
+from agents.models import AnalysisReport, ResearchResult
+
 # ---------------------------------------------------------------------------
 # Environment must be patched BEFORE the settings singleton is imported.
 # LLM_PROVIDER=anthropic with a dummy key so Settings loads without error.
@@ -31,58 +33,57 @@ os.environ.setdefault("ENVIRONMENT", "development")
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture(scope="session")
-def mock_research_result() -> MagicMock:
-    """
-    Return a MagicMock that behaves like a ResearchResult dataclass.
+@pytest.fixture()
+def mock_research_result() -> ResearchResult:
+    """Return a real ``ResearchResult`` instance for testing.
 
-    Scope: session — the object is immutable across all tests.
+    Scope: function — each test gets a fresh copy to avoid shared state.
     """
-    result = MagicMock()
-    result.query = "What is quantum computing?"
-    result.summary = "Quantum computing uses qubits to perform computations."
-    result.findings = [
-        "Quantum computers leverage superposition and entanglement.",
-        "Current hardware is still in the NISQ era.",
-    ]
-    result.sources = [
-        "https://example.com/quantum",
-        "https://news.example.com/quantum-computing",
-    ]
-    result.confidence = 0.85
-    result.metadata = {"agent": "ResearchAgent", "thread_id": "test-thread-001"}
-    return result
-
-
-@pytest.fixture(scope="session")
-def mock_analysis_report() -> MagicMock:
-    """
-    Return a MagicMock that behaves like an AnalysisReport dataclass.
-
-    Scope: session — the object is immutable across all tests.
-    """
-    report = MagicMock()
-    report.query = "What is quantum computing?"
-    report.executive_summary = (
-        "Quantum computing represents a paradigm shift in computational power, "
-        "leveraging quantum mechanics to solve problems intractable for classical computers."
+    return ResearchResult(
+        query="What is quantum computing?",
+        summary="Quantum computing uses qubits to perform computations.",
+        findings=[
+            "Quantum computers leverage superposition and entanglement.",
+            "Current hardware is still in the NISQ era.",
+        ],
+        sources=[
+            "https://example.com/quantum",
+            "https://news.example.com/quantum-computing",
+        ],
+        confidence=0.85,
+        metadata={"agent": "ResearchAgent", "thread_id": "test-thread-001"},
     )
-    report.key_insights = [
-        "Qubits enable superposition, exponentially expanding the solution space.",
-        "Error correction remains the dominant engineering challenge.",
-    ]
-    report.patterns = [
-        "Rapid hardware iteration across multiple qubit modalities.",
-        "Growing investment from both public and private sectors.",
-    ]
-    report.implications = [
-        "Cryptographic systems based on integer factorisation will need replacement.",
-        "Drug discovery and material science stand to benefit most in the near term.",
-    ]
-    report.confidence = 0.82
-    report.research_summary = "Quantum computing uses qubits to perform computations."
-    report.metadata = {"run_id": "test-run-001", "agent": "AnalystAgent"}
-    return report
+
+
+@pytest.fixture()
+def mock_analysis_report() -> AnalysisReport:
+    """Return a real ``AnalysisReport`` instance for testing.
+
+    Scope: function — each test gets a fresh copy to avoid shared state.
+    """
+    return AnalysisReport(
+        query="What is quantum computing?",
+        executive_summary=(
+            "Quantum computing represents a paradigm shift in computational power, "
+            "leveraging quantum mechanics to solve problems intractable for classical "
+            "computers."
+        ),
+        key_insights=[
+            "Qubits enable superposition, exponentially expanding the solution space.",
+            "Error correction remains the dominant engineering challenge.",
+        ],
+        patterns=[
+            "Rapid hardware iteration across multiple qubit modalities.",
+            "Growing investment from both public and private sectors.",
+        ],
+        implications=[
+            "Cryptographic systems based on integer factorisation will need replacement.",
+            "Drug discovery and material science stand to benefit most in the near term.",
+        ],
+        confidence=0.82,
+        research_summary="Quantum computing uses qubits to perform computations.",
+        metadata={"run_id": "test-run-001", "agent": "AnalystAgent"},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -92,8 +93,8 @@ def mock_analysis_report() -> MagicMock:
 
 @pytest.fixture(scope="function")
 def test_client(
-    mock_research_result: MagicMock,
-    mock_analysis_report: MagicMock,
+    mock_research_result: ResearchResult,
+    mock_analysis_report: AnalysisReport,
 ) -> Generator[TestClient, None, None]:
     """
     Return a FastAPI TestClient with MultiAgentGraph and ResearchAgent mocked.
