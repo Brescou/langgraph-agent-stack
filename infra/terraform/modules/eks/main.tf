@@ -257,7 +257,7 @@ resource "kubernetes_secret" "anthropic_api_key" {
 
   type = "Opaque"
 
-  data = {
+  string_data = {
     ANTHROPIC_API_KEY = var.anthropic_api_key
   }
 }

@@ -31,6 +31,8 @@ COPY uv.lock* ./
 # --locked  : respect the lockfile if present, fail if out of date
 # --no-dev  : skip development dependencies
 # LLM_EXTRAS: provider extras to include (e.g. "anthropic", "openai", "all-providers")
+# For Redis/Postgres in production, extend the extras:
+#   docker build --build-arg LLM_EXTRAS="anthropic,redis" .
 ARG LLM_EXTRAS="anthropic"
 RUN uv sync --locked --no-dev --extra ${LLM_EXTRAS}
 
