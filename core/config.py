@@ -143,7 +143,7 @@ class Settings(BaseSettings):
 
     # --- API server ---
     api_host: str = Field(
-        default="0.0.0.0",
+        default="0.0.0.0",  # noqa: S104  # nosec B104 — required for container networking
         description="Host the FastAPI application binds to.",
     )
     api_port: int = Field(
