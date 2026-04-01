@@ -336,11 +336,12 @@ async def rate_limit_middleware(request: Request, call_next: Any) -> Any:
     """
     Enforce a per-IP sliding-window rate limit on all incoming requests.
 
-    The health endpoint is excluded so Kubernetes probes are never blocked.
+    The ``/health`` and ``/ready`` endpoints are excluded so Kubernetes
+    liveness and readiness probes are never blocked.
     When a client exceeds the limit a ``429 Too Many Requests`` response is
     returned immediately without forwarding the request to any handler.
     """
-    if request.url.path == "/health":
+    if request.url.path in {"/health", "/ready"}:
         return await call_next(request)
 
     client_ip: str = request.client.host if request.client else "unknown"
@@ -462,9 +463,7 @@ async def health(
     components: dict[str, ComponentHealth] = {}
 
     if _shared_llm is not None:
-        components["llm"] = ComponentHealth(
-            status="ok", detail=settings.llm_provider.value
-        )
+        components["llm"] = ComponentHealth(status="ok", detail=settings.llm_provider)
     else:
         components["llm"] = ComponentHealth(
             status="degraded", detail="LLM not initialised"
