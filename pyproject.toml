@@ -50,6 +50,13 @@ rag = [
     "langchain-chroma>=0.1",
     "chromadb>=0.5",
 ]
+observability = [
+    "opentelemetry-api>=1.20",
+    "opentelemetry-sdk>=1.20",
+    "opentelemetry-instrumentation-fastapi>=0.44b0",
+    "opentelemetry-exporter-otlp>=1.20",
+    "python-json-logger>=2.0",
+]
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.24",

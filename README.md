@@ -502,7 +502,6 @@ langgraph-agent-stack/
 │   ├── Dockerfile          # Multi-stage build (builder + non-root runtime)
 │   ├── docker-compose.yml  # Local stack with optional Redis profile
 │   ├── helm/               # Helm chart for Kubernetes deployment
-│   ├── k8s/                # Raw Kubernetes manifests (deployment, service, configmap, secret)
 │   └── terraform/          # Terraform modules for GKE Autopilot and EKS
 ├── examples/
 │   ├── sequential/         # Linear Research → Analysis pipeline

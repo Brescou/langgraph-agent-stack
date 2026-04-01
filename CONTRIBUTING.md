@@ -173,7 +173,7 @@ Branch names must be lowercase with hyphens — no underscores, no uppercase.
 ## Reporting Issues
 
 - Check existing issues before opening a new one.
-- For security vulnerabilities, follow the process in [SECURITY.md](SECURITY.md) — do not open a public issue.
+- For security vulnerabilities, follow the process in [docs/security.md](docs/security.md) — do not open a public issue.
 - For bugs, include: Python version, `uv` version, the full error traceback, and a minimal reproduction.
 
 ## License

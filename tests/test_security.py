@@ -259,6 +259,8 @@ class TestSanitizeLogData:
 class TestValidateApiKeyFormat:
     """Tests for validate_api_key_format()."""
 
+    # --- Anthropic (default provider) ---
+
     def test_valid_key_format(self) -> None:
         """A well-formed Anthropic key must return True."""
         assert validate_api_key_format("sk-ant-test123456789012345") is True
@@ -268,8 +270,11 @@ class TestValidateApiKeyFormat:
         assert validate_api_key_format("sk-ant-api03-abc_DEF-123456") is True
 
     def test_invalid_key_wrong_prefix(self) -> None:
-        """Keys not starting with 'sk-ant-' must return False."""
-        assert validate_api_key_format("sk-wrong-1234567890") is False
+        """Keys not starting with 'sk-ant-' must return False for Anthropic."""
+        assert (
+            validate_api_key_format("sk-wrong-1234567890", provider="anthropic")
+            is False
+        )
 
     def test_invalid_key_too_short_suffix(self) -> None:
         """Keys with fewer than 10 characters after 'sk-ant-' must return False."""
@@ -290,3 +295,39 @@ class TestValidateApiKeyFormat:
     def test_valid_key_minimum_length_suffix(self) -> None:
         """A key with exactly 10 characters after 'sk-ant-' must return True."""
         assert validate_api_key_format("sk-ant-1234567890") is True
+
+    # --- OpenAI ---
+
+    def test_openai_valid_key(self) -> None:
+        """A well-formed OpenAI key must return True."""
+        assert validate_api_key_format("sk-" + "a" * 48, provider="openai") is True
+
+    def test_openai_invalid_key_wrong_prefix(self) -> None:
+        """Keys without 'sk-' prefix must return False for OpenAI."""
+        assert validate_api_key_format("pk-" + "a" * 48, provider="openai") is False
+
+    def test_openai_invalid_key_too_short(self) -> None:
+        """OpenAI keys shorter than 20 chars after prefix must return False."""
+        assert validate_api_key_format("sk-short", provider="openai") is False
+
+    # --- Azure ---
+
+    def test_azure_valid_key(self) -> None:
+        """A 32-character hex string must return True for Azure."""
+        assert validate_api_key_format("a" * 32, provider="azure") is True
+
+    def test_azure_invalid_key_wrong_format(self) -> None:
+        """Non-hex Azure keys must return False."""
+        assert (
+            validate_api_key_format("not-a-hex-key-at-all!!", provider="azure") is False
+        )
+
+    # --- Generic fallback ---
+
+    def test_generic_provider_valid_key(self) -> None:
+        """Unknown providers use a generic 8+ char alphanumeric check."""
+        assert validate_api_key_format("abcdefgh12345", provider="google") is True
+
+    def test_generic_provider_key_too_short(self) -> None:
+        """Keys shorter than 8 chars must return False for unknown providers."""
+        assert validate_api_key_format("short", provider="google") is False

@@ -137,8 +137,8 @@ cp .env.example .env
 
 ### Staging / Production — Kubernetes
 
-**Do not commit `infra/k8s/secret.yaml` with real values.** The file contains
-only placeholder base64 strings to document the required keys.
+**Do not commit Kubernetes secret manifests with real values.** The Helm chart
+manages secrets via `values.yaml` and `existingSecret` references.
 
 The recommended production approach is **External Secrets Operator**, which
 pulls secrets from a managed secret store and creates native Kubernetes `Secret`
