@@ -43,6 +43,18 @@ variable "llm_provider" {
   default     = "anthropic"
 }
 
+variable "helm_release_name" {
+  description = "Name of the Helm release — must match the IRSA service account subject."
+  type        = string
+  default     = "langgraph"
+}
+
+variable "eks_version" {
+  description = "Kubernetes version for the EKS cluster."
+  type        = string
+  default     = "1.31"
+}
+
 # ---------------------------------------------------------------------------
 # EKS node group sizing
 # ---------------------------------------------------------------------------

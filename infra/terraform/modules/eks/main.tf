@@ -67,7 +67,7 @@ resource "aws_iam_role_policy_attachment" "eks_cluster_policy" {
 resource "aws_eks_cluster" "main" {
   name     = var.cluster_name
   role_arn = aws_iam_role.eks_cluster.arn
-  version  = "1.29"
+  version  = var.eks_version
 
   vpc_config {
     subnet_ids = data.aws_subnets.default.ids
@@ -167,7 +167,7 @@ resource "aws_iam_role" "langgraph_irsa" {
       }
       Condition = {
         StringEquals = {
-          "${replace(aws_eks_cluster.main.identity[0].oidc[0].issuer, "https://", "")}:sub" = "system:serviceaccount:${var.namespace}:langgraph-agent-stack"
+          "${replace(aws_eks_cluster.main.identity[0].oidc[0].issuer, "https://", "")}:sub" = "system:serviceaccount:${var.namespace}:${var.helm_release_name}-langgraph-agent-stack"
           "${replace(aws_eks_cluster.main.identity[0].oidc[0].issuer, "https://", "")}:aud" = "sts.amazonaws.com"
         }
       }
@@ -292,12 +292,6 @@ resource "helm_release" "langgraph" {
   set {
     name  = "secrets.existingSecret"
     value = kubernetes_secret.anthropic_api_key.metadata[0].name
-  }
-
-  # Sensitive override — kept out of Helm manifest plaintext.
-  set_sensitive {
-    name  = "secrets.anthropicApiKey"
-    value = var.anthropic_api_key
   }
 
   depends_on = [kubernetes_namespace.langgraph]

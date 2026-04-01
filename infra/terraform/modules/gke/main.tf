@@ -26,8 +26,7 @@ resource "google_container_cluster" "main" {
     workload_pool = "${var.project_id}.svc.id.goog"
   }
 
-  # Retain the cluster if Terraform is destroyed accidentally in production.
-  deletion_protection = false
+  deletion_protection = var.environment == "production" ? true : false
 }
 
 # ---------------------------------------------------------------------------
@@ -115,12 +114,6 @@ resource "helm_release" "langgraph" {
   set {
     name  = "secrets.existingSecret"
     value = kubernetes_secret.anthropic_api_key.metadata[0].name
-  }
-
-  # Sensitive override — Terraform marks this value as sensitive in state.
-  set_sensitive {
-    name  = "secrets.anthropicApiKey"
-    value = var.anthropic_api_key
   }
 
   depends_on = [kubernetes_namespace.langgraph]

@@ -6,9 +6,9 @@ metadata:
   namespace: {{ .Values.namespace.name }}
   labels:
     {{- include "langgraph-agent-stack.labels" . | nindent 4 }}
-  annotations:
-    kubernetes.io/ingress.class: {{ .Values.ingress.className }}
+  annotations: {}
 spec:
+  ingressClassName: {{ .Values.ingress.className }}
   {{- if .Values.ingress.tls }}
   tls:
     - hosts:

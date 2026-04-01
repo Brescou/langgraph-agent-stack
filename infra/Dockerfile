@@ -30,7 +30,9 @@ COPY uv.lock* ./
 # Install production dependencies into an explicit virtual environment
 # --frozen  : respect the lockfile if present, fail if out of date
 # --no-dev  : skip development dependencies
-RUN uv sync --frozen --no-dev
+# LLM_EXTRAS: provider extras to include (e.g. "anthropic", "openai", "all-providers")
+ARG LLM_EXTRAS="anthropic"
+RUN uv sync --frozen --no-dev --extra ${LLM_EXTRAS}
 
 # =============================================================================
 # Stage 2 — runtime
