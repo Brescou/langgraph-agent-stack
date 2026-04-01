@@ -41,6 +41,15 @@ redis = [
     "redis>=5",
     "langgraph-checkpoint-redis>=0.0.6",
 ]
+postgres = [
+    "asyncpg>=0.29",
+    "psycopg[binary]>=3.1",
+    "langgraph-checkpoint-postgres>=2.0",
+]
+rag = [
+    "langchain-chroma>=0.1",
+    "chromadb>=0.5",
+]
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.24",

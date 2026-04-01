@@ -212,6 +212,25 @@ secrets:
   existingSecret: langgraph-secrets  # chart will not create a Secret
 ```
 
+## Infrastructure as Code
+
+Terraform modules for GKE (Autopilot) and EKS in `infra/terraform/`.
+
+```bash
+cd infra/terraform
+terraform init
+
+# GKE (default)
+terraform apply -var-file=environments/dev.tfvars \
+  -var="project_id=my-gcp-project" \
+  -var="anthropic_api_key=$ANTHROPIC_API_KEY"
+
+# EKS
+terraform apply -var-file=environments/dev.tfvars \
+  -var="cloud_provider=eks" \
+  -var="anthropic_api_key=$ANTHROPIC_API_KEY"
+```
+
 ## API Reference
 
 | Method | Path | Description |
@@ -219,6 +238,8 @@ secrets:
 | `POST` | `/run` | Run the full Research + Analysis pipeline. Returns a structured `AnalysisReport`. |
 | `POST` | `/research` | Run the Research phase only. Returns a `ResearchResult` without downstream analysis. |
 | `GET` | `/health` | Liveness and readiness probe. Returns service status, version, uptime, and environment. |
+| `POST` | `/run/stream` | Execute pipeline and stream results as Server-Sent Events |
+| `GET` | `/sessions/{session_id}/history` | Retrieve run history for a session |
 
 **POST /run**
 
@@ -268,6 +289,23 @@ secrets:
 }
 ```
 
+**POST /run/stream**
+
+```bash
+curl -X POST http://localhost:8000/run/stream \
+  -H "Content-Type: application/json" \
+  -H "Accept: text/event-stream" \
+  -d '{"query": "Latest AI advances"}'
+```
+
+Events are delivered as Server-Sent Events:
+
+```
+data: {"type": "status", "message": "Starting research phase..."}
+data: {"type": "agent_switch", "from": "researcher", "to": "analyst"}
+data: {"type": "done", "run_id": "...", "session_id": "...", "confidence": 0.87}
+```
+
 Rate limit: 60 requests per minute per IP. Exceeding the limit returns `429 Too Many Requests` with a `Retry-After` header. The `/health` endpoint is exempt from rate limiting so Kubernetes probes are never blocked.
 
 ## Configuration
@@ -280,13 +318,16 @@ All configuration is loaded from environment variables. Copy `.env.example` to `
 | `ANTHROPIC_API_KEY` | Anthropic API key | — | Required if `LLM_PROVIDER=anthropic` |
 | `ANTHROPIC_MODEL` | Claude model name | `claude-3-5-sonnet-20241022` | Optional |
 | `MAX_TOKENS` | Maximum tokens per LLM call | `4096` | No |
-| `MEMORY_BACKEND` | Checkpoint backend: `sqlite` or `redis` | `sqlite` | No |
+| `MEMORY_BACKEND` | Memory backend: `sqlite`, `redis`, or `postgres` | `sqlite` | Optional |
 | `SQLITE_PATH` | Path to the SQLite database file | `./data/agent_memory.db` | No |
 | `REDIS_URL` | Redis connection URL | `redis://localhost:6379/0` | Only when `MEMORY_BACKEND=redis` |
+| `POSTGRES_URL` | PostgreSQL DSN | — | Required if `MEMORY_BACKEND=postgres` |
 | `API_HOST` | Host the server binds to | `0.0.0.0` | No |
 | `API_PORT` | TCP port the server listens on | `8000` | No |
 | `LOG_LEVEL` | Logging verbosity: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` | `INFO` | No |
 | `ENVIRONMENT` | Deployment environment label: `development`, `staging`, `production` | `development` | No |
+| `RAG_ENABLED` | Enable vector store RAG | `false` | Optional |
+| `STREAM_TIMEOUT_SECONDS` | SSE stream timeout | `120` | Optional |
 
 See `.env.example` for all provider-specific variables (OpenAI, Google, Bedrock, Azure, Ollama).
 
@@ -308,6 +349,17 @@ uv run black --check .
 ```
 
 Both checks run automatically in CI on every push and pull request.
+
+### Makefile shortcuts
+
+```bash
+make install    # uv sync --all-extras
+make test       # uv run pytest
+make lint       # uv run ruff check .
+make check      # lint + format check (CI)
+make docker-run # docker compose up --build
+make helm-lint  # validate Helm chart
+```
 
 **Project structure**
 
@@ -365,6 +417,19 @@ No code changes required — the factory in `core/llm.py` handles instantiation.
 1. Set `MEMORY_BACKEND=redis` and `REDIS_URL=redis://your-host:6379/0` in your environment.
 2. Install the optional Redis extras: `uv sync --extra redis`.
 3. When deploying with Docker Compose, start with `--profile redis` to bring up the Redis service alongside the application.
+
+## Examples
+
+Four ready-to-run multi-agent patterns in `examples/`:
+
+| Pattern | Description | Run |
+|---------|-------------|-----|
+| Sequential | Linear Research → Analysis pipeline | `uv run python examples/sequential/graph.py` |
+| Parallel | Three analysts run simultaneously | `uv run python examples/parallel/graph.py` |
+| Supervisor | Dynamic routing to specialist agents | `uv run python examples/supervisor/graph.py` |
+| Human-in-loop | Pause for human approval | `uv run python examples/human_in_loop/graph.py` |
+
+See `examples/README.md` for architecture details.
 
 ## License
 
