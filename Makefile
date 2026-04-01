@@ -40,7 +40,7 @@ test: ## Run the test suite with verbose output
 test-cov: ## Run tests with coverage report for agents, core and api
 	$(UV) run pytest tests/ --cov=agents --cov=core --cov=api --cov-report=term-missing
 
-lint: ## Check code style with ruff (auto-fix)
+lint: ## Check code style with ruff
 	$(UV) run ruff check .
 
 format: ## Format source code with black

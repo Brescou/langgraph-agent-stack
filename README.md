@@ -251,15 +251,15 @@ curl -X POST http://localhost:8000/run \
 
 ```json
 {
-  "run_id": "uuid",
-  "session_id": "uuid",
-  "summary": "string",
+  "query": "Latest advances in quantum computing",
+  "executive_summary": "string",
   "key_insights": ["string"],
   "patterns": ["string"],
   "implications": ["string"],
   "confidence": 0.87,
-  "query": "string",
-  "timestamp": "ISO 8601"
+  "research_summary": "string",
+  "metadata": {},
+  "session_id": "uuid"
 }
 ```
 
@@ -280,7 +280,7 @@ Events are delivered as Server-Sent Events:
 data: {"type": "status", "message": "Starting research phase..."}
 data: {"type": "agent_switch", "from": "researcher", "to": "analyst"}
 data: {"type": "status", "message": "Starting analysis phase..."}
-data: {"type": "done", "run_id": "...", "session_id": "...", "confidence": 0.87, ...}
+data: {"type": "done", "session_id": "...", "confidence": 0.87, ...}
 ```
 
 The stream enforces a wall-clock timeout controlled by `STREAM_TIMEOUT_SECONDS` (default 120s). On timeout, a final `{"type": "error", "message": "Stream timed out after 120s"}` event is emitted.
@@ -295,14 +295,13 @@ The stream enforces a wall-clock timeout controlled by `STREAM_TIMEOUT_SECONDS` 
 
 // Response
 {
-  "run_id": "uuid",
-  "session_id": "uuid",
+  "query": "string",
   "summary": "string",
   "findings": ["string"],
   "sources": ["string"],
   "confidence": 0.91,
-  "query": "string",
-  "timestamp": "ISO 8601"
+  "metadata": {},
+  "session_id": "uuid"
 }
 ```
 
@@ -315,7 +314,11 @@ The stream enforces a wall-clock timeout controlled by `STREAM_TIMEOUT_SECONDS` 
   "status": "ok",
   "version": "0.1.0",
   "uptime_seconds": 142.3,
-  "environment": "development"
+  "environment": "development",
+  "components": {
+    "llm": { "status": "ok", "detail": "" },
+    "memory": { "status": "ok", "detail": "" }
+  }
 }
 ```
 

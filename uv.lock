@@ -1561,13 +1561,6 @@ anthropic = [
 bedrock = [
     { name = "langchain-aws" },
 ]
-dev = [
-    { name = "black" },
-    { name = "httpx" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "ruff" },
-]
 google = [
     { name = "langchain-google-genai" },
 ]
@@ -1612,10 +1605,8 @@ dev = [
 requires-dist = [
     { name = "aiosqlite", specifier = ">=0.20" },
     { name = "asyncpg", marker = "extra == 'postgres'", specifier = ">=0.29" },
-    { name = "black", marker = "extra == 'dev'", specifier = ">=24" },
     { name = "chromadb", marker = "extra == 'rag'", specifier = ">=0.5" },
     { name = "fastapi", specifier = ">=0.115" },
-    { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
     { name = "langchain", specifier = ">=0.3" },
     { name = "langchain-anthropic", marker = "extra == 'all-providers'", specifier = ">=0.3" },
     { name = "langchain-anthropic", marker = "extra == 'anthropic'", specifier = ">=0.3" },
@@ -1641,15 +1632,12 @@ requires-dist = [
     { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.1" },
     { name = "pydantic", specifier = ">=2.9" },
     { name = "pydantic-settings", specifier = ">=2.6" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
     { name = "python-json-logger", marker = "extra == 'observability'", specifier = ">=2.0" },
     { name = "redis", marker = "extra == 'redis'", specifier = ">=5" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8" },
     { name = "sqlalchemy", specifier = ">=2.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
 ]
-provides-extras = ["anthropic", "openai", "google", "bedrock", "ollama", "all-providers", "redis", "postgres", "rag", "observability", "dev"]
+provides-extras = ["anthropic", "openai", "google", "bedrock", "ollama", "all-providers", "redis", "postgres", "rag", "observability"]
 
 [package.metadata.requires-dev]
 dev = [
