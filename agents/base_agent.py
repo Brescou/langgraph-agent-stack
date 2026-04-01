@@ -342,6 +342,10 @@ class BaseAgent(abc.ABC):
                     ).inc()
                 return result
             except (TimeoutError, ConnectionError) as exc:
+                if llm_requests_total is not None:
+                    llm_requests_total.labels(
+                        provider=settings.llm_provider, status="retryable_error"
+                    ).inc()
                 last_exc = exc
                 if attempt < max_retries:
                     delay = min(base_delay * (2**attempt), max_delay) * (
@@ -358,6 +362,11 @@ class BaseAgent(abc.ABC):
             except Exception as exc:
                 err_str = str(exc).lower()
                 if "429" in err_str or "rate" in err_str:
+                    if llm_requests_total is not None:
+                        llm_requests_total.labels(
+                            provider=settings.llm_provider,
+                            status="retryable_error",
+                        ).inc()
                     last_exc = exc
                     if attempt < max_retries:
                         delay = min(base_delay * (2**attempt), max_delay) * (
@@ -372,13 +381,17 @@ class BaseAgent(abc.ABC):
                         )
                         time.sleep(delay)
                     continue
+                if llm_requests_total is not None:
+                    llm_requests_total.labels(
+                        provider=settings.llm_provider, status="fatal_error"
+                    ).inc()
                 raise AgentExecutionError(
                     f"[{self.name}] LLM call failed: {exc}"
                 ) from exc
 
         if llm_requests_total is not None:
             llm_requests_total.labels(
-                provider=settings.llm_provider, status="error"
+                provider=settings.llm_provider, status="fatal_error"
             ).inc()
         raise AgentExecutionError(
             f"[{self.name}] LLM call failed after {max_retries + 1} attempts: {last_exc}"
