@@ -264,3 +264,40 @@ def test_get_default_tools_with_memory_includes_recall() -> None:
         names = [t.name for t in tools]
 
     assert "recall_history" in names
+
+
+# ---------------------------------------------------------------------------
+# Calculator: Pow guard and builtins
+# ---------------------------------------------------------------------------
+
+
+class TestCalculatorPowGuard:
+    """Tests for the calculator exponentiation guard and built-in functions."""
+
+    def test_large_exponent_rejected(self) -> None:
+        """Calculator should reject exponents larger than 1000."""
+        tools = get_default_tools()
+        calc = next(t for t in tools if t.name == "calculator")
+        result = calc.invoke({"expression": "2 ** 1001"})
+        assert "error" in result.lower() or "too large" in result.lower()
+
+    def test_normal_exponent_allowed(self) -> None:
+        """Calculator should allow reasonable exponents."""
+        tools = get_default_tools()
+        calc = next(t for t in tools if t.name == "calculator")
+        result = calc.invoke({"expression": "2 ** 10"})
+        assert "1024" in result
+
+    def test_min_function(self) -> None:
+        """Calculator should support min()."""
+        tools = get_default_tools()
+        calc = next(t for t in tools if t.name == "calculator")
+        result = calc.invoke({"expression": "min(3, 1, 2)"})
+        assert "1" in result
+
+    def test_max_function(self) -> None:
+        """Calculator should support max()."""
+        tools = get_default_tools()
+        calc = next(t for t in tools if t.name == "calculator")
+        result = calc.invoke({"expression": "max(3, 1, 2)"})
+        assert "3" in result
