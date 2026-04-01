@@ -28,6 +28,7 @@ from typing_extensions import TypedDict
 
 from core.config import get_settings
 from core.llm import get_llm
+from core.observability import llm_requests_total
 from core.memory import create_checkpointer
 from core.security import InputValidator
 from core.tools import get_default_tools
@@ -330,10 +331,16 @@ class BaseAgent(abc.ABC):
         Raises:
             AgentExecutionError: When all retries are exhausted.
         """
+        settings = get_settings()
         last_exc: Exception | None = None
         for attempt in range(max_retries + 1):
             try:
-                return self.llm.invoke(messages)
+                result = self.llm.invoke(messages)
+                if llm_requests_total is not None:
+                    llm_requests_total.labels(
+                        provider=settings.llm_provider, status="success"
+                    ).inc()
+                return result
             except (TimeoutError, ConnectionError) as exc:
                 last_exc = exc
                 if attempt < max_retries:
@@ -369,6 +376,10 @@ class BaseAgent(abc.ABC):
                     f"[{self.name}] LLM call failed: {exc}"
                 ) from exc
 
+        if llm_requests_total is not None:
+            llm_requests_total.labels(
+                provider=settings.llm_provider, status="error"
+            ).inc()
         raise AgentExecutionError(
             f"[{self.name}] LLM call failed after {max_retries + 1} attempts: {last_exc}"
         ) from last_exc
