@@ -390,3 +390,80 @@ class TestAnalystAgent:
 
         assert isinstance(output, str)
         assert len(output) > 0
+
+
+# ---------------------------------------------------------------------------
+# LLM retry metric tests
+# ---------------------------------------------------------------------------
+
+
+class TestRetryMetrics:
+    """Verify llm_requests_total is incremented per attempt, not per invocation."""
+
+    def test_retry_counts_each_attempt(self) -> None:
+        """Each retry increments retryable_error, final success increments success."""
+        mock_counter = MagicMock()
+        mock_labels = MagicMock()
+        mock_counter.labels.return_value = mock_labels
+
+        mock_llm = MagicMock()
+        mock_llm.bind_tools.return_value = mock_llm
+        mock_llm.invoke.side_effect = [
+            TimeoutError("timeout"),
+            _make_ai_message("ok"),
+        ]
+
+        with (
+            patch("agents.base_agent.get_llm", return_value=mock_llm),
+            patch("agents.base_agent.llm_requests_total", mock_counter),
+            patch("agents.base_agent.time.sleep"),
+        ):
+            agent = ResearchAgent()
+            result = agent._invoke_llm_with_retry(
+                [HumanMessage(content="test")],
+                max_retries=2,
+                base_delay=0.01,
+            )
+
+        assert result.content == "ok"
+        calls = mock_counter.labels.call_args_list
+        label_kwargs = [c.kwargs for c in calls]
+        retryable = sum(
+            1 for kw in label_kwargs if kw.get("status") == "retryable_error"
+        )
+        success = sum(1 for kw in label_kwargs if kw.get("status") == "success")
+        assert retryable == 1
+        assert success == 1
+
+    def test_all_retries_exhausted_counts_fatal(self) -> None:
+        """When all retries are exhausted, fatal_error is incremented."""
+        from agents.base_agent import AgentExecutionError
+
+        mock_counter = MagicMock()
+        mock_labels = MagicMock()
+        mock_counter.labels.return_value = mock_labels
+
+        mock_llm = MagicMock()
+        mock_llm.bind_tools.return_value = mock_llm
+        mock_llm.invoke.side_effect = TimeoutError("timeout")
+
+        with (
+            patch("agents.base_agent.get_llm", return_value=mock_llm),
+            patch("agents.base_agent.llm_requests_total", mock_counter),
+            patch("agents.base_agent.time.sleep"),
+        ):
+            agent = ResearchAgent()
+            with pytest.raises(AgentExecutionError):
+                agent._invoke_llm_with_retry(
+                    [HumanMessage(content="test")],
+                    max_retries=1,
+                    base_delay=0.01,
+                )
+
+        label_kwargs = [c.kwargs for c in mock_counter.labels.call_args_list]
+        retryable = sum(
+            1 for kw in label_kwargs if kw.get("status") == "retryable_error"
+        )
+        fatal = sum(1 for kw in label_kwargs if kw.get("status") == "fatal_error")
+        assert retryable == 2  # initial attempt + 1 retry
+        assert fatal == 1

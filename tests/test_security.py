@@ -7,7 +7,7 @@ validate_api_key_format.  All tests are fully isolated and synchronous.
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -372,3 +372,45 @@ class TestRateLimiterEviction:
                 limiter.is_allowed(f"10.0.0.{i % 256}")
 
         assert limiter.is_allowed("192.168.1.1")
+
+
+# ---------------------------------------------------------------------------
+# create_rate_limiter factory
+# ---------------------------------------------------------------------------
+
+
+class TestCreateRateLimiter:
+    """Tests for the rate limiter factory function."""
+
+    def test_memory_backend_returns_rate_limiter(self) -> None:
+        """Factory with backend='memory' returns an InMemoryRateLimiter."""
+        from core.security import InMemoryRateLimiter, create_rate_limiter
+
+        limiter = create_rate_limiter(backend="memory")
+        assert isinstance(limiter, InMemoryRateLimiter)
+
+    def test_redis_backend_without_url_falls_back(self) -> None:
+        """Factory with backend='redis' but no URL falls back to in-memory."""
+        from core.security import InMemoryRateLimiter, create_rate_limiter
+
+        limiter = create_rate_limiter(backend="redis", redis_url="")
+        assert isinstance(limiter, InMemoryRateLimiter)
+
+    def test_redis_backend_with_url_creates_redis_limiter(self) -> None:
+        """Factory with backend='redis' and a URL creates RedisRateLimiter."""
+        from core.security import RedisRateLimiter, create_rate_limiter
+
+        mock_redis = MagicMock()
+        mock_redis.register_script.return_value = MagicMock()
+
+        try:
+            import redis as redis_lib  # noqa: F811
+
+            with patch.object(redis_lib.Redis, "from_url", return_value=mock_redis):
+                limiter = create_rate_limiter(
+                    backend="redis",
+                    redis_url="redis://localhost:6379/0",
+                )
+                assert isinstance(limiter, RedisRateLimiter)
+        except ImportError:
+            pytest.skip("redis package not installed")

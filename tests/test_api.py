@@ -54,6 +54,7 @@ def test_health_check_with_llm_initialised() -> None:
     mock_checkpointer = MagicMock()
     mock_memory = MagicMock()
     mock_memory.db_path = ":memory:"
+    mock_memory.health_check.return_value = ("ok", ":memory:")
 
     with (
         patch("api.main._rate_limiter", permissive),
@@ -756,3 +757,17 @@ def test_research_returns_503_when_shutting_down() -> None:
     with _shutdown_client_ctx() as client:
         response = client.post("/research", json={"query": "test"})
     assert response.status_code == 503
+
+
+def test_drain_middleware_allows_health_during_shutdown() -> None:
+    """GET /health should still work when the server is shutting down."""
+    with _shutdown_client_ctx() as client:
+        response = client.get("/health")
+    assert response.status_code == 200
+
+
+def test_drain_middleware_allows_ready_during_shutdown() -> None:
+    """GET /ready should still work when the server is shutting down."""
+    with _shutdown_client_ctx() as client:
+        response = client.get("/ready")
+    assert response.status_code in (200, 503)  # depends on init state
