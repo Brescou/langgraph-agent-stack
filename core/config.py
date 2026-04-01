@@ -152,6 +152,21 @@ class Settings(BaseSettings):
         le=65535,
         description="TCP port the FastAPI application listens on.",
     )
+    cors_origins_raw: str = Field(
+        default="",
+        validation_alias="CORS_ORIGINS",
+        exclude=True,
+        description="Raw comma-separated CORS origins string from the environment.",
+    )
+
+    @property
+    def cors_origins(self) -> list[str]:
+        """Return the list of allowed CORS origins parsed from ``CORS_ORIGINS``."""
+        return [
+            origin.strip()
+            for origin in self.cors_origins_raw.split(",")
+            if origin.strip()
+        ]
 
     # --- Agent behaviour ---
     max_research_iterations: int = Field(

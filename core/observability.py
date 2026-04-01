@@ -20,11 +20,39 @@ installed, standard ``logging`` and no-op tracing are used instead.
 
 from __future__ import annotations
 
+import contextvars
 import logging
 import os
 from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any
+
+# ---------------------------------------------------------------------------
+# Request ID context variable — propagates request_id through async call chains
+# ---------------------------------------------------------------------------
+
+_request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "request_id", default=""
+)
+
+
+def set_request_id(request_id: str) -> None:
+    """Set the current request ID in the context variable."""
+    _request_id_var.set(request_id)
+
+
+def get_request_id() -> str:
+    """Return the current request ID, or empty string if not set."""
+    return _request_id_var.get()
+
+
+class RequestIdFilter(logging.Filter):
+    """Inject request_id into every log record from the context variable."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.request_id = get_request_id()  # type: ignore[attr-defined]
+        return True
+
 
 # ---------------------------------------------------------------------------
 # Structured JSON logging
@@ -61,6 +89,7 @@ def configure_logging(level: str = "INFO") -> None:
         formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
 
     handler.setFormatter(formatter)
+    handler.addFilter(RequestIdFilter())
     root.addHandler(handler)
 
 
@@ -173,3 +202,54 @@ def trace_span(
             for k, v in attributes.items():
                 span.set_attribute(k, v)
         yield span
+
+
+# ---------------------------------------------------------------------------
+# Prometheus metrics
+# ---------------------------------------------------------------------------
+
+try:
+    from prometheus_client import (
+        Counter,
+        Gauge,
+        Histogram,
+        make_asgi_app,
+    )
+
+    http_requests_total = Counter(
+        "http_requests_total",
+        "Total HTTP requests",
+        ["method", "path", "status_code"],
+    )
+    http_request_duration_seconds = Histogram(
+        "http_request_duration_seconds",
+        "HTTP request duration in seconds",
+        ["path"],
+        buckets=[0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0],
+    )
+    llm_requests_total = Counter(
+        "llm_requests_total",
+        "Total LLM API calls",
+        ["provider", "status"],
+    )
+    active_pipelines = Gauge(
+        "active_pipelines",
+        "Currently running agent pipelines",
+    )
+
+    def create_metrics_app() -> Any:
+        """Return ASGI app for /metrics endpoint."""
+        return make_asgi_app()
+
+    _PROMETHEUS_AVAILABLE = True
+
+except ImportError:
+    http_requests_total = None  # type: ignore[assignment]
+    http_request_duration_seconds = None  # type: ignore[assignment]
+    llm_requests_total = None  # type: ignore[assignment]
+    active_pipelines = None  # type: ignore[assignment]
+    _PROMETHEUS_AVAILABLE = False
+
+    def create_metrics_app() -> Any:
+        """No-op when prometheus-client is not installed."""
+        return None

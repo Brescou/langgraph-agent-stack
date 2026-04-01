@@ -327,9 +327,16 @@ class ConversationMemory:
         self._conn: sqlite3.Connection = sqlite3.connect(
             str(self.db_path),
             check_same_thread=False,
-            isolation_level="DEFERRED",
+            isolation_level=None,  # autocommit for PRAGMAs
+            timeout=30,
         )
         self._conn.row_factory = sqlite3.Row
+        # Enable WAL mode for concurrent read/write access
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA synchronous=NORMAL")
+        self._conn.execute("PRAGMA cache_size=1000")
+        # Switch to DEFERRED transactions after PRAGMAs
+        self._conn.isolation_level = "DEFERRED"
         self._lock = threading.Lock()
         self._apply_schema()
 
