@@ -99,7 +99,9 @@ class MultiAgentGraph:
         self.run_id: str = run_id or str(uuid.uuid4())
         self._llm = llm
         self._checkpointer = checkpointer or create_checkpointer(get_settings())
-        self._executor = ThreadPoolExecutor(max_workers=1)
+        self._executor = ThreadPoolExecutor(
+            max_workers=get_settings().thread_pool_max_workers
+        )
         self._research_agent: ResearchAgent | None = None
         self._analyst_agent: AnalystAgent | None = None
         self._graph = self._build_graph()

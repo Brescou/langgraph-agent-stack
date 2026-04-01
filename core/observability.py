@@ -111,7 +111,16 @@ def init_tracing(service_name: str = "langgraph-agent-stack") -> None:
     provider = TracerProvider(resource=resource)
 
     otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
-    exporter = OTLPSpanExporter(endpoint=otlp_endpoint, insecure=True)
+    otel_insecure = os.getenv("OTEL_EXPORTER_OTLP_INSECURE", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    is_local = "localhost" in otlp_endpoint or "127.0.0.1" in otlp_endpoint
+    if otel_insecure or is_local:
+        exporter = OTLPSpanExporter(endpoint=otlp_endpoint, insecure=True)
+    else:
+        exporter = OTLPSpanExporter(endpoint=otlp_endpoint)
     provider.add_span_processor(BatchSpanProcessor(exporter))
 
     trace.set_tracer_provider(provider)

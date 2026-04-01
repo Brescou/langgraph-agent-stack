@@ -66,6 +66,17 @@ from core.config import MemoryBackend, Settings
 
 logger = logging.getLogger(__name__)
 
+
+def _fallback_or_raise(message: str) -> MemorySaver:
+    """Return ``MemorySaver`` in development; raise ``RuntimeError`` in production."""
+    from core.config import get_settings
+
+    if get_settings().environment != "development":
+        raise RuntimeError(message)
+    logger.warning(message + " — falling back to MemorySaver (dev only).")
+    return MemorySaver()
+
+
 # ---------------------------------------------------------------------------
 # Checkpointer factory
 # ---------------------------------------------------------------------------
@@ -111,7 +122,9 @@ def create_checkpointer(settings: Settings) -> Any:
         "Unknown memory_backend %r — falling back to MemorySaver.",
         backend,
     )
-    return MemorySaver()
+    return _fallback_or_raise(
+        f"Unknown memory_backend {backend!r} — cannot create checkpointer."
+    )
 
 
 def _create_sqlite_checkpointer(sqlite_path: str) -> Any:
@@ -148,7 +161,7 @@ def _create_sqlite_checkpointer(sqlite_path: str) -> Any:
             "MemorySaver.  Install with: pip install langgraph-checkpoint-sqlite",
             extra={"sqlite_path": sqlite_path},
         )
-        return MemorySaver()
+        return _fallback_or_raise("langgraph-checkpoint-sqlite not installed.")
 
 
 def _create_redis_checkpointer(redis_url: str) -> Any:
@@ -180,7 +193,7 @@ def _create_redis_checkpointer(redis_url: str) -> Any:
             "MemorySaver.  Install with: pip install langgraph-checkpoint-redis",
             extra={"redis_url": redis_url.split("@")[-1]},
         )
-        return MemorySaver()
+        return _fallback_or_raise("langgraph-checkpoint-redis not installed.")
 
 
 def _create_postgres_checkpointer(postgres_url: str | None) -> Any:
@@ -206,7 +219,9 @@ def _create_postgres_checkpointer(postgres_url: str | None) -> Any:
             "MEMORY_BACKEND=postgres but POSTGRES_URL is not set — "
             "falling back to MemorySaver."
         )
-        return MemorySaver()
+        return _fallback_or_raise(
+            "MEMORY_BACKEND=postgres but POSTGRES_URL is not set."
+        )
 
     try:
         from langgraph.checkpoint.postgres.aio import (
@@ -226,7 +241,7 @@ def _create_postgres_checkpointer(postgres_url: str | None) -> Any:
             "MemorySaver.  Install with: uv sync --extra postgres",
             extra={"postgres_url": postgres_url.split("@")[-1]},
         )
-        return MemorySaver()
+        return _fallback_or_raise("langgraph-checkpoint-postgres not installed.")
 
 
 # ---------------------------------------------------------------------------
