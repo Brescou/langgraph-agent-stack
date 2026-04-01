@@ -3,10 +3,11 @@ api/main.py — Production-ready FastAPI application for the LangGraph agent sta
 
 Exposes three functional endpoints over the multi-agent pipeline:
 
-* ``POST /run``       — Full Research + Analysis pipeline via ``MultiAgentGraph``.
-* ``POST /research``  — Research-only pipeline via ``ResearchAgent``.
-* ``GET  /health``    — Lightweight health/liveness probe.
-* ``GET  /``          — Redirect to the auto-generated ``/docs`` UI.
+* ``POST /run``        — Full Research + Analysis pipeline via ``MultiAgentGraph``.
+* ``POST /run/stream`` — Same pipeline streamed as Server-Sent Events.
+* ``POST /research``   — Research-only pipeline via ``ResearchAgent``.
+* ``GET  /health``     — Lightweight health/liveness probe.
+* ``GET  /``           — Redirect to the auto-generated ``/docs`` UI.
 
 Architecture notes
 ------------------
@@ -23,6 +24,7 @@ Architecture notes
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 import uuid
@@ -33,8 +35,9 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 
+from agents.analyst import AnalystAgent
 from agents.base_agent import (
     AgentExecutionError,
     AgentTimeoutError,
@@ -43,6 +46,8 @@ from agents.base_agent import (
 from agents.researcher import ResearchAgent
 from api.models import (
     HealthResponse,
+    HistoryEntry,
+    HistoryResponse,
     ResearchRequest,
     ResearchResponse,
     RunRequest,
@@ -383,16 +388,31 @@ async def run_pipeline(body: RunRequest) -> RunResponse:
             detail="Query must not be empty.",
         )
 
+    session_id = body.session_id or str(uuid.uuid4())
     run_id = str(uuid.uuid4())
     logger.info(
         "POST /run — pipeline started",
-        extra={"run_id": run_id, "query_preview": query[:120]},
+        extra={"run_id": run_id, "session_id": session_id, "query_preview": query[:120]},
     )
 
     def _execute() -> RunResponse:
         pipeline = MultiAgentGraph(run_id=run_id)
         report = pipeline.run(query)
-        return RunResponse.from_analysis_report(report)
+
+        from core.memory import ConversationMemory
+
+        with ConversationMemory(settings.sqlite_path) as mem:
+            mem.save_run(
+                run_id=run_id,
+                query=query,
+                result=vars(report) if hasattr(report, "__dict__") else {},
+                metadata={
+                    "session_id": session_id,
+                    "agent": "MultiAgentGraph",
+                },
+            )
+
+        return RunResponse.from_analysis_report(report, session_id=session_id)
 
     try:
         response = await _run_in_executor(_execute)
@@ -437,11 +457,166 @@ async def run_pipeline(body: RunRequest) -> RunResponse:
         "POST /run — pipeline completed",
         extra={
             "run_id": run_id,
+            "session_id": session_id,
             "confidence": response.confidence,
             "insights_count": len(response.key_insights),
         },
     )
     return response
+
+
+# ---------------------------------------------------------------------------
+# SSE streaming helpers
+# ---------------------------------------------------------------------------
+
+
+async def _stream_pipeline(
+    query: str,
+    session_id: str,
+    run_id: str,
+) -> AsyncGenerator[str, None]:
+    """
+    Async generator that executes the Research + Analysis pipeline and yields
+    SSE-formatted event strings.
+
+    Each yielded string is a complete SSE event of the form::
+
+        data: <json payload>\\n\\n
+
+    Event types emitted:
+
+    * ``status``       — Progress message (``{"type": "status", "message": "…"}``).
+    * ``agent_switch`` — Transition between agents
+                         (``{"type": "agent_switch", "from": "…", "to": "…"}``).
+    * ``done``         — Final success event with traceability metadata
+                         (``{"type": "done", "run_id": "…", "session_id": "…",
+                         "confidence": 0.87}``).
+    * ``error``        — Terminal error event
+                         (``{"type": "error", "message": "…"}``).
+
+    Args:
+        query: Validated user query string.
+        session_id: Session identifier for memory persistence.
+        run_id: Unique identifier for this pipeline run.
+
+    Yields:
+        SSE-formatted strings ready to be sent as ``text/event-stream`` chunks.
+    """
+    try:
+        yield f"data: {json.dumps({'type': 'status', 'message': 'Starting research phase...'})}\n\n"
+
+        loop = asyncio.get_running_loop()
+        research_agent = ResearchAgent(thread_id=session_id)
+        research_result = await loop.run_in_executor(
+            _executor, research_agent.run_structured, query
+        )
+
+        yield f"data: {json.dumps({'type': 'agent_switch', 'from': 'researcher', 'to': 'analyst'})}\n\n"
+        yield f"data: {json.dumps({'type': 'status', 'message': 'Starting analysis phase...'})}\n\n"
+
+        analyst_agent = AnalystAgent(thread_id=session_id)
+        report = await loop.run_in_executor(
+            _executor, analyst_agent.run_structured, research_result
+        )
+
+        logger.info(
+            "POST /run/stream — pipeline completed",
+            extra={
+                "run_id": run_id,
+                "session_id": session_id,
+                "confidence": report.confidence,
+            },
+        )
+
+        yield f"data: {json.dumps({'type': 'done', 'run_id': run_id, 'session_id': session_id, 'confidence': report.confidence})}\n\n"
+
+    except AgentTimeoutError as exc:
+        logger.error(
+            "POST /run/stream — pipeline timeout",
+            extra={"run_id": run_id, "error": str(exc)},
+        )
+        yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+    except (AgentExecutionError, AgentValidationError) as exc:
+        logger.error(
+            "POST /run/stream — pipeline error",
+            extra={"run_id": run_id, "error": str(exc)},
+        )
+        yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+    except Exception as exc:
+        logger.exception(
+            "POST /run/stream — unexpected error",
+            extra={"run_id": run_id, "error": str(exc)},
+        )
+        yield f"data: {json.dumps({'type': 'error', 'message': 'An unexpected error occurred.'})}\n\n"
+
+
+@app.post(
+    "/run/stream",
+    status_code=status.HTTP_200_OK,
+    tags=["Pipeline"],
+    summary="Stream the full Research + Analysis pipeline as Server-Sent Events",
+    response_description=(
+        "A text/event-stream response emitting status, agent_switch, done, "
+        "and error SSE events as the pipeline progresses."
+    ),
+)
+async def run_stream(body: RunRequest, request: Request) -> StreamingResponse:
+    """
+    Execute the complete multi-agent pipeline and stream progress as SSE.
+
+    The pipeline sequences two LangGraph agents:
+
+    1. ``ResearchAgent``  — expands the query and produces a ``ResearchResult``.
+    2. ``AnalystAgent``   — consumes the research and produces an ``AnalysisReport``.
+
+    SSE event types
+    ---------------
+    * ``status``       — ``{"type": "status", "message": "…"}``
+    * ``agent_switch`` — ``{"type": "agent_switch", "from": "researcher", "to": "analyst"}``
+    * ``done``         — ``{"type": "done", "run_id": "…", "session_id": "…", "confidence": 0.87}``
+    * ``error``        — ``{"type": "error", "message": "…"}``
+
+    Args:
+        body: Request body containing the ``query`` string and optional ``session_id``.
+        request: The raw FastAPI ``Request`` (used for client metadata).
+
+    Returns:
+        A ``StreamingResponse`` with ``media_type="text/event-stream"``.
+
+    Raises:
+        422 Unprocessable Entity: When the request body fails schema validation.
+        400 Bad Request: When the query is empty after stripping whitespace.
+    """
+    try:
+        query = _input_validator.validate(body.query)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    if not query:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Query must not be empty.",
+        )
+
+    session_id = body.session_id or str(uuid.uuid4())
+    run_id = str(uuid.uuid4())
+
+    logger.info(
+        "POST /run/stream — pipeline started",
+        extra={"run_id": run_id, "session_id": session_id, "query_preview": query[:120]},
+    )
+
+    return StreamingResponse(
+        _stream_pipeline(query, session_id, run_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.post(
@@ -492,16 +667,31 @@ async def run_research(body: ResearchRequest) -> ResearchResponse:
             detail="Query must not be empty.",
         )
 
+    session_id = body.session_id or str(uuid.uuid4())
     run_id = str(uuid.uuid4())
     logger.info(
         "POST /research — started",
-        extra={"run_id": run_id, "query_preview": query[:120]},
+        extra={"run_id": run_id, "session_id": session_id, "query_preview": query[:120]},
     )
 
     def _execute() -> ResearchResponse:
         agent = ResearchAgent(thread_id=run_id)
         result = agent.run_structured(query)
-        return ResearchResponse.from_research_result(result)
+
+        from core.memory import ConversationMemory
+
+        with ConversationMemory(settings.sqlite_path) as mem:
+            mem.save_run(
+                run_id=run_id,
+                query=query,
+                result=vars(result) if hasattr(result, "__dict__") else {},
+                metadata={
+                    "session_id": session_id,
+                    "agent": "ResearchAgent",
+                },
+            )
+
+        return ResearchResponse.from_research_result(result, session_id=session_id)
 
     try:
         response = await _run_in_executor(_execute)
@@ -546,8 +736,56 @@ async def run_research(body: ResearchRequest) -> ResearchResponse:
         "POST /research — completed",
         extra={
             "run_id": run_id,
+            "session_id": session_id,
             "confidence": response.confidence,
             "findings_count": len(response.findings),
         },
     )
     return response
+
+
+@app.get(
+    "/sessions/{session_id}/history",
+    response_model=HistoryResponse,
+    status_code=status.HTTP_200_OK,
+    tags=["Sessions"],
+    summary="Retrieve run history for a session",
+    response_description="Ordered list of run records associated with the given session ID.",
+)
+async def get_session_history(session_id: str) -> HistoryResponse:
+    """
+    Return all run records associated with ``session_id``.
+
+    Scans the most recent 100 runs in ``ConversationMemory`` and filters those
+    whose ``metadata.session_id`` matches the requested session.  The results
+    are returned newest-first (the underlying ``list_runs`` query orders by
+    ``created_at DESC``).
+
+    Args:
+        session_id: The session identifier to look up (URL path parameter).
+
+    Returns:
+        A ``HistoryResponse`` with the matching entries and a total count.
+    """
+    from core.memory import ConversationMemory
+
+    with ConversationMemory(settings.sqlite_path) as mem:
+        all_runs = mem.list_runs(limit=100)
+        entries = [
+            HistoryEntry(
+                run_id=r["run_id"],
+                query=r["query"],
+                result_summary=str(r.get("result", {}) or "")[:200],
+                created_at=r.get("created_at", ""),
+                metadata=r.get("metadata", {}),
+            )
+            for r in all_runs
+            if r.get("metadata", {}).get("session_id") == session_id
+        ]
+
+    logger.info(
+        "GET /sessions/%s/history — %d entries returned",
+        session_id,
+        len(entries),
+    )
+    return HistoryResponse(session_id=session_id, entries=entries, total=len(entries))
