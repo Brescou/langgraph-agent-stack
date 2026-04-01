@@ -135,7 +135,7 @@ class AnalystAgent(BaseAgent):
         )
 
         try:
-            response = self.llm.invoke(
+            response = self._invoke_llm_with_retry(
                 [
                     SystemMessage(content="You are a rigorous analytical thinker."),
                     HumanMessage(content=analysis_prompt),
@@ -145,6 +145,7 @@ class AnalystAgent(BaseAgent):
             insights: list[str] = parsed.get("insights", [])
             confidence: float = float(parsed.get("confidence", 0.7))
         except Exception:
+            logger.warning("Analyze node parsing failed", exc_info=True)
             insights = ["Analysis completed — structured extraction failed."]
             confidence = 0.5
 
@@ -187,7 +188,7 @@ class AnalystAgent(BaseAgent):
         )
 
         try:
-            response = self.llm.invoke(
+            response = self._invoke_llm_with_retry(
                 [
                     SystemMessage(content="You are a strategic pattern synthesiser."),
                     HumanMessage(content=synthesis_prompt),
@@ -197,6 +198,7 @@ class AnalystAgent(BaseAgent):
             patterns: list[str] = parsed.get("patterns", [])
             implications: list[str] = parsed.get("implications", [])
         except Exception:
+            logger.warning("Synthesize node parsing failed", exc_info=True)
             patterns = ["Pattern synthesis unavailable."]
             implications = ["Implication extraction unavailable."]
 
@@ -248,13 +250,13 @@ class AnalystAgent(BaseAgent):
         )
 
         try:
-            exec_response = self.llm.invoke(
+            exec_response = self._invoke_llm_with_retry(
                 [
                     SystemMessage(content="You are a precise executive report writer."),
                     HumanMessage(content=exec_summary_prompt),
                 ]
             )
-            exec_summary: str = str(exec_response.content).strip()
+            exec_summary: str = _extract_text_content(exec_response.content).strip()
         except Exception:
             exec_summary = (
                 f"Analysis of '{query}' completed with "

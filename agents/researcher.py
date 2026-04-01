@@ -131,7 +131,7 @@ class ResearchAgent(BaseAgent):
             "information. Return ONLY a JSON array of strings."
         )
         try:
-            expansion_msg = self.llm.invoke(
+            expansion_msg = self._invoke_llm_with_retry(
                 [
                     SystemMessage(content="You are a precise research query expander."),
                     HumanMessage(content=expansion_prompt),
@@ -219,7 +219,7 @@ class ResearchAgent(BaseAgent):
         )
 
         try:
-            validation_msg = self.llm.invoke(
+            validation_msg = self._invoke_llm_with_retry(
                 [
                     SystemMessage(
                         content="You are a strict research quality assessor."
@@ -230,9 +230,14 @@ class ResearchAgent(BaseAgent):
             result = json.loads(_extract_text_content(validation_msg.content))
             is_sufficient: bool = bool(result.get("sufficient", True))
             reason: str = result.get("reason", "")
+        except json.JSONDecodeError:
+            is_sufficient = False
+            reason = (
+                "Validation parsing failed — defaulting to insufficient for safety."
+            )
         except Exception:
-            is_sufficient = True
-            reason = "Validation parsing failed — defaulting to sufficient."
+            is_sufficient = False
+            reason = "Validation failed unexpectedly — defaulting to insufficient."
 
         self._log.info(
             "Validate node completed",
@@ -277,7 +282,7 @@ class ResearchAgent(BaseAgent):
         summary_text = "Summary unavailable."
         confidence = 0.5
         try:
-            summary_msg = self.llm.invoke(
+            summary_msg = self._invoke_llm_with_retry(
                 [
                     SystemMessage(content="You are a precise research summariser."),
                     HumanMessage(content=summary_prompt),
@@ -287,7 +292,7 @@ class ResearchAgent(BaseAgent):
             summary_text = parsed.get("summary", str(summary_msg.content))
             confidence = float(parsed.get("confidence", 0.7))
         except json.JSONDecodeError:
-            summary_text = str(summary_msg.content)
+            summary_text = _extract_text_content(summary_msg.content)
         except Exception:
             logger.warning(
                 "Summarize node parsing failed — using defaults",
