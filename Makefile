@@ -9,7 +9,7 @@ HELM_CHART   := infra/helm/langgraph-agent-stack
 
 .PHONY: help install run run-ollama \
         test test-cov lint format check \
-        docker-build docker-run docker-redis docker-down \
+        docker-build docker-run docker-redis docker-down docker-smoke \
         helm-lint helm-dev helm-prod helm-dry-run helm-uninstall \
         tf-init tf-plan tf-apply \
         clean
@@ -63,6 +63,9 @@ docker-redis: ## Start all services including the redis profile
 
 docker-down: ## Stop and remove all docker compose containers
 	$(DOCKER_COMPOSE) down
+
+docker-smoke: ## Run Docker smoke test (build + /health + /docs + non-root)
+	bash tests/smoke_test_docker.sh
 
 # ─── Helm ────────────────────────────────────────────────────────────────────
 
