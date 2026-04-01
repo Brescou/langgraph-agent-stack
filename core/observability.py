@@ -61,40 +61,44 @@ class SanitizingFilter(logging.Filter):
     strips passwords, tokens, API keys, and URLs with embedded credentials.
     """
 
+    _PROTECTED_ATTRS = frozenset({
+        "name",
+        "msg",
+        "args",
+        "created",
+        "relativeCreated",
+        "exc_info",
+        "exc_text",
+        "stack_info",
+        "lineno",
+        "funcName",
+        "pathname",
+        "filename",
+        "module",
+        "levelno",
+        "levelname",
+        "message",
+        "msecs",
+        "process",
+        "processName",
+        "thread",
+        "threadName",
+        "request_id",
+        "taskName",
+    })
+
     def filter(self, record: logging.LogRecord) -> bool:
         from core.security import sanitize_log_data
 
-        if hasattr(record, "__dict__"):
-            for key in list(record.__dict__):
-                if key.startswith("_") or key in {
-                    "name",
-                    "msg",
-                    "args",
-                    "created",
-                    "relativeCreated",
-                    "exc_info",
-                    "exc_text",
-                    "stack_info",
-                    "lineno",
-                    "funcName",
-                    "pathname",
-                    "filename",
-                    "module",
-                    "levelno",
-                    "levelname",
-                    "message",
-                    "msecs",
-                    "process",
-                    "processName",
-                    "thread",
-                    "threadName",
-                    "request_id",
-                    "taskName",
-                }:
-                    continue
-                value = getattr(record, key, None)
-                if isinstance(value, dict):
-                    setattr(record, key, sanitize_log_data(value))
+        extras = {
+            k: getattr(record, k)
+            for k in list(record.__dict__)
+            if not k.startswith("_") and k not in self._PROTECTED_ATTRS
+        }
+        if extras:
+            sanitized = sanitize_log_data(extras)
+            for k, v in sanitized.items():
+                setattr(record, k, v)
         return True
 
 

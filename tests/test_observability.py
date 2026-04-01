@@ -100,7 +100,7 @@ class TestSanitizingFilter:
         assert record.extra_data["password"] == "***REDACTED***"  # type: ignore[attr-defined]
         assert record.extra_data["user"] == "alice"  # type: ignore[attr-defined]
 
-    def test_leaves_non_dict_extras_untouched(self) -> None:
+    def test_leaves_non_sensitive_extras_untouched(self) -> None:
         from core.observability import SanitizingFilter
 
         filt = SanitizingFilter()
@@ -116,6 +116,28 @@ class TestSanitizingFilter:
         record.run_id = "abc-123"  # type: ignore[attr-defined]
         filt.filter(record)
         assert record.run_id == "abc-123"  # type: ignore[attr-defined]
+
+    def test_redacts_scalar_sensitive_extras(self) -> None:
+        """Scalar extras with sensitive key names are redacted."""
+        from core.observability import SanitizingFilter
+
+        filt = SanitizingFilter()
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="test",
+            args=None,
+            exc_info=None,
+        )
+        record.api_key = "sk-live-abc123"  # type: ignore[attr-defined]
+        record.token = "tok_secret"  # type: ignore[attr-defined]
+        record.user = "alice"  # type: ignore[attr-defined]
+        filt.filter(record)
+        assert record.api_key == "***REDACTED***"  # type: ignore[attr-defined]
+        assert record.token == "***REDACTED***"  # type: ignore[attr-defined]
+        assert record.user == "alice"  # type: ignore[attr-defined]
 
 
 class TestTraceSpan:
