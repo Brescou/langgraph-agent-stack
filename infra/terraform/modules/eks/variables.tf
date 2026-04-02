@@ -33,8 +33,8 @@ variable "helm_chart_path" {
 
 variable "anthropic_api_key" {
   description = "Anthropic API key — injected as a Kubernetes secret, never logged."
-  type      = string
-  sensitive = true
+  type        = string
+  sensitive   = true
 }
 
 variable "llm_provider" {

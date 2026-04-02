@@ -30,8 +30,8 @@ variable "environment" {
 
 variable "anthropic_api_key" {
   description = "Anthropic API key injected into the Helm release as a Kubernetes secret. Must never be stored in plaintext."
-  type      = string
-  sensitive = true
+  type        = string
+  sensitive   = true
 }
 
 variable "llm_provider" {
