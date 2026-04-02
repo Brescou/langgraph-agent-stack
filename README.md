@@ -492,9 +492,14 @@ redacted by a `SanitizingFilter` before serialisation.
 **Prometheus metrics** — When `prometheus-client` is installed, the
 `/metrics` endpoint exposes:
 
-- `http_requests_total` — counter by method/path/status
-- `http_request_duration_seconds` — histogram by path
-- `active_pipelines` — gauge of in-flight pipeline executions
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `http_requests_total` | Counter | method, path, status_code | Total HTTP requests |
+| `http_request_duration_seconds` | Histogram | path | Request latency (buckets: 0.1s–30s) |
+| `llm_requests_total` | Counter | provider, status | LLM API calls per attempt (success / retryable_error / fatal_error) |
+| `active_pipelines` | Gauge | — | Currently running agent pipelines |
+| `server_shutting_down` | Gauge | — | 1 during graceful drain, 0 otherwise |
+| `requests_rejected_during_shutdown_total` | Counter | — | Requests rejected with 503 during shutdown |
 
 To include metrics in your Docker image, build with:
 
