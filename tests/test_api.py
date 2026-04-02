@@ -85,7 +85,7 @@ def test_health_check_with_llm_initialised() -> None:
     body = response.json()
     assert body["status"] == "ok"
     assert body["components"]["llm"]["status"] == "ok"
-    assert body["components"]["llm"]["detail"] == "anthropic"
+    assert body["components"]["llm"]["detail"] == "anthropic (initialised)"
 
 
 # ---------------------------------------------------------------------------

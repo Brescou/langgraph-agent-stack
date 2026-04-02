@@ -336,13 +336,16 @@ The stream enforces a wall-clock timeout controlled by `STREAM_TIMEOUT_SECONDS` 
   "uptime_seconds": 142.3,
   "environment": "development",
   "components": {
-    "llm": { "status": "ok", "detail": "" },
-    "memory": { "status": "ok", "detail": "" }
+    "llm": { "status": "ok", "detail": "anthropic (initialised)" },
+    "memory": { "status": "ok", "detail": ":memory:" },
+    "checkpointer": { "status": "ok", "detail": "sqlite" }
   }
 }
 ```
 
 This endpoint is exempt from rate limiting so Kubernetes probes are never blocked.
+
+> **Note on LLM health:** The `llm` component reports whether the LLM client is initialised, not whether the upstream provider is reachable. A real provider call on every probe would add latency, consume tokens, and risk hitting rate limits. An expired API key or provider outage will surface on the first pipeline request, not on the liveness probe. The `memory` and `checkpointer` components perform actual connectivity checks (SQLite `SELECT 1`, Redis `PING`, Postgres `SELECT 1`).
 
 ---
 

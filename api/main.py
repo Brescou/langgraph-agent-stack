@@ -588,8 +588,14 @@ async def health(
     """
     components: dict[str, ComponentHealth] = {}
 
+    # LLM health is an initialisation check only — we deliberately do NOT
+    # call the provider on every probe to avoid latency, token cost, and
+    # rate-limit pressure.  A stale API key or provider outage will surface
+    # on the first real request, not on the liveness probe.
     if _shared_llm is not None:
-        components["llm"] = ComponentHealth(status="ok", detail=settings.llm_provider)
+        components["llm"] = ComponentHealth(
+            status="ok", detail=f"{settings.llm_provider} (initialised)"
+        )
     else:
         components["llm"] = ComponentHealth(
             status="degraded", detail="LLM not initialised"
