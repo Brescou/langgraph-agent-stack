@@ -82,7 +82,7 @@ resource "kubernetes_secret" "anthropic_api_key" {
   # Opaque secrets store arbitrary key-value pairs.
   type = "Opaque"
 
-  string_data = {
+  data = {
     # Key name aligned with values.yaml: secrets.anthropicApiKey
     ANTHROPIC_API_KEY = var.anthropic_api_key
   }
