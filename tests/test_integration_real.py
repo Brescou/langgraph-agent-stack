@@ -328,3 +328,57 @@ class TestGraphWithSqliteSaver:
         assert report.research_summary != ""
         assert report.executive_summary != ""
         assert mock_llm.invoke.call_count == 6
+
+
+# ---------------------------------------------------------------------------
+# 2.5 — Full pipeline E2E: MultiAgentGraph + real PostgresSaver + mocked LLM
+# ---------------------------------------------------------------------------
+
+
+@skip_no_tc
+@pytest.mark.skipif(not _check_docker_available(), reason="Docker daemon not reachable")
+@pytest.mark.skipif(
+    not _pg_saver_available(), reason="langgraph-checkpoint-postgres not installed"
+)
+class TestGraphWithPostgresSaver:
+    """Full pipeline E2E: real PostgresSaver via testcontainers, mocked LLM."""
+
+    def test_pipeline_produces_analysis_report(self) -> None:
+        """MultiAgentGraph.run() with a real PostgresSaver produces an AnalysisReport."""
+        from langgraph.checkpoint.postgres import PostgresSaver  # type: ignore[import]
+        from testcontainers.postgres import PostgresContainer
+
+        from agents.models import AnalysisReport
+        from core.graph import MultiAgentGraph
+
+        with PostgresContainer("postgres:16-alpine") as pg:
+            raw_url = pg.get_connection_url()
+            dsn = raw_url.replace("postgresql+psycopg2://", "postgresql://")
+
+            saver = PostgresSaver.from_conn_string(dsn)
+            saver.setup()
+
+            mock_llm = MagicMock()
+            mock_llm.invoke.side_effect = _build_llm_responses()
+
+            with (
+                patch("agents.base_agent.get_llm", return_value=mock_llm),
+                patch("agents.base_agent.create_checkpointer", return_value=saver),
+                patch("core.graph.create_checkpointer", return_value=saver),
+            ):
+                graph = MultiAgentGraph(
+                    run_id="e2e-postgres-test",
+                    llm=mock_llm,
+                    checkpointer=saver,
+                )
+                report = graph.run("What is quantum computing?")
+
+            assert isinstance(report, AnalysisReport)
+            assert report.query == "What is quantum computing?"
+            assert len(report.key_insights) > 0
+            assert len(report.patterns) > 0
+            assert len(report.implications) > 0
+            assert 0.0 <= report.confidence <= 1.0
+            assert report.research_summary != ""
+            assert report.executive_summary != ""
+            assert mock_llm.invoke.call_count == 6

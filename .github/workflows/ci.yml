@@ -6,6 +6,7 @@
 #   infra-lint   — helm lint + terraform validate
 #   test         — pytest with coverage via uv
 #   docker-smoke — build Docker image + startup/health validation
+#   integration  — real backend tests (Postgres/Redis via testcontainers)
 #   build        — Docker image build (push to main only)
 #
 # All Python dependency installation uses uv exclusively (no pip, no poetry).
@@ -208,7 +209,42 @@ jobs:
         run: bash tests/smoke_test_docker.sh
 
 # ---------------------------------------------------------------------------
-# Job 6 — Build Docker image (push to main only)
+# Job 6 — Integration tests (real backends via testcontainers)
+# ---------------------------------------------------------------------------
+  integration:
+    name: Integration tests (Postgres / Redis)
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    env:
+      ANTHROPIC_API_KEY: test-key-not-real
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Cache uv dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-integration-${{ hashFiles('pyproject.toml', 'uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-integration-
+
+      - name: Install dependencies with backend extras
+        run: uv sync --frozen --extra redis --extra postgres
+
+      - name: Run integration tests
+        run: uv run pytest -m integration --tb=short -v
+
+# ---------------------------------------------------------------------------
+# Job 7 — Build Docker image (push to main only)
 # ---------------------------------------------------------------------------
   build:
     name: Build Docker image

@@ -393,6 +393,17 @@ Never combine `allow_origins=["*"]` with `allow_credentials=True`.
 
 60 requests per minute per IP, enforced by a per-IP sliding-window limiter. Exceeding the limit returns `429 Too Many Requests` with a `Retry-After` header.
 
+The rate limiter backend is controlled by `RATE_LIMIT_BACKEND`:
+
+| Value | Scope | Use case |
+|-------|-------|----------|
+| `memory` (default) | Per-process | Local development, single-replica deployments |
+| `redis` | Shared across replicas | Production with multiple pods behind a load balancer |
+
+When using `redis`, the limiter uses a Lua-scripted sliding window on Redis sorted sets, providing a consistent view of request counts across all replicas. Set `REDIS_URL` in your environment to point to a shared Redis instance.
+
+**Fail-open behaviour:** If the Redis instance becomes unreachable, the rate limiter fails open — requests are allowed through and a warning is logged (`Redis rate limiter unreachable — failing open`). This is intentional: rate limiting is a non-critical function and should never block legitimate traffic during a Redis outage. Operators should monitor this log message and the rate of `429` responses to detect degraded rate limiting.
+
 **Input validation**
 
 All queries are validated by `InputValidator` before reaching agent code. Queries exceeding 2000 characters or matching dangerous patterns are rejected with `400 Bad Request`.
