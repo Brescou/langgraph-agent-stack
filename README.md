@@ -517,7 +517,15 @@ uv run pytest --cov=. --cov-report=term-missing
 uv run pytest tests/test_api.py -v
 ```
 
-Tests are fully mocked — no external API calls are made. `conftest.py` patches LLM calls and memory backends for all tests.
+The default test suite is fully mocked — no external API calls or databases are needed. `conftest.py` patches LLM calls and memory backends automatically. Real backend integration tests (Postgres, Redis via testcontainers) live in `tests/test_integration_real.py` and are marked with `@pytest.mark.integration`:
+
+```bash
+# Skip integration tests (fast CI path)
+uv run pytest -m "not integration"
+
+# Run only integration tests (requires Docker)
+uv run pytest -m integration -v
+```
 
 ### Test files
 
@@ -616,7 +624,7 @@ langgraph-agent-stack/
 │   ├── parallel/           # Three analysts running simultaneously
 │   ├── supervisor/         # Dynamic routing to specialist agents
 │   └── human_in_loop/      # Pause graph execution for human approval
-├── tests/                  # Fully mocked test suite (no external API calls)
+├── tests/                  # Unit tests (mocked) + real backend integration tests
 ├── .github/workflows/
 │   ├── ci.yml              # ruff + black + pytest on push/PR
 │   └── security.yml        # gitleaks, bandit, dependency audit
