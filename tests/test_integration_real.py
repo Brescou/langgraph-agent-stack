@@ -145,7 +145,7 @@ class TestRedisReal:
         from langgraph.checkpoint.redis import RedisSaver  # type: ignore[import]
         from testcontainers.redis import RedisContainer
 
-        with RedisContainer("redis:7-alpine") as redis_ct:
+        with RedisContainer("redis/redis-stack-server:latest") as redis_ct:
             host = redis_ct.get_container_host_ip()
             port = redis_ct.get_exposed_port(6379)
             redis_url = f"redis://{host}:{port}/0"
@@ -159,7 +159,7 @@ class TestRedisReal:
 
         from core.memory import create_checkpointer
 
-        with RedisContainer("redis:7-alpine") as redis_ct:
+        with RedisContainer("redis/redis-stack-server:latest") as redis_ct:
             host = redis_ct.get_container_host_ip()
             port = redis_ct.get_exposed_port(6379)
             redis_url = f"redis://{host}:{port}/0"
@@ -408,7 +408,7 @@ class TestGraphWithRedisSaver:
         from agents.models import AnalysisReport
         from core.graph import MultiAgentGraph
 
-        with RedisContainer("redis:7-alpine") as redis_ct:
+        with RedisContainer("redis/redis-stack-server:latest") as redis_ct:
             host = redis_ct.get_container_host_ip()
             port = redis_ct.get_exposed_port(6379)
             redis_url = f"redis://{host}:{port}/0"
