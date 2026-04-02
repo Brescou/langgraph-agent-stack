@@ -342,14 +342,26 @@ class RedisRateLimiter:
         self._prefix = "ratelimit:"
 
     def is_allowed(self, ip: str) -> bool:
-        """Check the rate limit for *ip* using Redis."""
-        now = time.time()
-        key = f"{self._prefix}{ip}"
-        result = self._script(
-            keys=[key],
-            args=[now, self.window_seconds, self.max_requests],
-        )
-        return int(result) >= 0 if result != 0 else False
+        """Check the rate limit for *ip* using Redis.
+
+        Fail-open: if Redis is unreachable the request is allowed and a
+        warning is logged.  Rate limiting is a non-critical function — an
+        outage should never block legitimate traffic.
+        """
+        try:
+            now = time.time()
+            key = f"{self._prefix}{ip}"
+            result = self._script(
+                keys=[key],
+                args=[now, self.window_seconds, self.max_requests],
+            )
+            return int(result) >= 0 if result != 0 else False
+        except Exception as exc:
+            logger.warning(
+                "Redis rate limiter unreachable — failing open (request allowed)",
+                extra={"ip": ip, "error": str(exc)},
+            )
+            return True
 
     def remaining(self, ip: str) -> int:
         """Return remaining requests for *ip* in the current window."""

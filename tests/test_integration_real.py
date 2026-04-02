@@ -9,13 +9,20 @@ These tests require Docker to be running and are marked with
 
 Each test spins up a real database container, exercises the actual code path,
 and tears it down after the test completes.
+
+The ``TestGraphWithSqliteSaver`` class does NOT require Docker: it validates
+the full ``MultiAgentGraph`` pipeline against a real on-disk ``SqliteSaver``
+with the LLM mocked, proving that checkpointing works end-to-end.
 """
 
 from __future__ import annotations
 
+import json
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from langchain_core.messages import AIMessage
 from langgraph.checkpoint.memory import MemorySaver
 
 from core.config import MemoryBackend
@@ -227,3 +234,97 @@ class TestAPIEndToEnd:
                 assert data["session_id"] == "e2e-session"
                 assert data["key_insights"] == ["Insight 1"]
                 assert data["research_summary"] == "Research summary"
+
+
+# ---------------------------------------------------------------------------
+# 2.4 — Full pipeline E2E: MultiAgentGraph + real SqliteSaver + mocked LLM
+# ---------------------------------------------------------------------------
+
+
+def _build_llm_responses() -> list[AIMessage]:
+    """Return canned AIMessage responses for the 6 sequential LLM calls.
+
+    Order (ResearchAgent then AnalystAgent):
+      1. research  — query expansion  → JSON list of sub-queries
+      2. validate  — quality check    → {"sufficient": true, "reason": "..."}
+      3. summarize — final summary    → {"summary": "...", "confidence": 0.85}
+      4. analyze   — extract insights → {"insights": [...], "confidence": 0.8}
+      5. synthesize — patterns        → {"patterns": [...], "implications": [...]}
+      6. report    — exec summary     → plain-text paragraph
+    """
+    return [
+        AIMessage(content=json.dumps(["sub-query-1", "sub-query-2", "sub-query-3"])),
+        AIMessage(
+            content=json.dumps({"sufficient": True, "reason": "Findings are adequate."})
+        ),
+        AIMessage(
+            content=json.dumps(
+                {
+                    "summary": "Quantum computing leverages qubits for computation.",
+                    "confidence": 0.85,
+                }
+            )
+        ),
+        AIMessage(
+            content=json.dumps(
+                {
+                    "insights": [
+                        "Qubits enable superposition.",
+                        "Error correction is key.",
+                    ],
+                    "confidence": 0.8,
+                }
+            )
+        ),
+        AIMessage(
+            content=json.dumps(
+                {
+                    "patterns": ["Hardware iteration accelerating."],
+                    "implications": ["Post-quantum crypto needed."],
+                }
+            )
+        ),
+        AIMessage(
+            content="Quantum computing is a transformative technology with near-term "
+            "applications in drug discovery and materials science."
+        ),
+    ]
+
+
+class TestGraphWithSqliteSaver:
+    """Full pipeline E2E: real SqliteSaver, mocked LLM, real graph execution."""
+
+    def test_pipeline_produces_analysis_report(self, tmp_path: Any) -> None:
+        """MultiAgentGraph.run() with a real SqliteSaver produces an AnalysisReport."""
+        from langgraph.checkpoint.sqlite import SqliteSaver
+
+        from agents.models import AnalysisReport
+        from core.graph import MultiAgentGraph
+
+        db_path = str(tmp_path / "e2e_checkpoint.db")
+
+        mock_llm = MagicMock()
+        mock_llm.invoke.side_effect = _build_llm_responses()
+
+        with (
+            SqliteSaver.from_conn_string(db_path) as saver,
+            patch("agents.base_agent.get_llm", return_value=mock_llm),
+            patch("agents.base_agent.create_checkpointer", return_value=saver),
+            patch("core.graph.create_checkpointer", return_value=saver),
+        ):
+            graph = MultiAgentGraph(
+                run_id="e2e-sqlite-test",
+                llm=mock_llm,
+                checkpointer=saver,
+            )
+            report = graph.run("What is quantum computing?")
+
+        assert isinstance(report, AnalysisReport)
+        assert report.query == "What is quantum computing?"
+        assert len(report.key_insights) > 0
+        assert len(report.patterns) > 0
+        assert len(report.implications) > 0
+        assert 0.0 <= report.confidence <= 1.0
+        assert report.research_summary != ""
+        assert report.executive_summary != ""
+        assert mock_llm.invoke.call_count == 6

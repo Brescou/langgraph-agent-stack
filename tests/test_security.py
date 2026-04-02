@@ -414,3 +414,23 @@ class TestCreateRateLimiter:
                 assert isinstance(limiter, RedisRateLimiter)
         except ImportError:
             pytest.skip("redis package not installed")
+
+    def test_redis_rate_limiter_fails_open_on_error(self) -> None:
+        """RedisRateLimiter.is_allowed() returns True when Redis is down."""
+        from core.security import RedisRateLimiter
+
+        mock_redis = MagicMock()
+        mock_script = MagicMock(side_effect=ConnectionError("Redis down"))
+        mock_redis.register_script.return_value = mock_script
+
+        try:
+            import redis as redis_lib  # noqa: F811
+
+            with patch.object(redis_lib.Redis, "from_url", return_value=mock_redis):
+                limiter = RedisRateLimiter(
+                    redis_url="redis://localhost:6379/0",
+                )
+                assert limiter.is_allowed("192.168.1.1") is True
+                mock_script.assert_called_once()
+        except ImportError:
+            pytest.skip("redis package not installed")
