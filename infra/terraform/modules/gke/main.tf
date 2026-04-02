@@ -90,7 +90,7 @@ resource "kubernetes_secret" "anthropic_api_key" {
 
 # ---------------------------------------------------------------------------
 # 7. Helm release — langgraph-agent-stack
-#    Chart version and appVersion sourced from Chart.yaml: 0.1.0
+#    Chart version and appVersion sourced from Chart.yaml (see infra/helm)
 #    Default image: langgraph-agent-stack:latest
 #    Default namespace from values.yaml: langgraph-agents
 # ---------------------------------------------------------------------------

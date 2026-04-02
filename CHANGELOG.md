@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
+## [0.3.0] - 2026-04-02
+
+### Added
+- CI job `integration`: `pytest -m integration` with Docker + `uv sync --extra redis --extra postgres`
+- E2E tests (`tests/test_integration_real.py`): full `MultiAgentGraph.run()` with real SqliteSaver, PostgresSaver, and RedisSaver (redis-stack image for RedisJSON)
+- README: `RATE_LIMIT_BACKEND`, Redis rate limiter fail-open policy, test suite layout (mocked vs integration), `/health` LLM semantics, Prometheus metrics reference table
 - `/ready` readiness probe endpoint — separate from `/health` liveness probe
 - Fail-fast checkpointer in production (`_fallback_or_raise` in `core/memory.py`)
 - OTel `insecure=True` conditional on `OTEL_EXPORTER_OTLP_INSECURE` or localhost endpoint
@@ -40,10 +47,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **CRITICAL**: `settings.llm_provider.value` → `settings.llm_provider` — `LLMProvider` is `Literal` (str), not Enum; `.value` caused `AttributeError` on `/health`
-- `_APP_VERSION` and `Chart.yaml` aligned to `0.2.0`
+- Release versioning: `pyproject.toml`, Helm `Chart.yaml`, and API `_APP_VERSION` set to `0.3.0`
 - `Chart.yaml` maintainer `your-name` → `brescou`
 - `docs/security.md` link `your-org` → `brescou`
-- Terraform secrets: `data` → `string_data` (GKE and EKS modules)
+- Terraform `kubernetes_secret`: use provider-valid `data` map (invalid `string_data` removed in GKE and EKS modules)
+- CI infra-lint: validate Terraform modules only; root module uses legacy child providers + `count` (not validatable in CI without credentials)
 - Helm: moved `REDIS_URL` from ConfigMap to Secret (passwords must not be in cleartext ConfigMaps)
 - `CLAUDE.md` directory tree: added `core/observability.py`
 - Dockerfile: pinned base images by SHA digest; documented `--build-arg LLM_EXTRAS`

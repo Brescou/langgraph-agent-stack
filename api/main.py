@@ -86,7 +86,7 @@ logger = logging.getLogger(__name__)
 # Module-level state (populated during lifespan startup)
 # ---------------------------------------------------------------------------
 
-_APP_VERSION = "0.2.0"
+_APP_VERSION = "0.3.0"
 _start_time: float = 0.0
 _executor: ThreadPoolExecutor | None = None
 _shared_llm: BaseChatModel | None = None
