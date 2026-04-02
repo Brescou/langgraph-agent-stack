@@ -115,6 +115,9 @@ jobs:
       - name: Install Helm
         uses: azure/setup-helm@v4
 
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v3
+
       - name: Helm lint
         run: helm lint infra/helm/langgraph-agent-stack
 

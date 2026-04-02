@@ -103,9 +103,9 @@ class TestPostgresReal:
             raw_url = pg.get_connection_url()
             dsn = raw_url.replace("postgresql+psycopg2://", "postgresql://")
 
-            saver = PostgresSaver.from_conn_string(dsn)
-            saver.setup()
-            assert saver is not None
+            with PostgresSaver.from_conn_string(dsn) as saver:
+                saver.setup()
+                assert saver is not None
 
     def test_create_checkpointer_postgres_factory(self) -> None:
         """Verify create_checkpointer() works with a real Postgres instance."""
@@ -150,8 +150,8 @@ class TestRedisReal:
             port = redis_ct.get_exposed_port(6379)
             redis_url = f"redis://{host}:{port}/0"
 
-            saver = RedisSaver.from_conn_string(redis_url)
-            assert saver is not None
+            with RedisSaver.from_conn_string(redis_url) as saver:
+                assert saver is not None
 
     def test_create_checkpointer_redis_factory(self) -> None:
         """Verify create_checkpointer() works with a real Redis instance."""
@@ -355,23 +355,26 @@ class TestGraphWithPostgresSaver:
             raw_url = pg.get_connection_url()
             dsn = raw_url.replace("postgresql+psycopg2://", "postgresql://")
 
-            saver = PostgresSaver.from_conn_string(dsn)
-            saver.setup()
+            with PostgresSaver.from_conn_string(dsn) as saver:
+                saver.setup()
 
-            mock_llm = MagicMock()
-            mock_llm.invoke.side_effect = _build_llm_responses()
+                mock_llm = MagicMock()
+                mock_llm.invoke.side_effect = _build_llm_responses()
 
-            with (
-                patch("agents.base_agent.get_llm", return_value=mock_llm),
-                patch("agents.base_agent.create_checkpointer", return_value=saver),
-                patch("core.graph.create_checkpointer", return_value=saver),
-            ):
-                graph = MultiAgentGraph(
-                    run_id="e2e-postgres-test",
-                    llm=mock_llm,
-                    checkpointer=saver,
-                )
-                report = graph.run("What is quantum computing?")
+                with (
+                    patch("agents.base_agent.get_llm", return_value=mock_llm),
+                    patch(
+                        "agents.base_agent.create_checkpointer",
+                        return_value=saver,
+                    ),
+                    patch("core.graph.create_checkpointer", return_value=saver),
+                ):
+                    graph = MultiAgentGraph(
+                        run_id="e2e-postgres-test",
+                        llm=mock_llm,
+                        checkpointer=saver,
+                    )
+                    report = graph.run("What is quantum computing?")
 
             assert isinstance(report, AnalysisReport)
             assert report.query == "What is quantum computing?"
@@ -410,22 +413,24 @@ class TestGraphWithRedisSaver:
             port = redis_ct.get_exposed_port(6379)
             redis_url = f"redis://{host}:{port}/0"
 
-            saver = RedisSaver.from_conn_string(redis_url)
+            with RedisSaver.from_conn_string(redis_url) as saver:
+                mock_llm = MagicMock()
+                mock_llm.invoke.side_effect = _build_llm_responses()
 
-            mock_llm = MagicMock()
-            mock_llm.invoke.side_effect = _build_llm_responses()
-
-            with (
-                patch("agents.base_agent.get_llm", return_value=mock_llm),
-                patch("agents.base_agent.create_checkpointer", return_value=saver),
-                patch("core.graph.create_checkpointer", return_value=saver),
-            ):
-                graph = MultiAgentGraph(
-                    run_id="e2e-redis-test",
-                    llm=mock_llm,
-                    checkpointer=saver,
-                )
-                report = graph.run("What is quantum computing?")
+                with (
+                    patch("agents.base_agent.get_llm", return_value=mock_llm),
+                    patch(
+                        "agents.base_agent.create_checkpointer",
+                        return_value=saver,
+                    ),
+                    patch("core.graph.create_checkpointer", return_value=saver),
+                ):
+                    graph = MultiAgentGraph(
+                        run_id="e2e-redis-test",
+                        llm=mock_llm,
+                        checkpointer=saver,
+                    )
+                    report = graph.run("What is quantum computing?")
 
             assert isinstance(report, AnalysisReport)
             assert report.query == "What is quantum computing?"

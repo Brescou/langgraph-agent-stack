@@ -35,8 +35,10 @@ class TestPostgresCheckpointerIntegration:
     def test_postgres_checkpointer_lifecycle(self) -> None:
         """create_checkpointer(postgres) → PostgresSaver with setup() called."""
         mock_saver = MagicMock()
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__ = MagicMock(return_value=mock_saver)
         mock_pg_module = MagicMock()
-        mock_pg_module.PostgresSaver.from_conn_string.return_value = mock_saver
+        mock_pg_module.PostgresSaver.from_conn_string.return_value = mock_ctx
 
         mock_settings = MagicMock()
         mock_settings.memory_backend = "postgres"
@@ -105,8 +107,10 @@ class TestRedisCheckpointerIntegration:
     def test_redis_checkpointer_lifecycle(self) -> None:
         """create_checkpointer(redis) → RedisSaver with correct URL."""
         mock_saver = MagicMock()
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__ = MagicMock(return_value=mock_saver)
         mock_redis_module = MagicMock()
-        mock_redis_module.RedisSaver.from_conn_string.return_value = mock_saver
+        mock_redis_module.RedisSaver.from_conn_string.return_value = mock_ctx
 
         mock_settings = MagicMock()
         mock_settings.memory_backend = "redis"

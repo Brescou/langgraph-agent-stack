@@ -271,8 +271,10 @@ def test_create_checkpointer_redis_with_mock():
     from unittest.mock import MagicMock, patch
 
     mock_redis_saver = MagicMock()
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__ = MagicMock(return_value=mock_redis_saver)
     mock_redis_module = MagicMock()
-    mock_redis_module.RedisSaver.from_conn_string.return_value = mock_redis_saver
+    mock_redis_module.RedisSaver.from_conn_string.return_value = mock_ctx
 
     with patch.dict(
         "sys.modules",
@@ -282,7 +284,7 @@ def test_create_checkpointer_redis_with_mock():
 
         result = _create_redis_checkpointer("redis://localhost:6379/0")
 
-    assert result == mock_redis_saver
+    assert result is mock_redis_saver
     mock_redis_module.RedisSaver.from_conn_string.assert_called_once_with(
         "redis://localhost:6379/0"
     )
@@ -310,8 +312,10 @@ def test_create_checkpointer_postgres_sync_with_setup():
     from unittest.mock import MagicMock, patch
 
     mock_saver = MagicMock()
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__ = MagicMock(return_value=mock_saver)
     mock_pg_module = MagicMock()
-    mock_pg_module.PostgresSaver.from_conn_string.return_value = mock_saver
+    mock_pg_module.PostgresSaver.from_conn_string.return_value = mock_ctx
 
     with patch.dict(
         "sys.modules",

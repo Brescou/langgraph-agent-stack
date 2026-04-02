@@ -180,7 +180,8 @@ def _create_redis_checkpointer(redis_url: str) -> Any:
     try:
         from langgraph.checkpoint.redis import RedisSaver  # type: ignore[import]
 
-        checkpointer = RedisSaver.from_conn_string(redis_url)
+        conn = RedisSaver.from_conn_string(redis_url)
+        checkpointer = conn.__enter__()
         logger.info(
             "Checkpointer: RedisSaver initialised",
             extra={"url": redis_url.split("@")[-1]},
@@ -232,7 +233,8 @@ def _create_postgres_checkpointer(postgres_url: str | None) -> Any:
             PostgresSaver,  # type: ignore[import]
         )
 
-        checkpointer = PostgresSaver.from_conn_string(postgres_url)
+        conn = PostgresSaver.from_conn_string(postgres_url)
+        checkpointer = conn.__enter__()
         checkpointer.setup()
         logger.info(
             "Checkpointer: PostgresSaver initialised (tables created)",

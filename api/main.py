@@ -439,7 +439,9 @@ async def rate_limit_middleware(request: Request, call_next: Any) -> Any:
             content='{"detail":"Rate limit exceeded. Please slow down."}',
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             media_type="application/json",
-            headers={"Retry-After": str(int(_rate_limiter.window_seconds))},
+            headers={
+                "Retry-After": str(int(getattr(_rate_limiter, "window_seconds", 60)))
+            },
         )
 
     return await call_next(request)
@@ -603,7 +605,10 @@ async def health(
 
     if _shared_memory is not None:
         mem_status, mem_detail = _shared_memory.health_check()
-        components["memory"] = ComponentHealth(status=mem_status, detail=mem_detail)
+        components["memory"] = ComponentHealth(
+            status="ok" if mem_status == "ok" else "degraded",
+            detail=mem_detail,
+        )
     else:
         components["memory"] = ComponentHealth(
             status="degraded", detail="Memory store not initialised"
@@ -612,7 +617,8 @@ async def health(
     if _shared_checkpointer is not None:
         chk_status, chk_detail = _check_checkpointer_health(settings)
         components["checkpointer"] = ComponentHealth(
-            status=chk_status, detail=chk_detail
+            status="ok" if chk_status == "ok" else "degraded",
+            detail=chk_detail,
         )
     else:
         components["checkpointer"] = ComponentHealth(
