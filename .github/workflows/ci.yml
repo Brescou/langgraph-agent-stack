@@ -54,7 +54,7 @@ jobs:
         run: uv python install ${{ env.PYTHON_VERSION }}
 
       - name: Cache uv dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/uv
           key: uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('pyproject.toml', 'uv.lock') }}
@@ -89,7 +89,7 @@ jobs:
         run: uv python install ${{ env.PYTHON_VERSION }}
 
       - name: Cache uv dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/uv
           key: uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('pyproject.toml', 'uv.lock') }}
@@ -166,7 +166,7 @@ jobs:
         run: uv python install ${{ matrix.python-version }}
 
       - name: Cache uv dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/uv
           key: uv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('pyproject.toml', 'uv.lock') }}
@@ -230,7 +230,7 @@ jobs:
         run: uv python install ${{ env.PYTHON_VERSION }}
 
       - name: Cache uv dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/uv
           key: uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-integration-${{ hashFiles('pyproject.toml', 'uv.lock') }}
@@ -260,7 +260,7 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: Cache Docker layers
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: /tmp/.buildx-cache
           key: buildx-${{ runner.os }}-${{ hashFiles('infra/Dockerfile', 'pyproject.toml', 'uv.lock') }}
