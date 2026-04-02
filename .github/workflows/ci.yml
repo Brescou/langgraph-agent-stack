@@ -124,12 +124,8 @@ jobs:
       - name: Helm template (render validation)
         run: helm template test-release infra/helm/langgraph-agent-stack
 
-      - name: Terraform fmt check
-        run: |
-          for dir in infra/terraform/modules/*/; do
-            echo "--- terraform fmt -check $dir ---"
-            terraform -chdir="$dir" fmt -check
-          done
+      - name: Terraform fmt check (all)
+        run: terraform -chdir=infra/terraform fmt -check -recursive
 
       - name: Terraform validate modules
         run: |
@@ -138,11 +134,6 @@ jobs:
             terraform -chdir="$dir" init -backend=false -input=false
             terraform -chdir="$dir" validate
           done
-
-      - name: Terraform validate root
-        run: |
-          terraform -chdir=infra/terraform init -backend=false -input=false
-          terraform -chdir=infra/terraform validate
 
 # ---------------------------------------------------------------------------
 # Job 4 — Test
