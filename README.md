@@ -670,7 +670,7 @@ No code changes required — `core/llm.py` handles instantiation.
 
 > **Note:** Setting `RAG_ENABLED=true` currently provisions the vector store
 > infrastructure (ChromaDB or PGVector) but does **not** wire it into agent
-> pipelines. Full RAG integration is planned for **v0.3.0**.
+> pipelines. Full RAG integration is planned for **v0.4.0**.
 
 1. Set `RAG_ENABLED=true` in your environment.
 2. Install the RAG extras: `uv sync --extra rag`.
