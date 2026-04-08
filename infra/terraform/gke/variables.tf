@@ -49,6 +49,13 @@ variable "anthropic_api_key" {
   sensitive   = true
 }
 
+variable "redis_url" {
+  description = "Redis connection URL (optional). Required in prod for distributed rate limiting."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "llm_provider" {
   description = "LLM provider name (e.g. anthropic, openai, google)."
   type        = string

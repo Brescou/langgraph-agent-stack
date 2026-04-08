@@ -21,6 +21,7 @@
 #   # AKS
 #   cd aks && terraform init && terraform apply \
 #     -var-file=../environments/azure.dev.tfvars \
+#     -var="subscription_id=$ARM_SUBSCRIPTION_ID" \
 #     -var="anthropic_api_key=$ANTHROPIC_API_KEY"
 #
 # See each directory's main.tf for the full usage instructions.

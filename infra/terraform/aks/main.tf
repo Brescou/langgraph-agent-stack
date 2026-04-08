@@ -5,10 +5,12 @@
 #   cd infra/terraform/aks
 #   terraform init
 #   terraform apply -var-file=../environments/azure.dev.tfvars \
+#     -var="subscription_id=$ARM_SUBSCRIPTION_ID" \
 #     -var="anthropic_api_key=$ANTHROPIC_API_KEY"
 #
 # Production:
 #   terraform apply -var-file=../environments/azure.prod.tfvars \
+#     -var="subscription_id=$ARM_SUBSCRIPTION_ID" \
 #     -var="anthropic_api_key=$ANTHROPIC_API_KEY" \
 #     -var="redis_url=$REDIS_URL"
 # ---------------------------------------------------------------------------
@@ -16,6 +18,7 @@
 module "aks" {
   source = "../modules/aks"
 
+  subscription_id     = var.subscription_id
   resource_group_name = var.resource_group_name
   location            = var.location
   cluster_name        = var.cluster_name

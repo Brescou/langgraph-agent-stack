@@ -26,7 +26,7 @@ output "kube_config" {
 
 output "namespace" {
   description = "Kubernetes namespace where the langgraph-agent-stack is deployed."
-  value       = kubernetes_namespace.langgraph.metadata[0].name
+  value       = kubernetes_namespace_v1.langgraph.metadata[0].name
 }
 
 output "helm_release_status" {

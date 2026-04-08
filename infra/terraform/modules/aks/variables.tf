@@ -2,6 +2,11 @@
 # AKS module variables
 # ---------------------------------------------------------------------------
 
+variable "subscription_id" {
+  description = "Azure Subscription ID (mandatory since AzureRM 4.x)."
+  type        = string
+}
+
 variable "resource_group_name" {
   description = "Azure Resource Group name."
   type        = string

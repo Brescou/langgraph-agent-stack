@@ -229,39 +229,58 @@ In production, set `secrets.existingSecret` to point to a secret managed by the 
 
 ## Infrastructure as Code
 
-Terraform modules for GKE (Autopilot), EKS, and AKS in `infra/terraform/`.
+Terraform modules for GKE (Autopilot), EKS, and AKS in `infra/terraform/`. Each cloud has its own entry-point directory — there is no shared root module.
 
-> **Important:** By default, Terraform state is stored locally. For production or team use, configure a remote backend (GCS, S3, or Azure Blob) in `infra/terraform/versions.tf` before running `terraform apply`. See the comments in that file for instructions.
+> **Important:** By default, Terraform state is stored locally. For production or team use, configure a remote backend (GCS, S3, or Azure Blob Storage) in the entry-point directory before running `terraform apply`. See `infra/terraform/versions.tf` for instructions.
+
+### Provider versions
+
+| Provider | Constraint | Description |
+|----------|------------|-------------|
+| `hashicorp/google` | `~> 7.0` | GKE Autopilot |
+| `hashicorp/aws` | `~> 6.0` | EKS |
+| `hashicorp/azurerm` | `~> 4.0` | AKS |
+| `hashicorp/helm` | `~> 3.1` | Helm chart deployment (all clouds) |
+| `hashicorp/kubernetes` | `~> 3.0` | Namespace and secret management (all clouds) |
+
+### GKE
 
 ```bash
-cd infra/terraform
+cd infra/terraform/gke
 terraform init
-
-# GKE (default)
-terraform apply -var-file=environments/dev.tfvars \
+terraform apply \
   -var="project_id=my-gcp-project" \
-  -var="anthropic_api_key=$ANTHROPIC_API_KEY"
-
-# EKS
-terraform apply -var-file=environments/dev.tfvars \
-  -var="cloud_provider=eks" \
   -var="anthropic_api_key=$ANTHROPIC_API_KEY"
 ```
 
-### Azure AKS
+### EKS
+
+```bash
+cd infra/terraform/eks
+terraform init
+terraform apply \
+  -var="anthropic_api_key=$ANTHROPIC_API_KEY"
+```
+
+### AKS
 
 **Prerequisites**: Azure CLI authenticated (`az login`), Terraform >= 1.6.
 
 ```bash
-cd infra/terraform
+cd infra/terraform/aks
+terraform init
 
 # Development
-terraform init
-terraform apply -var-file=environments/azure.dev.tfvars \
+terraform apply \
+  -var="subscription_id=$ARM_SUBSCRIPTION_ID" \
+  -var="resource_group_name=langgraph-rg" \
   -var="anthropic_api_key=$ANTHROPIC_API_KEY"
 
 # Production
-terraform apply -var-file=environments/azure.prod.tfvars \
+terraform apply \
+  -var="subscription_id=$ARM_SUBSCRIPTION_ID" \
+  -var="resource_group_name=langgraph-rg" \
+  -var="environment=prod" \
   -var="anthropic_api_key=$ANTHROPIC_API_KEY" \
   -var="redis_url=$REDIS_URL"
 

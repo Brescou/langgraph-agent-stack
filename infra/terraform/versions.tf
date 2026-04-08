@@ -1,24 +1,18 @@
+# ---------------------------------------------------------------------------
+# This root directory is NOT a deployable Terraform module.
+#
+# Each cloud provider has its own entry-point directory with its own
+# versions.tf that pins the required providers:
+#
+#   infra/terraform/gke/   — google  ~> 7.0, helm ~> 3.1, kubernetes ~> 3.0
+#   infra/terraform/eks/   — aws     ~> 6.0, helm ~> 3.1, kubernetes ~> 3.0
+#   infra/terraform/aks/   — azurerm ~> 4.0, helm ~> 3.1, kubernetes ~> 3.0
+#
+# See main.tf for deployment instructions.
+# ---------------------------------------------------------------------------
+
 terraform {
   required_version = ">= 1.6"
-
-  required_providers {
-    google = {
-      source  = "hashicorp/google"
-      version = "~> 5.0"
-    }
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
-    }
-    helm = {
-      source  = "hashicorp/helm"
-      version = "~> 2.12"
-    }
-    kubernetes = {
-      source  = "hashicorp/kubernetes"
-      version = "~> 2.25"
-    }
-  }
 }
 
 # WARNING: No backend is configured — Terraform will store state LOCALLY.
@@ -27,9 +21,10 @@ terraform {
 #   * No locking — concurrent applies can corrupt state
 #   * No history or audit trail
 #
-# REQUIRED for production: uncomment ONE of the backend blocks below.
+# REQUIRED for production: configure a remote backend in the cloud-specific
+# entry-point directory (gke/, eks/, or aks/).
 #
-# For GCP:
+# For GCP (GCS):
 #   terraform {
 #     backend "gcs" {
 #       bucket = "your-terraform-state-bucket"
@@ -37,7 +32,7 @@ terraform {
 #     }
 #   }
 #
-# For AWS:
+# For AWS (S3):
 #   terraform {
 #     backend "s3" {
 #       bucket         = "your-terraform-state-bucket"
@@ -45,5 +40,15 @@ terraform {
 #       region         = "us-east-1"
 #       dynamodb_table = "terraform-locks"
 #       encrypt        = true
+#     }
+#   }
+#
+# For Azure (Blob Storage):
+#   terraform {
+#     backend "azurerm" {
+#       resource_group_name  = "your-tfstate-rg"
+#       storage_account_name = "yourtfstatesa"
+#       container_name       = "tfstate"
+#       key                  = "langgraph-agent-stack.tfstate"
 #     }
 #   }

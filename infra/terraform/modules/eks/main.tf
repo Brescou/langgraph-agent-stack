@@ -217,8 +217,9 @@ provider "kubernetes" {
 # ---------------------------------------------------------------------------
 # 9. Helm provider — shares the same EKS credentials
 # ---------------------------------------------------------------------------
+# NOTE: Helm provider 3.x requires nested object syntax (= {}) instead of blocks.
 provider "helm" {
-  kubernetes {
+  kubernetes = {
     host                   = aws_eks_cluster.main.endpoint
     token                  = data.aws_eks_cluster_auth.main.token
     cluster_ca_certificate = base64decode(aws_eks_cluster.main.certificate_authority[0].data)
@@ -228,7 +229,7 @@ provider "helm" {
 # ---------------------------------------------------------------------------
 # 10. Kubernetes namespace
 # ---------------------------------------------------------------------------
-resource "kubernetes_namespace" "langgraph" {
+resource "kubernetes_namespace_v1" "langgraph" {
   metadata {
     name = var.namespace
 
@@ -247,18 +248,19 @@ resource "kubernetes_namespace" "langgraph" {
 }
 
 # ---------------------------------------------------------------------------
-# 11. Kubernetes secret for the Anthropic API key
+# 11. Kubernetes secret for the Anthropic API key (and optional Redis URL)
 # ---------------------------------------------------------------------------
-resource "kubernetes_secret" "anthropic_api_key" {
+resource "kubernetes_secret_v1" "langgraph_secrets" {
   metadata {
     name      = "langgraph-secrets"
-    namespace = kubernetes_namespace.langgraph.metadata[0].name
+    namespace = kubernetes_namespace_v1.langgraph.metadata[0].name
   }
 
   type = "Opaque"
 
   data = {
     ANTHROPIC_API_KEY = var.anthropic_api_key
+    REDIS_URL         = var.redis_url
   }
 }
 
@@ -270,29 +272,27 @@ resource "kubernetes_secret" "anthropic_api_key" {
 resource "helm_release" "langgraph" {
   name             = "langgraph"
   chart            = var.helm_chart_path
-  namespace        = kubernetes_namespace.langgraph.metadata[0].name
+  namespace        = kubernetes_namespace_v1.langgraph.metadata[0].name
   create_namespace = false # Namespace is managed above.
 
   # Environment-specific values file (values.dev.yaml or values.prod.yaml).
   values = [file("${var.helm_chart_path}/values.${var.environment}.yaml")]
 
-  # Annotate the service account with the IRSA role so pods receive AWS creds.
-  set {
-    name  = "serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
-    value = aws_iam_role.langgraph_irsa.arn
-  }
+  # Helm provider 3.x: set is now a list of objects.
+  set = [
+    {
+      name  = "serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
+      value = aws_iam_role.langgraph_irsa.arn
+    },
+    {
+      name  = "llm.provider"
+      value = var.llm_provider
+    },
+    {
+      name  = "secrets.existingSecret"
+      value = kubernetes_secret_v1.langgraph_secrets.metadata[0].name
+    },
+  ]
 
-  # LLM provider override.
-  set {
-    name  = "llm.provider"
-    value = var.llm_provider
-  }
-
-  # Reference the pre-created secret.
-  set {
-    name  = "secrets.existingSecret"
-    value = kubernetes_secret.anthropic_api_key.metadata[0].name
-  }
-
-  depends_on = [kubernetes_namespace.langgraph]
+  depends_on = [kubernetes_namespace_v1.langgraph]
 }

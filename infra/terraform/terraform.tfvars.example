@@ -1,23 +1,53 @@
 # ---------------------------------------------------------------------------
-# Example variable values — copy to terraform.tfvars and fill in real values
+# Example variable values for each cloud provider
+#
+# Copy the relevant section to a terraform.tfvars file in the matching
+# entry-point directory (gke/, eks/, or aks/) and fill in real values.
 # ---------------------------------------------------------------------------
 
-cloud_provider = "gke"
-environment    = "dev"
+# ═══════════════════════════════════════════════════════════════════════════
+# GKE  (cd infra/terraform/gke && terraform init && terraform apply)
+# ═══════════════════════════════════════════════════════════════════════════
+# project_id   = "my-gcp-project"
+# region       = "us-central1"
+# cluster_name = "langgraph-cluster"
+# environment  = "dev"
+# namespace    = "langgraph-agents"
+# llm_provider = "anthropic"
+# # Set via TF_VAR_anthropic_api_key or -var:
+# # anthropic_api_key = ""
+# # redis_url         = ""
 
-# LLM / application
-llm_provider      = "anthropic"
-anthropic_api_key = ""   # set via TF_VAR_anthropic_api_key or a secrets manager
+# ═══════════════════════════════════════════════════════════════════════════
+# EKS  (cd infra/terraform/eks && terraform init && terraform apply)
+# ═══════════════════════════════════════════════════════════════════════════
+# aws_region         = "us-east-1"
+# cluster_name       = "langgraph-cluster"
+# environment        = "dev"
+# namespace          = "langgraph-agents"
+# llm_provider       = "anthropic"
+# eks_version        = "1.31"
+# node_instance_type = "t3.medium"
+# node_min_size      = 1
+# node_max_size      = 3
+# node_desired_size  = 2
+# # Set via TF_VAR_anthropic_api_key or -var:
+# # anthropic_api_key = ""
+# # redis_url         = ""
 
-# Kubernetes / Helm
-namespace       = "langgraph-agents"
-helm_chart_path = "../helm/langgraph-agent-stack"
-
-# GKE-specific (required when cloud_provider = "gke")
-project_id   = "my-gcp-project"
-region       = "us-central1"
-cluster_name = "langgraph-cluster"
-
-# EKS-specific (required when cloud_provider = "eks")
-aws_region       = "us-east-1"
-eks_cluster_name = "langgraph-cluster"
+# ═══════════════════════════════════════════════════════════════════════════
+# AKS  (cd infra/terraform/aks && terraform init && terraform apply)
+# ═══════════════════════════════════════════════════════════════════════════
+# subscription_id     = "00000000-0000-0000-0000-000000000000"
+# resource_group_name = "langgraph-rg"
+# location            = "canadaeast"
+# cluster_name        = "langgraph-cluster"
+# environment         = "dev"
+# kubernetes_version  = "1.29"
+# node_count          = 2
+# node_vm_size        = "Standard_D2s_v3"
+# namespace           = "langgraph-agents"
+# llm_provider        = "anthropic"
+# # Set via TF_VAR_anthropic_api_key or -var:
+# # anthropic_api_key = ""
+# # redis_url         = ""

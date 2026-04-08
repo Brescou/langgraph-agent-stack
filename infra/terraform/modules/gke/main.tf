@@ -44,8 +44,9 @@ data "google_client_config" "current" {}
 # ---------------------------------------------------------------------------
 # 4. Helm provider — shares the same Kubernetes credentials
 # ---------------------------------------------------------------------------
+# NOTE: Helm provider 3.x requires nested object syntax (= {}) instead of blocks.
 provider "helm" {
-  kubernetes {
+  kubernetes = {
     host                   = "https://${google_container_cluster.main.endpoint}"
     token                  = data.google_client_config.current.access_token
     cluster_ca_certificate = base64decode(google_container_cluster.main.master_auth[0].cluster_ca_certificate)
@@ -55,7 +56,7 @@ provider "helm" {
 # ---------------------------------------------------------------------------
 # 5. Kubernetes namespace
 # ---------------------------------------------------------------------------
-resource "kubernetes_namespace" "langgraph" {
+resource "kubernetes_namespace_v1" "langgraph" {
   metadata {
     name = var.namespace
 
@@ -73,18 +74,17 @@ resource "kubernetes_namespace" "langgraph" {
 #    The secret key name matches the Helm chart's expected reference:
 #    secrets.anthropicApiKey
 # ---------------------------------------------------------------------------
-resource "kubernetes_secret" "anthropic_api_key" {
+resource "kubernetes_secret_v1" "langgraph_secrets" {
   metadata {
     name      = "langgraph-secrets"
-    namespace = kubernetes_namespace.langgraph.metadata[0].name
+    namespace = kubernetes_namespace_v1.langgraph.metadata[0].name
   }
 
-  # Opaque secrets store arbitrary key-value pairs.
   type = "Opaque"
 
   data = {
-    # Key name aligned with values.yaml: secrets.anthropicApiKey
     ANTHROPIC_API_KEY = var.anthropic_api_key
+    REDIS_URL         = var.redis_url
   }
 }
 
@@ -97,24 +97,23 @@ resource "kubernetes_secret" "anthropic_api_key" {
 resource "helm_release" "langgraph" {
   name             = "langgraph"
   chart            = var.helm_chart_path
-  namespace        = kubernetes_namespace.langgraph.metadata[0].name
+  namespace        = kubernetes_namespace_v1.langgraph.metadata[0].name
   create_namespace = false # Namespace is managed above.
 
   # Environment-specific values file (values.dev.yaml or values.prod.yaml).
   values = [file("${var.helm_chart_path}/values.${var.environment}.yaml")]
 
-  # LLM provider override (from values.yaml: llm.provider).
-  set {
-    name  = "llm.provider"
-    value = var.llm_provider
-  }
+  # Helm provider 3.x: set is now a list of objects.
+  set = [
+    {
+      name  = "llm.provider"
+      value = var.llm_provider
+    },
+    {
+      name  = "secrets.existingSecret"
+      value = kubernetes_secret_v1.langgraph_secrets.metadata[0].name
+    },
+  ]
 
-  # Reference the pre-created secret instead of passing the key inline,
-  # which avoids the API key appearing in Helm's release manifest.
-  set {
-    name  = "secrets.existingSecret"
-    value = kubernetes_secret.anthropic_api_key.metadata[0].name
-  }
-
-  depends_on = [kubernetes_namespace.langgraph]
+  depends_on = [kubernetes_namespace_v1.langgraph]
 }

@@ -17,6 +17,7 @@ module "eks" {
   namespace          = var.namespace
   helm_chart_path    = var.helm_chart_path
   anthropic_api_key  = var.anthropic_api_key
+  redis_url          = var.redis_url
   llm_provider       = var.llm_provider
   helm_release_name  = var.helm_release_name
   eks_version        = var.eks_version

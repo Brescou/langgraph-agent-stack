@@ -7,6 +7,7 @@
 # ---------------------------------------------------------------------------
 provider "azurerm" {
   features {}
+  subscription_id = var.subscription_id
 }
 
 # ---------------------------------------------------------------------------
@@ -59,7 +60,7 @@ resource "azurerm_kubernetes_cluster" "main" {
     type = "VirtualMachineScaleSets"
 
     # Auto-scaling bounds differ per environment.
-    enable_auto_scaling = true
+    auto_scaling_enabled = true
     min_count           = var.environment == "prod" ? 2 : 1
     max_count           = var.environment == "prod" ? 10 : 3
 
@@ -108,9 +109,10 @@ provider "kubernetes" {
 
 # ---------------------------------------------------------------------------
 # 6. Helm provider — shares the same AKS credentials
+#    NOTE: Helm provider 3.x requires nested object syntax (= {}).
 # ---------------------------------------------------------------------------
 provider "helm" {
-  kubernetes {
+  kubernetes = {
     host                   = azurerm_kubernetes_cluster.main.kube_config[0].host
     client_certificate     = base64decode(azurerm_kubernetes_cluster.main.kube_config[0].client_certificate)
     client_key             = base64decode(azurerm_kubernetes_cluster.main.kube_config[0].client_key)
@@ -121,7 +123,7 @@ provider "helm" {
 # ---------------------------------------------------------------------------
 # 7. Kubernetes namespace
 # ---------------------------------------------------------------------------
-resource "kubernetes_namespace" "langgraph" {
+resource "kubernetes_namespace_v1" "langgraph" {
   metadata {
     name = var.namespace
 
@@ -139,10 +141,10 @@ resource "kubernetes_namespace" "langgraph" {
 #    The secret name "langgraph-secrets" matches the Helm chart default:
 #    secrets.existingSecret.
 # ---------------------------------------------------------------------------
-resource "kubernetes_secret" "langgraph_secrets" {
+resource "kubernetes_secret_v1" "langgraph_secrets" {
   metadata {
     name      = "langgraph-secrets"
-    namespace = kubernetes_namespace.langgraph.metadata[0].name
+    namespace = kubernetes_namespace_v1.langgraph.metadata[0].name
   }
 
   # Opaque secrets store arbitrary key-value pairs.
@@ -153,7 +155,7 @@ resource "kubernetes_secret" "langgraph_secrets" {
     REDIS_URL         = var.redis_url
   }
 
-  depends_on = [kubernetes_namespace.langgraph]
+  depends_on = [kubernetes_namespace_v1.langgraph]
 }
 
 # ---------------------------------------------------------------------------
@@ -164,27 +166,26 @@ resource "kubernetes_secret" "langgraph_secrets" {
 resource "helm_release" "langgraph" {
   name             = "langgraph"
   chart            = var.helm_chart_path
-  namespace        = kubernetes_namespace.langgraph.metadata[0].name
+  namespace        = kubernetes_namespace_v1.langgraph.metadata[0].name
   create_namespace = false # Namespace is managed above.
 
   # Environment-specific values file (values.dev.yaml or values.prod.yaml).
   values = [file("${var.helm_chart_path}/values.${var.environment}.yaml")]
 
-  # LLM provider override (from values.yaml: llm.provider).
-  set {
-    name  = "llm.provider"
-    value = var.llm_provider
-  }
-
-  # Reference the pre-created secret instead of passing the key inline,
-  # which avoids the API key appearing in Helm's release manifest.
-  set {
-    name  = "secrets.existingSecret"
-    value = kubernetes_secret.langgraph_secrets.metadata[0].name
-  }
+  # Helm provider 3.x: set is now a list of objects.
+  set = [
+    {
+      name  = "llm.provider"
+      value = var.llm_provider
+    },
+    {
+      name  = "secrets.existingSecret"
+      value = kubernetes_secret_v1.langgraph_secrets.metadata[0].name
+    },
+  ]
 
   depends_on = [
-    kubernetes_namespace.langgraph,
-    kubernetes_secret.langgraph_secrets,
+    kubernetes_namespace_v1.langgraph,
+    kubernetes_secret_v1.langgraph_secrets,
   ]
 }

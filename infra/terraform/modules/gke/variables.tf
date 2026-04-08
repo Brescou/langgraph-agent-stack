@@ -42,6 +42,13 @@ variable "anthropic_api_key" {
   sensitive   = true
 }
 
+variable "redis_url" {
+  description = "Redis connection URL (optional). Injected as a Kubernetes secret."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "llm_provider" {
   description = "LLM provider name (e.g. anthropic, openai, google)."
   type        = string

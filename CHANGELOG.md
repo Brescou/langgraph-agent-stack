@@ -11,9 +11,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Terraform module for Azure AKS (`infra/terraform/modules/aks/`) with Log Analytics
   workspace, auto-scaling node pool, System-Assigned Managed Identity, and Helm chart
   deployment
-- `environments/azure.dev.tfvars` and `environments/azure.prod.tfvars` for AKS
-- Root Terraform `cloud_provider` validation updated to accept `"azure"` alongside
-  `"gke"` and `"eks"`
+- AKS entry point (`infra/terraform/aks/`) with `subscription_id` (mandatory since
+  AzureRM 4.x) and `redis_url` variables
+- `redis_url` variable added to EKS and GKE modules/entry points for secret parity
+  with AKS
+- Azure Blob Storage backend example in `infra/terraform/versions.tf`
+- AKS section in `infra/terraform/terraform.tfvars.example`
+
+### Changed
+- **BREAKING (Terraform):** Provider version bumps across all modules:
+  - `hashicorp/azurerm` `~> 3.0` → `~> 4.0` (AKS: `enable_auto_scaling` renamed to
+    `auto_scaling_enabled`, `subscription_id` now mandatory)
+  - `hashicorp/aws` `~> 5.0` → `~> 6.0` (enhanced per-resource `region` support)
+  - `hashicorp/google` `~> 5.0` → `~> 7.0`
+  - `hashicorp/helm` `~> 2.12` → `~> 3.1` (`set` blocks replaced by list-of-objects
+    syntax, `kubernetes` block uses nested object `= {}`)
+  - `hashicorp/kubernetes` `~> 2.25` → `~> 3.0` (`kubernetes_namespace` →
+    `kubernetes_namespace_v1`, `kubernetes_secret` → `kubernetes_secret_v1`)
+- Terraform root directory is no longer a deployable module — each cloud has its own
+  entry point (`gke/`, `eks/`, `aks/`)
+- Root `outputs.tf` and `variables.tf` converted to documentation-only files
+- Kubernetes secret resource name unified to `langgraph_secrets` across all three modules
+- README "Infrastructure as Code" section rewritten for per-cloud entry-point layout
 
 ## [0.3.0] - 2026-04-02
 
