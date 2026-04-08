@@ -222,6 +222,10 @@ helm uninstall langgraph -n langgraph-agents
 |------|---------|-------------|
 | `ingress.enabled` | `false` | Create an Ingress resource |
 | `autoscaling.enabled` | `false` | Enable HorizontalPodAutoscaler |
+| `persistence.enabled` | `true` | Persistent volume for SQLite data |
+| `networkPolicy.enabled` | `false` | Restrict pod-to-pod traffic with a NetworkPolicy |
+| `podDisruptionBudget.enabled` | `false` | Create a PodDisruptionBudget |
+| `serviceMonitor.enabled` | `false` | Create a Prometheus ServiceMonitor |
 | `secrets.existingSecret` | `""` | Use an existing Secret (External Secrets Operator) |
 | `serviceAccount.create` | `true` | Create a dedicated ServiceAccount |
 
@@ -294,12 +298,14 @@ kubectl get pods -n langgraph-agents
 
 | Method | Path | Description |
 |--------|------|-------------|
+| `GET` | `/` | Redirect to interactive API docs (`/docs`). |
 | `POST` | `/run` | Run the full Research + Analysis pipeline. Returns a structured `AnalysisReport`. |
 | `POST` | `/run/stream` | Same pipeline streamed as Server-Sent Events. |
 | `POST` | `/research` | Run the Research phase only. Returns a `ResearchResult` without downstream analysis. |
 | `GET` | `/health` | Liveness probe. Returns service status, version, uptime, and environment. |
 | `GET` | `/ready` | Readiness probe. Returns 200 when LLM and checkpointer are initialised; 503 otherwise. |
 | `GET` | `/sessions/{session_id}/history` | Retrieve all run records for a session, ordered newest-first. |
+| `GET` | `/metrics` | Prometheus metrics (available when `observability` extra is installed). |
 
 ---
 
@@ -339,13 +345,13 @@ curl -X POST http://localhost:8000/run/stream \
 Events are delivered as Server-Sent Events:
 
 ```
-data: {"type": "status", "message": "Starting research phase..."}
+data: {"type": "status", "message": "Starting pipeline..."}
+data: {"type": "agent_switch", "from": "orchestrator", "to": "researcher"}
 data: {"type": "agent_switch", "from": "researcher", "to": "analyst"}
-data: {"type": "status", "message": "Starting analysis phase..."}
-data: {"type": "done", "session_id": "...", "confidence": 0.87, ...}
+data: {"type": "done", "run_id": "...", "session_id": "...", "confidence": 0.87, ...}
 ```
 
-The stream enforces a wall-clock timeout controlled by `STREAM_TIMEOUT_SECONDS` (default 120s). On timeout, a final `{"type": "error", "message": "Stream timed out after 120s"}` event is emitted.
+The stream enforces a wall-clock timeout controlled by `STREAM_TIMEOUT_SECONDS` (default 120s). On timeout, a `{"type": "error", "message": "The pipeline timed out. Try a simpler query."}` event is emitted.
 
 ---
 
@@ -447,7 +453,7 @@ The rate limiter backend is controlled by `RATE_LIMIT_BACKEND`:
 
 When using `redis`, the limiter uses a Lua-scripted sliding window on Redis sorted sets, providing a consistent view of request counts across all replicas. Set `REDIS_URL` in your environment to point to a shared Redis instance.
 
-**Fail-open behaviour:** If the Redis instance becomes unreachable, the rate limiter fails open — requests are allowed through and a warning is logged (`Redis rate limiter unreachable — failing open`). This is intentional: rate limiting is a non-critical function and should never block legitimate traffic during a Redis outage. Operators should monitor this log message and the rate of `429` responses to detect degraded rate limiting.
+**Fail-open behaviour:** If the Redis instance becomes unreachable, the rate limiter fails open — requests are allowed through and a warning is logged (`Redis rate limiter unreachable — failing open (request allowed)`). This is intentional: rate limiting is a non-critical function and should never block legitimate traffic during a Redis outage. Operators should monitor this log message and the rate of `429` responses to detect degraded rate limiting.
 
 **Input validation**
 
@@ -455,7 +461,7 @@ All queries are validated by `InputValidator` before reaching agent code. Querie
 
 **Security headers**
 
-Every response includes `X-Content-Type-Options`, `X-Frame-Options`, `Content-Security-Policy: default-src 'self'`, `Referrer-Policy`, and `Cache-Control: no-store`. The `Server` header is stripped to avoid advertising the runtime stack.
+Every response includes `X-Content-Type-Options`, `X-Frame-Options`, `Content-Security-Policy: default-src 'self'`, `Referrer-Policy`, and `Cache-Control: no-store`. The `Server` header is stripped to avoid advertising the runtime stack. The CSP is relaxed on `/docs`, `/redoc`, and `/openapi.json` to allow the Swagger/ReDoc CDN assets.
 
 **Log sanitization**
 
@@ -505,7 +511,7 @@ All configuration is loaded from environment variables. Copy `.env.example` to `
 | `SQLITE_PATH` | `./data/agent_memory.db` | SQLite database file path |
 | `REDIS_URL` | `redis://localhost:6379/0` | Redis connection URL (required when `MEMORY_BACKEND=redis`) |
 | `POSTGRES_URL` | — | PostgreSQL DSN (required when `MEMORY_BACKEND=postgres`) |
-| `RAG_ENABLED` | `false` | Enable vector store infrastructure (not yet wired to agents — planned for v0.3.0) |
+| `RAG_ENABLED` | `false` | Enable vector store infrastructure (not yet wired to agents — planned for v0.4.0) |
 
 ### Agent behaviour
 
@@ -546,7 +552,7 @@ redacted by a `SanitizingFilter` before serialisation.
 To include metrics in your Docker image, build with:
 
 ```bash
-docker build --build-arg LLM_EXTRAS=anthropic --build-arg OBS_EXTRAS=observability .
+docker build --build-arg LLM_EXTRAS=anthropic --build-arg OBS_EXTRAS=observability -f infra/Dockerfile .
 ```
 
 **OpenTelemetry** — Set `OTEL_ENABLED=true` and configure `OTEL_EXPORTER_OTLP_ENDPOINT`
@@ -634,10 +640,11 @@ make helm-prod     # Deploy to production environment
 make helm-dry-run  # Simulate a Helm install
 make helm-uninstall # Uninstall the Helm release
 
-# Terraform
+# Terraform (set TF_CLOUD=gke|eks|aks, default: gke)
 make tf-init       # Initialize Terraform working directory
 make tf-plan       # Generate Terraform execution plan
 make tf-apply      # Apply the Terraform plan
+make tf-fmt        # Check Terraform formatting (all modules)
 
 # Utilities
 make clean         # Remove build artifacts and caches
@@ -675,10 +682,12 @@ langgraph-agent-stack/
 │   ├── supervisor/         # Dynamic routing to specialist agents
 │   └── human_in_loop/      # Pause graph execution for human approval
 ├── tests/                  # Unit tests (mocked) + real backend integration tests
+├── docs/                   # Additional documentation (security, architecture)
 ├── .github/workflows/
 │   ├── ci.yml              # ruff + black + pytest on push/PR
 │   └── security.yml        # gitleaks, bandit, dependency audit
 ├── .dockerignore           # Excludes .env, .git, tests, docs from Docker context
+├── Makefile                # Developer shortcuts (make test, make lint, etc.)
 ├── pyproject.toml
 └── .env.example
 ```
@@ -694,7 +703,7 @@ langgraph-agent-stack/
 ### Change the LLM provider
 
 Set `LLM_PROVIDER` in `.env` to one of: `anthropic`, `openai`, `google`, `bedrock`, `azure`, `ollama`.
-Install the matching extra: `uv sync --extra <provider>`.
+Install the matching extra: `uv sync --extra <provider>` (Azure uses the `openai` extra).
 No code changes required — `core/llm.py` handles instantiation.
 
 ### Enable Redis for production

@@ -54,7 +54,7 @@ def get_llm(config: LLMConfig) -> BaseChatModel:
         uv sync --extra openai
         uv sync --extra google
         uv sync --extra bedrock
-        uv sync --extra azure
+        uv sync --extra openai   (Azure uses the openai extra)
         uv sync --extra ollama
 
     Args:
@@ -141,7 +141,7 @@ def get_llm(config: LLMConfig) -> BaseChatModel:
             try:
                 from langchain_openai import AzureChatOpenAI
             except ImportError as e:
-                raise ImportError("Install with: uv sync --extra azure") from e
+                raise ImportError("Install with: uv sync --extra openai") from e
             if not config.azure_openai_api_key:
                 raise ValueError(
                     "azure_openai_api_key is required for the 'azure' provider."

@@ -11,7 +11,7 @@ HELM_CHART   := infra/helm/langgraph-agent-stack
         test test-cov lint format check \
         docker-build docker-run docker-redis docker-down docker-smoke \
         helm-lint helm-dev helm-prod helm-dry-run helm-uninstall \
-        tf-init tf-plan tf-apply \
+        tf-init tf-plan tf-apply tf-fmt \
         clean
 
 .DEFAULT_GOAL := help
@@ -91,15 +91,22 @@ helm-uninstall: ## Uninstall the Helm release from the langgraph-agents namespac
 	helm uninstall langgraph -n langgraph-agents
 
 # ─── Terraform ───────────────────────────────────────────────────────────────
+# Each cloud has its own entry point: infra/terraform/{gke,eks,aks}/
+# Set TF_CLOUD to the target cloud (default: gke).
+
+TF_CLOUD ?= gke
 
 tf-init: ## Initialize the Terraform working directory
-	terraform -chdir=infra/terraform init
+	terraform -chdir=infra/terraform/$(TF_CLOUD) init
 
 tf-plan: ## Generate and display the Terraform execution plan
-	terraform -chdir=infra/terraform plan
+	terraform -chdir=infra/terraform/$(TF_CLOUD) plan
 
 tf-apply: ## Apply the Terraform execution plan
-	terraform -chdir=infra/terraform apply
+	terraform -chdir=infra/terraform/$(TF_CLOUD) apply
+
+tf-fmt: ## Check Terraform formatting (all modules)
+	terraform -chdir=infra/terraform fmt -check -recursive
 
 # ─── Utilities ───────────────────────────────────────────────────────────────
 
