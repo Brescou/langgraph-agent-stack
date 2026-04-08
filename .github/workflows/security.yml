@@ -237,7 +237,7 @@ jobs:
         run: docker build -f infra/Dockerfile -t langgraph-agent-stack:scan .
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@6e7b7d1fd3e4fef0c5fa8cce1229c54b2c9a4a0f  # v0.28.0
         with:
           image-ref: langgraph-agent-stack:scan
           format: table
@@ -246,7 +246,7 @@ jobs:
           severity: "HIGH,CRITICAL"
 
       - name: Run Trivy (SARIF for GitHub Security tab)
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@6e7b7d1fd3e4fef0c5fa8cce1229c54b2c9a4a0f  # v0.28.0
         if: always()
         with:
           image-ref: langgraph-agent-stack:scan

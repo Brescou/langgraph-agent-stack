@@ -188,7 +188,7 @@ class Settings(BaseSettings):
         validation_alias="STREAM_TIMEOUT_SECONDS",
     )
     thread_pool_max_workers: int = Field(
-        default=4,
+        default=8,
         ge=1,
         le=64,
         description="Size of the ThreadPoolExecutor used for blocking agent calls.",

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Literal
@@ -30,7 +31,11 @@ from langgraph.graph import END, StateGraph
 from typing_extensions import TypedDict
 
 from agents.analyst import AnalysisReport, AnalystAgent
-from agents.base_agent import AgentError, AgentExecutionError, AgentValidationError
+from agents.base_agent import (
+    AgentExecutionError,
+    AgentTimeoutError,
+    AgentValidationError,
+)
 from agents.researcher import ResearchAgent, ResearchResult
 from core.config import get_settings
 from core.memory import create_checkpointer
@@ -100,6 +105,7 @@ class MultiAgentGraph:
         self._llm = llm
         self._checkpointer = checkpointer or create_checkpointer(get_settings())
         self._executor: ThreadPoolExecutor | None = None
+        self._executor_lock = threading.Lock()
         self._research_agent: ResearchAgent | None = None
         self._analyst_agent: AnalystAgent | None = None
         self._graph = self._build_graph()
@@ -191,7 +197,11 @@ class MultiAgentGraph:
                     "error": None,
                 }  # type: ignore[return-value]
 
-            except AgentError as exc:
+            except (
+                AgentExecutionError,
+                AgentTimeoutError,
+                AgentValidationError,
+            ) as exc:
                 logger.error(
                     "Pipeline: research phase failed",
                     extra={"run_id": self.run_id, "error": str(exc)},
@@ -272,7 +282,11 @@ class MultiAgentGraph:
                     "error": None,
                 }  # type: ignore[return-value]
 
-            except AgentError as exc:
+            except (
+                AgentExecutionError,
+                AgentTimeoutError,
+                AgentValidationError,
+            ) as exc:
                 logger.error(
                     "Pipeline: analysis phase failed",
                     extra={"run_id": self.run_id, "error": str(exc)},
@@ -406,10 +420,12 @@ class MultiAgentGraph:
     def _get_executor(self) -> ThreadPoolExecutor:
         """Lazily create the thread pool on first async usage."""
         if self._executor is None:
-            self._executor = ThreadPoolExecutor(
-                max_workers=get_settings().thread_pool_max_workers,
-                thread_name_prefix="agent-graph",
-            )
+            with self._executor_lock:
+                if self._executor is None:
+                    self._executor = ThreadPoolExecutor(
+                        max_workers=get_settings().thread_pool_max_workers,
+                        thread_name_prefix="agent-graph",
+                    )
         return self._executor
 
     def __enter__(self) -> MultiAgentGraph:
@@ -425,7 +441,8 @@ class MultiAgentGraph:
     def close(self) -> None:
         """Shut down the thread pool executor if it was created."""
         if self._executor is not None:
-            self._executor.shutdown(wait=False)
+            self._executor.shutdown(wait=True)
+            self._executor = None
 
     def get_research_result(self, query: str) -> ResearchResult:
         """

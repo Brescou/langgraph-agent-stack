@@ -16,7 +16,45 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from agents.analyst import AnalysisReport, AnalystAgent
+from agents.base_agent import extract_text_content
 from agents.researcher import ResearchAgent, ResearchResult
+
+# ---------------------------------------------------------------------------
+# extract_text_content tests
+# ---------------------------------------------------------------------------
+
+
+class TestExtractTextContent:
+    """Verify extract_text_content handles all LLM content representations."""
+
+    def test_plain_string(self) -> None:
+        assert extract_text_content("hello world") == "hello world"
+
+    def test_empty_string(self) -> None:
+        assert extract_text_content("") == ""
+
+    def test_list_of_text_dicts(self) -> None:
+        content = [{"type": "text", "text": "part1"}, {"type": "text", "text": "part2"}]
+        assert extract_text_content(content) == "part1 part2"
+
+    def test_list_with_image_block(self) -> None:
+        content = [
+            {"type": "image_url", "image_url": "https://example.com/img.png"},
+            {"type": "text", "text": "caption"},
+        ]
+        assert extract_text_content(content) == " caption"
+
+    def test_list_of_plain_strings(self) -> None:
+        assert extract_text_content(["a", "b", "c"]) == "a b c"
+
+    def test_mixed_list(self) -> None:
+        content = [{"text": "structured"}, "plain"]
+        assert extract_text_content(content) == "structured plain"
+
+    def test_non_string_non_list(self) -> None:
+        assert extract_text_content(42) == "42"
+        assert extract_text_content(None) == "None"
+
 
 # ---------------------------------------------------------------------------
 # Mock LLM factory helpers

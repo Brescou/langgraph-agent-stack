@@ -27,7 +27,7 @@ from agents.base_agent import (
     AgentState,
     AgentValidationError,
     BaseAgent,
-    _extract_text_content,
+    extract_text_content,
     input_validator,
 )
 from agents.models import ResearchResult  # backward-compat re-export
@@ -120,7 +120,7 @@ class ResearchAgent(BaseAgent):
         state = self._increment_step(state)
         self._log_step("research", state)
 
-        query = _extract_text_content(state["messages"][0].content)
+        query = extract_text_content(state["messages"][0].content)
         iterations: int = state.get("context", {}).get(self._CTX_ITERATIONS, 0)
         existing: list[str] = state.get("context", {}).get(self._CTX_FINDINGS, [])
         sources: list[str] = state.get("context", {}).get(self._CTX_SOURCES, [])
@@ -138,7 +138,7 @@ class ResearchAgent(BaseAgent):
                     HumanMessage(content=expansion_prompt),
                 ]
             )
-            parsed = json.loads(_extract_text_content(expansion_msg.content))
+            parsed = json.loads(extract_text_content(expansion_msg.content))
             if isinstance(parsed, list):
                 sub_queries = list(map(str, parsed))
         except json.JSONDecodeError:
@@ -194,7 +194,7 @@ class ResearchAgent(BaseAgent):
         self._log_step("validate", state)
 
         findings: list[str] = state.get("context", {}).get(self._CTX_FINDINGS, [])
-        query = _extract_text_content(state["messages"][0].content)
+        query = extract_text_content(state["messages"][0].content)
 
         if not findings:
             return {
@@ -224,7 +224,7 @@ class ResearchAgent(BaseAgent):
                     HumanMessage(content=validation_prompt),
                 ]
             )
-            result = json.loads(_extract_text_content(validation_msg.content))
+            result = json.loads(extract_text_content(validation_msg.content))
             is_sufficient: bool = bool(result.get("sufficient", True))
             reason: str = result.get("reason", "")
         except json.JSONDecodeError:
@@ -260,7 +260,7 @@ class ResearchAgent(BaseAgent):
         state = self._increment_step(state)
         self._log_step("summarize", state)
 
-        query = _extract_text_content(state["messages"][0].content)
+        query = extract_text_content(state["messages"][0].content)
         findings: list[str] = state.get("context", {}).get(self._CTX_FINDINGS, [])
         sources: list[str] = state.get("context", {}).get(self._CTX_SOURCES, [])
 
@@ -285,11 +285,11 @@ class ResearchAgent(BaseAgent):
                     HumanMessage(content=summary_prompt),
                 ]
             )
-            parsed = json.loads(_extract_text_content(summary_msg.content))
+            parsed = json.loads(extract_text_content(summary_msg.content))
             summary_text = parsed.get("summary", str(summary_msg.content))
             confidence = float(parsed.get("confidence", 0.7))
         except json.JSONDecodeError:
-            summary_text = _extract_text_content(summary_msg.content)
+            summary_text = extract_text_content(summary_msg.content)
         except Exception:
             logger.warning(
                 "Summarize node parsing failed — using defaults",

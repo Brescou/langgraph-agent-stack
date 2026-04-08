@@ -31,7 +31,7 @@ from agents.base_agent import (
     AgentState,
     AgentValidationError,
     BaseAgent,
-    _extract_text_content,
+    extract_text_content,
     input_validator,
 )
 from agents.models import (
@@ -120,7 +120,9 @@ class AnalystAgent(BaseAgent):
         self._log_step("analyze", state)
 
         research: dict[str, Any] = state.get("context", {}).get(self._CTX_RESEARCH, {})
-        query: str = research.get("query", state["messages"][0].content)  # type: ignore[union-attr]
+        query = extract_text_content(
+            research.get("query", state["messages"][0].content)
+        )
         summary: str = research.get("summary", "")
         findings: list[str] = research.get("findings", [])
 
@@ -141,7 +143,7 @@ class AnalystAgent(BaseAgent):
                     HumanMessage(content=analysis_prompt),
                 ]
             )
-            parsed = json.loads(_extract_text_content(response.content))
+            parsed = json.loads(extract_text_content(response.content))
             insights: list[str] = parsed.get("insights", [])
             confidence: float = float(parsed.get("confidence", 0.7))
         except Exception:
@@ -194,7 +196,7 @@ class AnalystAgent(BaseAgent):
                     HumanMessage(content=synthesis_prompt),
                 ]
             )
-            parsed = json.loads(_extract_text_content(response.content))
+            parsed = json.loads(extract_text_content(response.content))
             patterns: list[str] = parsed.get("patterns", [])
             implications: list[str] = parsed.get("implications", [])
         except Exception:
@@ -256,7 +258,7 @@ class AnalystAgent(BaseAgent):
                     HumanMessage(content=exec_summary_prompt),
                 ]
             )
-            exec_summary: str = _extract_text_content(exec_response.content).strip()
+            exec_summary: str = extract_text_content(exec_response.content).strip()
         except Exception:
             exec_summary = (
                 f"Analysis of '{query}' completed with "

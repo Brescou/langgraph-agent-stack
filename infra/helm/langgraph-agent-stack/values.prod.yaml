@@ -23,5 +23,8 @@ autoscaling:
 persistence:
   enabled: false  # prod utilise Redis ou Postgres
 
+networkPolicy:
+  enabled: true
+
 secrets:
   existingSecret: langgraph-secrets

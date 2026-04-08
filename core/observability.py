@@ -212,6 +212,19 @@ def init_tracing(service_name: str = "langgraph-agent-stack") -> None:
     )
 
 
+class _NoOpTracer:
+    """Minimal stub so callers can use ``tracer.start_as_current_span``."""
+
+    @contextmanager
+    def start_as_current_span(
+        self, name: str, **kwargs: Any
+    ) -> Generator[None, None, None]:
+        yield
+
+
+_NOOP_TRACER = _NoOpTracer()
+
+
 def get_tracer() -> Any:
     """Return the active OTel tracer, or a no-op stub."""
     if _tracer is not None:
@@ -219,16 +232,7 @@ def get_tracer() -> Any:
     if _OTEL_AVAILABLE:
         return trace.get_tracer("langgraph-agent-stack")
 
-    class _NoOpTracer:
-        """Minimal stub so callers can use ``tracer.start_as_current_span``."""
-
-        @contextmanager
-        def start_as_current_span(
-            self, name: str, **kwargs: Any
-        ) -> Generator[None, None, None]:
-            yield
-
-    return _NoOpTracer()
+    return _NOOP_TRACER
 
 
 @contextmanager
@@ -283,6 +287,17 @@ try:
         "Total LLM API calls",
         ["provider", "status"],
     )
+    llm_request_duration_seconds = Histogram(
+        "llm_request_duration_seconds",
+        "LLM API call duration in seconds",
+        ["provider"],
+        buckets=[0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0],
+    )
+    llm_tokens_total = Counter(
+        "llm_tokens_total",
+        "Total tokens consumed by LLM calls",
+        ["provider", "direction"],
+    )
     active_pipelines = Gauge(
         "active_pipelines",
         "Currently running agent pipelines",
@@ -306,6 +321,8 @@ except ImportError:
     http_requests_total = None  # type: ignore[assignment]
     http_request_duration_seconds = None  # type: ignore[assignment]
     llm_requests_total = None  # type: ignore[assignment]
+    llm_request_duration_seconds = None  # type: ignore[assignment]
+    llm_tokens_total = None  # type: ignore[assignment]
     active_pipelines = None  # type: ignore[assignment]
     server_shutting_down = None  # type: ignore[assignment]
     requests_rejected_during_shutdown = None  # type: ignore[assignment]

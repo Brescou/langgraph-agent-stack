@@ -24,6 +24,7 @@ Architecture notes
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import functools
 import hmac
 import json
@@ -285,6 +286,8 @@ def get_shared_memory() -> ConversationMemory | None:
 # FastAPI application
 # ---------------------------------------------------------------------------
 
+_is_production = get_settings().environment == "production"
+
 app = FastAPI(
     title="LangGraph Agent Stack API",
     description=(
@@ -293,8 +296,8 @@ app = FastAPI(
         "to turn a free-text query into a structured ``AnalysisReport``."
     ),
     version=_APP_VERSION,
-    docs_url="/docs",
-    redoc_url="/redoc",
+    docs_url=None if _is_production else "/docs",
+    redoc_url=None if _is_production else "/redoc",
     lifespan=lifespan,
 )
 
@@ -304,19 +307,29 @@ if _metrics_app is not None:
     app.mount("/metrics", _metrics_app)
 
 # ---------------------------------------------------------------------------
-# CORS — wildcard for open-source template; tighten for production
+# CORS — fail-closed: no wildcard unless explicitly set in CORS_ORIGINS
 # ---------------------------------------------------------------------------
 
 _cors_origins = get_settings().cors_origins
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_cors_origins if _cors_origins else ["*"],
-    allow_credentials=bool(_cors_origins),  # False si wildcard
-    allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
-    expose_headers=["X-Request-ID"],
-)
+if _cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+        expose_headers=["X-Request-ID"],
+    )
+elif not _is_production:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+        expose_headers=["X-Request-ID"],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -547,11 +560,14 @@ async def _run_in_executor(fn: Any, *args: Any) -> Any:
     Returns:
         The return value of ``fn(*args)``.
     """
+    if _executor is None:
+        raise RuntimeError("Application not started — call during lifespan only")
     if active_pipelines is not None:
         active_pipelines.inc()
     try:
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(_executor, fn, *args)
+        ctx = contextvars.copy_context()
+        return await loop.run_in_executor(_executor, ctx.run, fn, *args)
     finally:
         if active_pipelines is not None:
             active_pipelines.dec()
@@ -757,7 +773,7 @@ async def run_pipeline(
                 _shared_memory.save_run(
                     run_id=run_id,
                     query=query,
-                    result=vars(report) if hasattr(report, "__dict__") else {},
+                    result=report.to_dict() if hasattr(report, "to_dict") else {},
                     metadata={"session_id": session_id, "agent": "MultiAgentGraph"},
                 )
 
@@ -871,7 +887,10 @@ async def _stream_pipeline(
         yield f"data: {json.dumps({'type': 'agent_switch', 'from': 'orchestrator', 'to': 'researcher'})}\n\n"
 
         pipeline = MultiAgentGraph(run_id=run_id, llm=llm, checkpointer=checkpointer)
-        report = await loop.run_in_executor(_executor, pipeline.run, query)
+        try:
+            report = await loop.run_in_executor(_executor, pipeline.run, query)
+        finally:
+            pipeline.close()
 
         yield f"data: {json.dumps({'type': 'agent_switch', 'from': 'researcher', 'to': 'analyst'})}\n\n"
 

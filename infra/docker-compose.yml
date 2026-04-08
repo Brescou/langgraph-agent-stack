@@ -56,11 +56,11 @@ services:
       - redis
     ports:
       - "6379:6379"
-    command: redis-server --save 60 1 --loglevel warning --requirepass ${REDIS_PASSWORD:-changeme}
+    command: redis-server --save 60 1 --loglevel warning --requirepass ${REDIS_PASSWORD:?Set REDIS_PASSWORD env var}
     volumes:
       - redis-data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-changeme}", "ping"]
+      test: ["CMD", "sh", "-c", "REDISCLI_AUTH=$REDIS_PASSWORD redis-cli ping"]
       interval: 10s
       timeout: 5s
       retries: 5

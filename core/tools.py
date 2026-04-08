@@ -259,7 +259,7 @@ _SAFE_OPERATORS: dict[type, Any] = {
 }
 
 
-def _safe_eval(node: ast.AST) -> Any:
+def _safe_eval(node: ast.AST) -> int | float:
     """
     Recursively evaluate a safe arithmetic AST node.
 

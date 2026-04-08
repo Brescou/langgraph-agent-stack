@@ -13,10 +13,31 @@ spec:
       {{- include "langgraph-agent-stack.selectorLabels" . | nindent 6 }}
   policyTypes:
     - Ingress
+    - Egress
   ingress:
     - ports:
         - port: 8000
           protocol: TCP
       from:
-        - namespaceSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              {{- if .Values.networkPolicy.ingressNamespaceLabel }}
+              {{ .Values.networkPolicy.ingressNamespaceLabel | toYaml | nindent 14 }}
+              {{- else }}
+              kubernetes.io/metadata.name: {{ .Values.namespace.name }}
+              {{- end }}
+  egress:
+    # DNS resolution
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # HTTPS to LLM provider APIs
+    - ports:
+        - port: 443
+          protocol: TCP
+    {{- if .Values.networkPolicy.extraEgressRules }}
+    {{- .Values.networkPolicy.extraEgressRules | toYaml | nindent 4 }}
+    {{- end }}
 {{- end }}

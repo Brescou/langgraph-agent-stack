@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 
@@ -29,14 +29,7 @@ class ResearchResult:
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise the result to a plain dictionary."""
-        return {
-            "query": self.query,
-            "findings": self.findings,
-            "summary": self.summary,
-            "sources": self.sources,
-            "confidence": self.confidence,
-            "metadata": self.metadata,
-        }
+        return asdict(self)
 
 
 @dataclass
@@ -66,16 +59,7 @@ class AnalysisReport:
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise the report to a plain dictionary."""
-        return {
-            "query": self.query,
-            "executive_summary": self.executive_summary,
-            "key_insights": self.key_insights,
-            "patterns": self.patterns,
-            "implications": self.implications,
-            "confidence": self.confidence,
-            "research_summary": self.research_summary,
-            "metadata": self.metadata,
-        }
+        return asdict(self)
 
     def to_markdown(self) -> str:
         """Render the report as a Markdown string."""

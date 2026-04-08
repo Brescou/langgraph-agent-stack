@@ -94,6 +94,8 @@ readinessProbe:
 
 networkPolicy:
   enabled: false
+  ingressNamespaceLabel: {}
+  extraEgressRules: []
 
 podDisruptionBudget:
   enabled: false

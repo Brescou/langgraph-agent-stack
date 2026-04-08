@@ -29,14 +29,18 @@ from typing_extensions import TypedDict
 from core.config import get_settings
 from core.llm import get_llm
 from core.memory import create_checkpointer
-from core.observability import llm_requests_total
+from core.observability import (
+    llm_request_duration_seconds,
+    llm_requests_total,
+    llm_tokens_total,
+)
 from core.security import InputValidator
 from core.tools import get_default_tools
 
 input_validator = InputValidator()
 
 
-def _extract_text_content(content: Any) -> str:
+def extract_text_content(content: Any) -> str:
     """Safely extract text from an LLM message content field.
 
     Multi-modal models may return ``list[dict]`` instead of ``str``.
@@ -335,11 +339,27 @@ class BaseAgent(abc.ABC):
         last_exc: Exception | None = None
         for attempt in range(max_retries + 1):
             try:
+                t0 = time.monotonic()
                 result = self.llm.invoke(messages)
+                elapsed = time.monotonic() - t0
+                if llm_request_duration_seconds is not None:
+                    llm_request_duration_seconds.labels(
+                        provider=settings.llm_provider,
+                    ).observe(elapsed)
                 if llm_requests_total is not None:
                     llm_requests_total.labels(
                         provider=settings.llm_provider, status="success"
                     ).inc()
+                usage = getattr(result, "usage_metadata", None)
+                if usage and llm_tokens_total is not None:
+                    if "input_tokens" in usage:
+                        llm_tokens_total.labels(
+                            provider=settings.llm_provider, direction="input"
+                        ).inc(usage["input_tokens"])
+                    if "output_tokens" in usage:
+                        llm_tokens_total.labels(
+                            provider=settings.llm_provider, direction="output"
+                        ).inc(usage["output_tokens"])
                 return result
             except (TimeoutError, ConnectionError) as exc:
                 if llm_requests_total is not None:
