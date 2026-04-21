@@ -49,7 +49,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source (full history for gitleaks)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           # Fetch the complete git history so gitleaks can scan all commits,
           # not just the files present in the working tree.
@@ -89,7 +89,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -157,7 +157,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -231,7 +231,7 @@ jobs:
       ANTHROPIC_API_KEY: test-key-not-real
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Build Docker image
         run: docker build -f infra/Dockerfile -t langgraph-agent-stack:scan .
