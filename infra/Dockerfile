@@ -83,6 +83,7 @@ COPY core/     ./core/
 COPY agents/   ./agents/
 COPY platform/ ./platform/
 COPY domain_packs/ ./domain_packs/
+COPY connectors/ ./connectors/
 
 # Transfer ownership of the working directory to the non-root user
 RUN chown -R appuser:appgroup /app
