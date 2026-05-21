@@ -63,17 +63,9 @@ if _stdlib_spec is not None and _stdlib_spec.loader is not None:
             setattr(_THIS_PKG, _name, getattr(_stdlib_platform_mod, _name))
 
 from platform.base_pack import BaseDomainPack  # noqa: E402
+from platform.builtin_packs import register_builtin_packs  # noqa: E402
 from platform.registry import PackRegistry  # noqa: E402
 
 __all__ = ["BaseDomainPack", "PackRegistry"]
 
-# Register built-in packs explicitly — no magic, no auto-discovery.
-from domain_packs.analysis_only.pack import AnalysisOnlyPack  # noqa: E402
-from domain_packs.research_analysis.pack import ResearchAnalysisPack  # noqa: E402
-from domain_packs.research_only.pack import ResearchOnlyPack  # noqa: E402
-from domain_packs.summariser.pack import SummariserPack  # noqa: E402
-
-PackRegistry.register(ResearchAnalysisPack)
-PackRegistry.register(ResearchOnlyPack)
-PackRegistry.register(SummariserPack)
-PackRegistry.register(AnalysisOnlyPack)
+register_builtin_packs()

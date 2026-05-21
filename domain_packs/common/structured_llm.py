@@ -1,0 +1,297 @@
+"""
+domain_packs/common/structured_llm.py — Reusable single-node LLM pack base.
+
+Vertical packs subclass ``StructuredLLMPack``, declare schemas, and implement
+``build_prompt`` (+ optional ``parse_llm_output``). Supports optional
+``connector`` for RAG enrichment on packs that accept reference documents.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import re
+import threading
+import uuid
+from collections.abc import AsyncGenerator
+from concurrent.futures import ThreadPoolExecutor
+from platform.base_pack import BaseDomainPack
+from typing import Any, ClassVar
+
+from langgraph.graph import END, StateGraph
+from pydantic import BaseModel
+from typing_extensions import TypedDict
+
+from agents.base_agent import (
+    AgentBudgetExceededError,
+    AgentExecutionError,
+    AgentTimeoutError,
+    AgentValidationError,
+)
+from connectors.base import BaseConnector, ConnectorRequest, ConnectorResult
+from core.config import get_settings
+from core.memory import create_checkpointer
+from core.observability import trace_span
+
+logger = logging.getLogger(__name__)
+
+
+class _StructuredState(TypedDict, total=False):
+    input_json: str
+    reference_text: str
+    output: dict[str, Any] | None
+    error: str | None
+    status: str
+
+
+def _fetch_connector_result_sync(
+    connector: BaseConnector, query: str
+) -> ConnectorResult:
+    """Run async ``connector.fetch`` from a sync graph node."""
+    request = ConnectorRequest(query=query)
+
+    async def _fetch() -> ConnectorResult:
+        return await connector.fetch(request)
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(_fetch())
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(asyncio.run, _fetch())
+        return future.result()
+
+
+def extract_json_object(raw: str) -> dict[str, Any]:
+    """Parse a JSON object from an LLM response (handles fenced blocks)."""
+    text = raw.strip()
+    fence = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
+    if fence:
+        text = fence.group(1).strip()
+    else:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            text = text[start : end + 1]
+    return json.loads(text)
+
+
+class StructuredLLMPack(BaseDomainPack):
+    """Base class for vertical packs driven by one structured LLM call."""
+
+    input_schema: ClassVar[type[BaseModel]]
+    output_schema: ClassVar[type[BaseModel]]
+    node_name: ClassVar[str] = "structured_llm_node"
+
+    def __init__(
+        self,
+        run_id: str | None = None,
+        llm: Any | None = None,
+        checkpointer: Any | None = None,
+        budget_usd: float | None = None,
+        connector: BaseConnector | None = None,
+    ) -> None:
+        super().__init__(
+            run_id=run_id, llm=llm, checkpointer=checkpointer, budget_usd=budget_usd
+        )
+        self.run_id = run_id or str(uuid.uuid4())
+        self._checkpointer = checkpointer or create_checkpointer(get_settings())
+        self._connector = connector
+        self._executor: ThreadPoolExecutor | None = None
+        self._executor_lock = threading.Lock()
+        self._graph = self._build_graph()
+
+    def _build_graph(self) -> Any:
+        graph = StateGraph(_StructuredState)
+        graph.add_node(self.node_name, self._run_node)
+        graph.set_entry_point(self.node_name)
+        graph.add_edge(self.node_name, END)
+        return graph.compile(checkpointer=self._checkpointer)
+
+    @classmethod
+    def build_prompt(cls, inp: BaseModel, *, reference_text: str = "") -> str:
+        """Build the LLM prompt from validated input and optional reference text."""
+        raise NotImplementedError
+
+    @classmethod
+    def parse_llm_output(
+        cls, raw: str, inp: BaseModel, *, reference_text: str = ""
+    ) -> BaseModel:
+        """Parse LLM text into ``output_schema`` (default: JSON extraction)."""
+        data = extract_json_object(raw)
+        return cls.output_schema.model_validate(data)
+
+    @classmethod
+    def primary_text(cls, inp: BaseModel) -> str:
+        """Text used for policy validation and run-history query field."""
+        for field in (
+            "query",
+            "text",
+            "company",
+            "topic",
+            "ticket_subject",
+            "question",
+        ):
+            if hasattr(inp, field):
+                value = getattr(inp, field)
+                if value:
+                    return str(value)
+        return str(inp.model_dump())[:500]
+
+    def _resolve_reference_text(self, inp: BaseModel) -> str:
+        parts: list[str] = []
+        for field in (
+            "reference_text",
+            "rfp_text",
+            "contract_text",
+            "document_text",
+            "job_description",
+            "resume_text",
+        ):
+            if hasattr(inp, field):
+                value = getattr(inp, field)
+                if value:
+                    parts.append(str(value))
+        if self._connector is not None:
+            query = self.primary_text(inp)
+            try:
+                result = _fetch_connector_result_sync(self._connector, query)
+                for record in result.records:
+                    snippet = (
+                        record.get("snippet")
+                        or record.get("text")
+                        or record.get("content")
+                        or str(record)
+                    )
+                    parts.append(str(snippet))
+            except Exception as exc:
+                logger.warning("Connector fetch failed for %s: %s", self.pack_id, exc)
+        return "\n\n---\n\n".join(parts)
+
+    def _run_node(self, state: _StructuredState) -> _StructuredState:
+        inp = self.input_schema.model_validate_json(state.get("input_json", "{}"))
+        reference_text = state.get("reference_text") or self._resolve_reference_text(
+            inp
+        )
+
+        with trace_span(
+            self.node_name, {"run_id": self.run_id, "pack_id": self.pack_id}
+        ):
+            try:
+                if self._llm is None:
+                    raise AgentExecutionError(
+                        f"{self.__class__.__name__} requires an LLM instance."
+                    )
+                prompt = self.build_prompt(inp, reference_text=reference_text)
+                response = self._llm.invoke(prompt)
+                raw = (
+                    response.content if hasattr(response, "content") else str(response)
+                )
+                output = self.parse_llm_output(raw, inp, reference_text=reference_text)
+                return {
+                    **state,
+                    "output": output.model_dump(),
+                    "status": "done",
+                    "error": None,
+                }  # type: ignore[return-value]
+            except (
+                AgentBudgetExceededError,
+                AgentExecutionError,
+                AgentTimeoutError,
+                AgentValidationError,
+                json.JSONDecodeError,
+                ValueError,
+            ) as exc:
+                return {
+                    **state,
+                    "output": None,
+                    "status": "error",
+                    "error": str(exc),
+                }  # type: ignore[return-value]
+
+    def run_from_input(self, body: BaseModel) -> BaseModel:
+        if not isinstance(body, self.input_schema):
+            body = self.input_schema.model_validate(body)
+        reference_text = self._resolve_reference_text(body)
+        initial: _StructuredState = {
+            "input_json": body.model_dump_json(),
+            "reference_text": reference_text,
+            "output": None,
+            "error": None,
+            "status": "running",
+        }
+        config = {"configurable": {"thread_id": self.run_id}}
+        try:
+            final = self._graph.invoke(initial, config=config)
+        except Exception as exc:
+            raise AgentExecutionError(
+                f"[{self.__class__.__name__}] Pipeline failed: {exc}"
+            ) from exc
+
+        if final.get("status") == "error":
+            raise AgentExecutionError(
+                f"[{self.__class__.__name__}] {final.get('error')}"
+            )
+        out = final.get("output")
+        if not out:
+            raise AgentExecutionError(
+                f"[{self.__class__.__name__}] completed without output."
+            )
+        return self.output_schema.model_validate(out)
+
+    def run(self, query: str) -> BaseModel:
+        if not query or not query.strip():
+            raise AgentValidationError(f"{self.__class__.__name__}.run() needs text.")
+        fields = self.input_schema.model_fields
+        if "query" in fields:
+            return self.run_from_input(self.input_schema(query=query.strip()))
+        if "text" in fields:
+            return self.run_from_input(self.input_schema(text=query.strip()))
+        if "company" in fields:
+            return self.run_from_input(self.input_schema(company=query.strip()))
+        if "topic" in fields:
+            return self.run_from_input(self.input_schema(topic=query.strip()))
+        if "ticket_subject" in fields:
+            return self.run_from_input(
+                self.input_schema(ticket_subject=query.strip(), body=query.strip())
+            )
+        if "question" in fields:
+            return self.run_from_input(self.input_schema(question=query.strip()))
+        raise AgentValidationError(
+            f"{self.__class__.__name__} has no string fallback field."
+        )
+
+    async def arun(self, query: str) -> BaseModel:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(self._get_executor(), self.run, query)
+
+    async def stream_events_from_input(
+        self, body: BaseModel
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        yield {"event": "phase_started", "data": {"phase": self.pack_id}}
+        result = self.run_from_input(body)
+        yield {"event": "phase_completed", "data": {"phase": self.pack_id}}
+        yield {"event": "pipeline_completed", "data": {"result": result.model_dump()}}
+
+    async def stream_events(self, query: str) -> AsyncGenerator[dict[str, Any], None]:
+        result = self.run(query)
+        yield {"event": "phase_started", "data": {"phase": self.pack_id}}
+        yield {"event": "phase_completed", "data": {"phase": self.pack_id}}
+        yield {"event": "pipeline_completed", "data": {"result": result.model_dump()}}
+
+    def close(self) -> None:
+        if self._executor is not None:
+            self._executor.shutdown(wait=True)
+            self._executor = None
+
+    def _get_executor(self) -> ThreadPoolExecutor:
+        if self._executor is None:
+            with self._executor_lock:
+                if self._executor is None:
+                    self._executor = ThreadPoolExecutor(
+                        max_workers=get_settings().thread_pool_max_workers,
+                        thread_name_prefix=f"{self.pack_id}-pack",
+                    )
+        return self._executor

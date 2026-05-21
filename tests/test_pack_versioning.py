@@ -95,19 +95,12 @@ def clean_registry():
     this fixture (e.g. test_api.py) still find the registry in its normal
     state.
     """
-    from domain_packs.analysis_only.pack import AnalysisOnlyPack
-    from domain_packs.research_analysis.pack import ResearchAnalysisPack
-    from domain_packs.research_only.pack import ResearchOnlyPack
-    from domain_packs.summariser.pack import SummariserPack
+    from platform.builtin_packs import register_builtin_packs
 
     PackRegistry._reset()
     yield
-    # Restore the registry to its baseline state (built-in packs).
     PackRegistry._reset()
-    PackRegistry.register(ResearchAnalysisPack)
-    PackRegistry.register(ResearchOnlyPack)
-    PackRegistry.register(SummariserPack)
-    PackRegistry.register(AnalysisOnlyPack)
+    register_builtin_packs()
 
 
 # ---------------------------------------------------------------------------

@@ -17,6 +17,17 @@ def test_pack_runtime_kwargs_injects_connector_for_research_analysis() -> None:
         api_main._shared_connector = None
 
 
+def test_pack_runtime_kwargs_injects_connector_for_rfp_assistant() -> None:
+    from domain_packs.rfp_assistant.pack import RfpAssistantPack
+
+    api_main._shared_connector = ExampleMemoryConnector()
+    try:
+        kwargs = api_main._pack_runtime_kwargs(RfpAssistantPack)
+        assert kwargs == {"connector": api_main._shared_connector}
+    finally:
+        api_main._shared_connector = None
+
+
 def test_pack_runtime_kwargs_skips_research_only() -> None:
     api_main._shared_connector = ExampleMemoryConnector()
     try:

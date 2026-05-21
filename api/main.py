@@ -421,13 +421,18 @@ def _validate_pack_query(pack_id: str, raw_query: str) -> str:
 
 def _pack_runtime_kwargs(pack_cls: type) -> dict[str, Any]:
     """Extra constructor kwargs: policy budget and optional connector."""
+    import inspect
+
     kwargs: dict[str, Any] = {}
     pack_id = getattr(pack_cls, "pack_id", None)
     if pack_id:
         budget = effective_budget_usd(pack_id, get_settings())
         if budget is not None:
             kwargs["budget_usd"] = budget
-    if _shared_connector is not None and pack_id == "research_analysis":
+    if (
+        _shared_connector is not None
+        and "connector" in inspect.signature(pack_cls.__init__).parameters
+    ):
         kwargs["connector"] = _shared_connector
     return kwargs
 
