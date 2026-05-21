@@ -49,7 +49,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source (full history for gitleaks)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           # Fetch the complete git history so gitleaks can scan all commits,
           # not just the files present in the working tree.
@@ -73,7 +73,7 @@ jobs:
         continue-on-error: true   # File may not exist when there are no findings
 
       - name: Upload gitleaks report artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: gitleaks-report
@@ -89,7 +89,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -100,7 +100,7 @@ jobs:
         run: uv python install ${{ env.PYTHON_VERSION }}
 
       - name: Cache uv dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/uv
           key: uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('pyproject.toml', 'uv.lock') }}
@@ -135,7 +135,7 @@ jobs:
         continue-on-error: true
 
       - name: Upload pip-audit report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: pip-audit-report
@@ -160,7 +160,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -204,7 +204,7 @@ jobs:
         continue-on-error: true   # Requires Advanced Security on private repos
 
       - name: Upload bandit SARIF artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: bandit-sarif-report
@@ -234,7 +234,7 @@ jobs:
       ANTHROPIC_API_KEY: test-key-not-real
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Build Docker image
         run: docker build -f infra/Dockerfile -t langgraph-agent-stack:scan .
@@ -247,7 +247,7 @@ jobs:
           output-file: sbom.spdx.json
 
       - name: Upload container SBOM
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: container-sbom-spdx
           path: sbom.spdx.json
@@ -281,7 +281,7 @@ jobs:
         continue-on-error: true
 
       - name: Upload Trivy SARIF artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: trivy-sarif-report
