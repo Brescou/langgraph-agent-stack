@@ -14,15 +14,19 @@ variable "region" {
 }
 
 variable "cluster_name" {
-  description = "Name of the GKE Autopilot cluster."
+  description = "Name of the GKE Autopilot cluster (created in the root module)."
   type        = string
-  default     = "langgraph-cluster"
 }
 
 variable "environment" {
   description = "Deployment environment (dev or prod)."
   type        = string
   default     = "dev"
+
+  validation {
+    condition     = contains(["dev", "prod"], var.environment)
+    error_message = "environment must be 'dev' or 'prod'."
+  }
 }
 
 variable "namespace" {
@@ -42,24 +46,3 @@ variable "llm_provider" {
   default     = "anthropic"
 }
 
-# ---------------------------------------------------------------------------
-# Private cluster & network access
-# ---------------------------------------------------------------------------
-
-variable "master_ipv4_cidr_block" {
-  description = "CIDR block for the GKE master's private IP range."
-  type        = string
-  default     = "172.16.0.0/28"
-}
-
-variable "master_authorized_cidrs" {
-  description = "CIDRs allowed to reach the GKE API server."
-  type = list(object({
-    cidr_block   = string
-    display_name = string
-  }))
-  default = [{
-    cidr_block   = "0.0.0.0/0"
-    display_name = "all (restrict in production)"
-  }]
-}

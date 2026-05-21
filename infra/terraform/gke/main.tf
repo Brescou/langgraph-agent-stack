@@ -11,13 +11,19 @@
 module "gke" {
   source = "../modules/gke"
 
-  project_id              = var.project_id
-  region                  = var.region
-  cluster_name            = var.cluster_name
-  environment             = var.environment
-  namespace               = var.namespace
-  helm_chart_path         = var.helm_chart_path
-  llm_provider            = var.llm_provider
-  master_ipv4_cidr_block  = var.master_ipv4_cidr_block
-  master_authorized_cidrs = var.master_authorized_cidrs
+  providers = {
+    google     = google
+    kubernetes = kubernetes
+    helm       = helm
+  }
+
+  depends_on = [google_container_cluster.main]
+
+  project_id      = var.project_id
+  region          = var.region
+  cluster_name    = var.cluster_name
+  environment     = var.environment
+  namespace       = var.namespace
+  helm_chart_path = var.helm_chart_path
+  llm_provider    = var.llm_provider
 }

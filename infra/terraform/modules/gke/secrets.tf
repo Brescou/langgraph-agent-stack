@@ -14,12 +14,16 @@ locals {
 }
 
 resource "google_project_service" "secretmanager" {
+  provider = google
+
   project            = var.project_id
   service            = "secretmanager.googleapis.com"
   disable_on_destroy = false
 }
 
 resource "google_secret_manager_secret" "anthropic_api_key" {
+  provider = google
+
   project   = var.project_id
   secret_id = local.anthropic_secret_id
 
@@ -31,6 +35,8 @@ resource "google_secret_manager_secret" "anthropic_api_key" {
 }
 
 resource "google_secret_manager_secret" "redis_url" {
+  provider = google
+
   project   = var.project_id
   secret_id = local.redis_secret_id
 
@@ -42,18 +48,24 @@ resource "google_secret_manager_secret" "redis_url" {
 }
 
 resource "google_service_account" "langgraph" {
+  provider = google
+
   account_id   = "langgraph-${var.environment}"
   display_name = "LangGraph agent stack (${var.environment})"
   project      = var.project_id
 }
 
 resource "google_project_iam_member" "langgraph_secret_accessor" {
+  provider = google
+
   project = var.project_id
   role    = "roles/secretmanager.secretAccessor"
   member  = "serviceAccount:${google_service_account.langgraph.email}"
 }
 
 resource "kubernetes_service_account_v1" "workload" {
+  provider = kubernetes
+
   metadata {
     name      = local.k8s_service_account_name
     namespace = kubernetes_namespace_v1.langgraph.metadata[0].name
@@ -66,16 +78,19 @@ resource "kubernetes_service_account_v1" "workload" {
     }
   }
 
-  depends_on = [google_container_cluster.main]
 }
 
 resource "google_service_account_iam_member" "workload_identity" {
+  provider = google
+
   service_account_id = google_service_account.langgraph.name
   role               = "roles/iam.workloadIdentityUser"
   member             = "serviceAccount:${var.project_id}.svc.id.goog[${kubernetes_namespace_v1.langgraph.metadata[0].name}/${local.k8s_service_account_name}]"
 }
 
 resource "kubernetes_manifest" "cluster_secret_store" {
+  provider = kubernetes
+
   manifest = {
     apiVersion = "external-secrets.io/v1beta1"
     kind       = "ClusterSecretStore"
@@ -89,7 +104,7 @@ resource "kubernetes_manifest" "cluster_secret_store" {
           auth = {
             workloadIdentity = {
               clusterLocation = var.region
-              clusterName       = google_container_cluster.main.name
+              clusterName       = var.cluster_name
               serviceAccountRef = {
                 name      = local.k8s_service_account_name
                 namespace = kubernetes_namespace_v1.langgraph.metadata[0].name
@@ -108,6 +123,8 @@ resource "kubernetes_manifest" "cluster_secret_store" {
 }
 
 resource "kubernetes_manifest" "langgraph_external_secret" {
+  provider = kubernetes
+
   manifest = {
     apiVersion = "external-secrets.io/v1beta1"
     kind       = "ExternalSecret"
