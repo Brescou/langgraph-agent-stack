@@ -1,6 +1,6 @@
 # langgraph-agent-stack
 
-> Deployable **production infrastructure** template for multi-agent LangGraph systems on Kubernetes — Helm, observability, CI, and a hardened API baseline. Identity for multi-tenant SaaS is **your** layer (see [Security → API authentication](#security)).
+> Production-grade **template** for multi-agent LangGraph systems — hardened FastAPI API, domain packs, Helm, Terraform stubs, CI, and observability. Multi-tenant identity is **your** layer ([Security guide](docs/security.md)).
 
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/release/python-3120/)
 [![uv](https://img.shields.io/badge/package%20manager-uv-blueviolet)](https://github.com/astral-sh/uv)
@@ -11,875 +11,173 @@
 
 ## What is this?
 
-Setting up a production-grade multi-agent system from scratch means wiring together an LLM SDK, a graph orchestrator, a persistent memory backend, a hardened API layer, containerization, and Kubernetes manifests — before you write a single line of domain logic. This template does all of that for you. It is aimed at ML and Data Engineers who want a correct, deployable starting point rather than a toy notebook.
+A deployable starting point for ML / data engineers who want a **real** agent stack—not a notebook demo. The default pipeline is Research → Analysis (`ResearchAgent` + `AnalystAgent`), exposed over FastAPI with SSE streaming, session history, cost tracking, and pack-based routing.
 
-**What “production-ready” means here:** deployable ops baseline (Docker, Helm, Terraform stubs, structured logging, metrics, rate limiting, input validation, CI). On `main`, images are pushed to GHCR with an SPDX SBOM (Syft) and Cosign keyless signatures — see [Supply chain](docs/security.md#8-supply-chain-sbom--image-signing). **What it does not include out of the box:** multi-tenant identity (OAuth2/OIDC, named API keys with revocation/scopes, per-caller audit). The built-in `API_KEY` is a single shared secret suitable for **internal gateways or single-tenant** deployments — see [Security](#security).
+**Included:** Docker, Helm chart, Terraform entry points (GKE / EKS / AKS), rate limiting, input validation, structured logging, Prometheus metrics, CI security scans, GHCR images with SBOM + Cosign on `main`.
 
-The source code implements a Research + Analysis pipeline where two LangGraph agents (`ResearchAgent` and `AnalystAgent`) are orchestrated by a shared graph and served over a FastAPI REST API with SSE streaming.
+**Not included:** OAuth2/OIDC, per-tenant API keys, or billing. The built-in `API_KEY` is a single shared Bearer secret for internal / single-tenant use.
 
-## Architecture
-
-```
-User Query
-    │
-    ▼
-┌─────────────────────────────────────────────────────┐
-│  FastAPI  (rate limiting · auth · security headers)  │
-│                                                       │
-│   POST /run ──────────────────────────────────────┐  │
-│   POST /run/stream ────────────────────────────┐  │  │
-│   POST /research ─────────────────────────┐   │  │  │
-│   GET  /health                            │   │  │  │
-│   GET  /ready                             │   │  │  │
-│   GET  /sessions/{id}/history             │   │  │  │
-└───────────────────────────────────────────┼───┼──┼──┘
-                                            │   │  │
-                    ┌───────────────────────┘   │  │
-                    ▼                           │  │
-         ┌─────────────────┐                   │  │
-         │  ResearchAgent  │◄──────────────────┘  │
-         │  (LangGraph)    │◄─────────────────────┘
-         └────────┬────────┘
-                  │ ResearchResult
-                  ▼
-         ┌─────────────────┐
-         │  AnalystAgent   │
-         │  (LangGraph)    │
-         └────────┬────────┘
-                  │ AnalysisReport
-                  ▼
-         ┌─────────────────────────┐
-         │  Memory Backend         │
-         │  SQLite / Redis / PG    │
-         └─────────────────────────┘
-```
-
-**Key components**
-
-| Component | Path | Responsibility |
-|-----------|------|----------------|
-| `ResearchAgent` | `agents/researcher.py` | Expands queries into sub-queries, retrieves information snippets, validates quality |
-| `AnalystAgent` | `agents/analyst.py` | Consumes research findings, extracts insights, identifies patterns, produces a structured report |
-| `ResearchAnalysisPack` | `domain_packs/research_analysis/pack.py` | Domain pack that owns the LangGraph graph (Research → Analysis); registered in `PackRegistry` |
-| `ResearchOnlyPack` | `domain_packs/research_only/pack.py` | Second built-in pack — research phase only (`POST /packs/research_only/run`) |
-| `SummariserPack` | `domain_packs/summariser/pack.py` | Single-agent text summariser (`POST /packs/summariser/run`) |
-| `AnalysisOnlyPack` | `domain_packs/analysis_only/pack.py` | Analysis on pre-supplied research (`POST /packs/analysis_only/run`) |
-| `MultiAgentGraph` | `core/graph.py` | Backward-compat alias for `ResearchAnalysisPack` (shim only — new orchestration belongs in a domain pack) |
-| `PackRegistry` | `pack_kernel/registry.py` | Explicit registration of domain packs and versions (`pack_kernel/__init__.py` registers built-ins at import) |
-| `ConversationMemory` | `core/memory.py` | Pluggable checkpoint backend (SQLite, Redis, or PostgreSQL) |
-| `core/security.py` | `core/security.py` | Input validation, per-IP rate limiting, log sanitization |
-| `api/main.py` | `api/main.py` | FastAPI application with lifespan, legacy `/run` routes, and pack routes derived from the registry |
-
-## What's New in v0.5.0
-
-- **Per-run cost tracking** — `CostTracker` callback accumulates token costs against a per-model pricing table; agents and packs expose a `cost_usd` property; the API returns cost in every response and enforces an optional `budget_usd` cap (HTTP 402 when exceeded).
-- **Typed pack schemas** — `BaseDomainPack` now declares `input_schema` and `output_schema` ClassVars (Pydantic models); `PackRegistry.get_schemas()` and `list_packs_with_metadata()` expose them. `_build_pack_router()` auto-wires typed `/run` and `/run/stream` endpoints for every registered pack at startup.
-- **Pack versioning + traffic split** — multiple versions of a pack can be registered simultaneously via the `PackVersion` dataclass. `set_weights()` controls the traffic split. `X-Pack-Version` request header pins a call to a specific version; `X-Pack-Version-Used` response header confirms which version ran.
-- **Sticky sessions** — on the SQLite backend, the router remembers which pack version was used for a given session and reuses it automatically (override with `X-Pack-Version` header).
-- **New REST endpoints** — `GET /packs`, `GET /packs/{pack_id}/versions`, `PATCH /packs/{pack_id}/versions/{version}/weight`.
-
-**Platform kernel (Sprint 2)**
-
-- **Second domain pack** — `research_only` (`ResearchOnlyPack`) registered alongside `research_analysis`; use `POST /packs/research_only/run` for research-only output.
-- **Summariser and analysis-only packs** — `summariser` and `analysis_only` for single-step summary and analysis-without-research workflows (`domain_packs/README.md`).
-- **Optional retrieval connector** — `CONNECTOR_ENABLED` + `CONNECTOR_ID` inject a built-in connector into `ResearchAnalysisPack` on `/run` and `/packs/research_analysis/*` (default id: `example_memory`; query containing `demo` returns canned snippets).
-
-**Platform kernel (Sprint 3)**
-
-- **Connectors** — `http` (`CONNECTOR_HTTP_URL`) and `rag` (`RAG_ENABLED=true`, `CONNECTOR_ID=rag`) in addition to `example_memory`.
-- **Control plane** — `PolicyRegistry` + enforcement at API boundaries (query length, budget, stream timeout per pack).
-- **Sticky sessions** — `get_pack_version_for_session` implemented for **Redis** and **Postgres** run-history backends (SQLite unchanged).
-
-## Quick Start
-
-**Prerequisites**
-
-- Python 3.12+
-- [uv](https://docs.astral.sh/uv/getting-started/installation/) (`curl -LsSf https://astral.sh/uv/install.sh | sh`)
-- Docker (optional, for containerized runs)
-- An API key for your chosen LLM provider
-
-**1. Clone and install dependencies**
+## Quick start
 
 ```bash
 git clone https://github.com/brescou/langgraph-agent-stack.git
 cd langgraph-agent-stack
 uv sync --extra anthropic
-```
-
-**2. Configure environment**
-
-```bash
-cp .env.example .env
-```
-
-Minimum required variables for the default Anthropic provider:
-
-```env
-LLM_PROVIDER=anthropic
-ANTHROPIC_API_KEY=sk-ant-...
-ANTHROPIC_MODEL=claude-3-5-sonnet-20241022
-```
-
-All other variables have working defaults for local development.
-
-**3. Start the API server**
-
-```bash
+cp .env.example .env   # set ANTHROPIC_API_KEY
 uv run uvicorn api.main:app --reload
 ```
 
-The server starts on `http://localhost:8000`. Interactive API docs are at `http://localhost:8000/docs`.
-
-**4. Send your first request**
-
 ```bash
+# Legacy default pipeline (research_analysis pack)
 curl -X POST http://localhost:8000/run \
   -H "Content-Type: application/json" \
   -d '{"query": "What are the latest advances in quantum computing?"}'
+
+# Pack registry
+curl http://localhost:8000/packs
+curl -X POST http://localhost:8000/packs/meeting_prep/run \
+  -H "Content-Type: application/json" \
+  -d '{"company": "Acme", "person": "Jane", "meeting_goal": "discovery"}'
 ```
 
-You will receive a structured `AnalysisReport` with an executive summary, key insights, identified patterns, and a confidence score.
+Interactive API docs: `http://localhost:8000/docs` (disabled when `ENVIRONMENT=production`).
 
-## LLM Providers
+## Architecture
 
-Set `LLM_PROVIDER` in your `.env` and install the matching extra. Provider-specific packages are imported lazily — only the package you install is required.
-
-| Provider | `LLM_PROVIDER` value | Install extra | Required env vars |
-|----------|----------------------|---------------|-------------------|
-| Anthropic (Claude) | `anthropic` | `uv sync --extra anthropic` | `ANTHROPIC_API_KEY` |
-| OpenAI (GPT) | `openai` | `uv sync --extra openai` | `OPENAI_API_KEY` |
-| Google (Gemini) | `google` | `uv sync --extra google` | `GOOGLE_API_KEY` |
-| AWS Bedrock | `bedrock` | `uv sync --extra bedrock` | `AWS_REGION`, `BEDROCK_MODEL`; static keys optional (IRSA/Pod Identity on EKS) |
-| Azure OpenAI | `azure` | `uv sync --extra openai` | `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT` |
-| Ollama (local) | `ollama` | `uv sync --extra ollama` | None — runs locally |
-| **Mock (dev)** | `mock` | None — included in langchain-core | None — deterministic responses |
-
-### Switching providers
-
-**OpenAI:**
-```env
-LLM_PROVIDER=openai
-OPENAI_API_KEY=sk-...
-OPENAI_MODEL=gpt-4o
 ```
-```bash
-uv sync --extra openai
+Client → FastAPI (auth · rate limit · validation)
+              → PackRegistry / control_plane policies
+              → domain_packs/* (LangGraph workflows)
+              → agents/* (reusable agent nodes)
+              → core/* (LLM · memory · security · cost · observability)
+              → connectors/* (optional retrieval)
 ```
 
-**Ollama (no API key required):**
-```env
-LLM_PROVIDER=ollama
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=llama3.2
-```
-```bash
-uv sync --extra ollama
-```
+| Layer | Path | Role |
+|-------|------|------|
+| HTTP | `api/` | FastAPI app, middlewares, legacy + pack routes |
+| Kernel | `pack_kernel/` | `BaseDomainPack`, `PackRegistry`, versioning, traffic split |
+| Workflows | `domain_packs/` | Built-in and vertical packs — see [domain_packs/README.md](domain_packs/README.md) |
+| Agents | `agents/` | Reusable LangGraph agents (`ResearchAgent`, `AnalystAgent`, …) |
+| Policies | `control_plane/` | Per-pack limits (query size, budget, stream timeout) — [control_plane/README.md](control_plane/README.md) |
+| Connectors | `connectors/` + `core/connectors.py` | Retrieval adapters — [connectors/README.md](connectors/README.md) |
+| Foundation | `core/` | Config, LLM factory, memory, security, cost, observability |
+| Ops | `infra/` | Dockerfile, Compose, Helm, Terraform |
 
-**Enterprise gateways (LiteLLM, OpenRouter, Helicone, internal proxy):** each cloud provider accepts an optional base URL override so traffic can route through a compliance or cost gateway without code changes.
+`core/graph.py` is a **compatibility shim** (`MultiAgentGraph` → `ResearchAnalysisPack`). New orchestration belongs in a domain pack.
 
-```env
-# OpenAI-compatible gateways (OpenRouter, LiteLLM /v1, Together AI, Anyscale)
-LLM_PROVIDER=openai
-OPENAI_API_KEY=sk-...
-OPENAI_BASE_URL=https://openrouter.ai/api/v1
+## Domain packs
 
-# Anthropic via Helicone / LiteLLM
-LLM_PROVIDER=anthropic
-ANTHROPIC_API_KEY=sk-ant-...
-ANTHROPIC_BASE_URL=https://litellm.internal.example.com/anthropic
+15 built-in packs registered in `pack_kernel/builtin_packs.py`:
 
-# Bedrock VPC endpoint or custom runtime proxy
-BEDROCK_ENDPOINT_URL=https://bedrock-runtime.us-east-1.amazonaws.com
-```
+| Category | Examples |
+|----------|----------|
+| Core pipelines | `research_analysis`, `research_only`, `analysis_only`, `summariser` |
+| Vertical workflows | `meeting_prep`, `rfp_assistant`, `support_triage`, `executive_brief`, `contract_reviewer`, `financial_memo` |
+| HR (`domain_packs/rh/`) | `talent_screening`, `job_description_writer`, `hr_policy_qa` |
 
-**Mock (no API key, deterministic responses for development/CI):**
-```env
-LLM_PROVIDER=mock
-```
-No extra installation needed — the mock provider uses `FakeListChatModel` from langchain-core.
+Each pack gets typed `POST /packs/{pack_id}/run` and `/run/stream` when schemas are declared. Versioning, traffic weights, and sticky sessions: `GET /packs`, `GET /packs/{id}/versions`, headers `X-Pack-Version` / `X-Pack-Version-Used`.
 
-Agents never import provider-specific code directly. `core/llm.py` resolves the provider at startup via `get_llm()`, so switching is a one-line `.env` change with no code modifications.
+Full catalogue and authoring guide: **[domain_packs/README.md](domain_packs/README.md)**.
 
-## Running with Docker
-
-Build and start the full stack (SQLite backend):
-
-```bash
-docker compose -f infra/docker-compose.yml up
-```
-
-Start with Redis as the memory backend:
-
-```bash
-docker compose -f infra/docker-compose.yml --profile redis up
-```
-
-The Dockerfile supports three independent build args for extras:
-
-| Arg | Default | Description |
-|-----|---------|-------------|
-| `LLM_EXTRAS` | `anthropic` | LLM provider (`openai`, `google`, `bedrock`, `ollama`, `all-providers`) |
-| `INFRA_EXTRAS` | *(empty)* | Storage backend (`redis`, `postgres`) |
-| `OBS_EXTRAS` | *(empty)* | Observability stack (`observability` — includes Prometheus + OTel) |
-
-```bash
-docker build \
-  --build-arg LLM_EXTRAS=anthropic \
-  --build-arg INFRA_EXTRAS=redis \
-  --build-arg OBS_EXTRAS=observability \
-  -f infra/Dockerfile .
-```
-
-The compose file reads your `.env` file automatically. The application is available at `http://localhost:8000` after the health check passes (about 15 seconds on first startup).
-
-The runtime image copies `api/`, `core/`, `agents/`, `pack_kernel/`, `domain_packs/`, `connectors/`, and `control_plane/` into `/app` (see `infra/Dockerfile`). Omitting `pack_kernel/` or `domain_packs/` would break pack registration and the default pipeline.
-
-## Kubernetes Deployment
-
-The chart lives in `infra/helm/langgraph-agent-stack/`. It requires Helm 3 and a running Kubernetes cluster.
-
-CI validates infrastructure with Checkov (Terraform + Helm), kubeconform, and kube-linter on rendered manifests — locally: `make infra-check` (see `scripts/infra-devsecops.sh`). Before production, run the stricter gate: `make infra-check-prod` (see [docs/security.md §7](docs/security.md#before-going-to-production-checkov)).
-
-### Install
-
-Bare `helm install` uses chart defaults safe for local try-out (`ENVIRONMENT=development`, no `API_KEY` required). For production, always pass `values.prod.yaml` and provision `API_KEY` via Secret.
-
-```bash
-helm install langgraph ./infra/helm/langgraph-agent-stack \
-  --namespace langgraph-agents \
-  --create-namespace \
-  --set secrets.anthropicApiKey=$ANTHROPIC_API_KEY
-```
-
-### Custom values
-
-```bash
-# Development
-helm install langgraph ./infra/helm/langgraph-agent-stack \
-  -f infra/helm/langgraph-agent-stack/values.dev.yaml \
-  --set secrets.anthropicApiKey=$ANTHROPIC_API_KEY
-
-# Production (with External Secrets Operator — no key in CLI)
-helm install langgraph ./infra/helm/langgraph-agent-stack \
-  -f infra/helm/langgraph-agent-stack/values.prod.yaml
-```
-
-### Upgrade / Uninstall
-
-```bash
-helm upgrade langgraph ./infra/helm/langgraph-agent-stack
-helm uninstall langgraph -n langgraph-agents
-```
-
-### Feature flags
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `config.environment` | `development` | Set to `production` in `values.prod.yaml` (enforces `API_KEY`) |
-| `ingress.enabled` | `false` | Create an Ingress resource |
-| `autoscaling.enabled` | `false` | Enable autoscaling (KEDA or HPA — see `autoscaling.metric`) |
-| `autoscaling.metric` | `keda` | `keda` (Prometheus `active_pipelines`), `active_pipelines` (HPA + adapter), or `cpu` (not recommended for LLM) |
-| `persistence.enabled` | `true` | Persistent volume for SQLite data |
-| `networkPolicy.enabled` | `false` | Restrict pod-to-pod traffic with a NetworkPolicy |
-| `podDisruptionBudget.enabled` | `false` | Create a PodDisruptionBudget (`maxUnavailable: 1` in `values.prod.yaml`) |
-| `topologySpreadConstraints.enabled` | `false` | Spread pods across `topology.kubernetes.io/zone` (enabled in `values.prod.yaml`) |
-| `serviceMonitor.enabled` | `false` | Create a Prometheus ServiceMonitor (required for KEDA scaling) |
-| `secrets.existingSecret` | `""` | Use an existing Secret (External Secrets Operator) |
-| `serviceAccount.create` | `true` | Create a dedicated ServiceAccount |
-
-In production, set `secrets.existingSecret` to point to a secret managed by the [External Secrets Operator](https://external-secrets.io) or Sealed Secrets instead of passing keys via `--set`.
-
-### Autoscaling (production)
-
-LLM agent calls are **I/O-bound** (waiting on remote APIs). CPU utilization stays low even when every worker thread is busy, so **CPU-based HPA mis-scales**. The chart defaults to **KEDA** scaling on the `active_pipelines` Prometheus gauge (already exposed at `/metrics`).
-
-**Prerequisites** (prod overlay enables these by default):
-
-1. [KEDA](https://keda.sh/) installed in the cluster
-2. Prometheus scraping the app (`serviceMonitor.enabled: true`)
-3. `config.memoryBackend: redis` (or postgres) and `rateLimitBackend: redis` for multi-replica
-
-Tune `keda.activePipelinesThreshold` to ~75–90% of `THREAD_POOL_MAX_WORKERS` (default `3` for a pool of `4`).
-
-Alternatives (see `values.yaml`):
-
-- `autoscaling.metric: active_pipelines` — native HPA external metric; requires [prometheus-adapter](https://github.com/kubernetes-sigs/prometheus-adapter) with the rule in `infra/helm/langgraph-agent-stack/examples/prometheus-adapter-rule.yaml`
-- `autoscaling.metric: cpu` — legacy fallback only; annotated as not recommended
-
-## Infrastructure as Code
-
-Terraform modules for GKE (Autopilot), EKS, and AKS in `infra/terraform/`. Each cloud has its own entry-point directory — there is no shared root module.
-
-> **Important:** By default, Terraform state is stored locally. For production or team use, configure a remote backend (GCS, S3, or Azure Blob Storage) in the entry-point directory before running `terraform apply`. See `infra/terraform/versions.tf` for instructions.
-
-### Provider versions
-
-| Provider | Constraint | Description |
-|----------|------------|-------------|
-| `hashicorp/google` | `~> 7.0` | GKE Autopilot |
-| `hashicorp/aws` | `~> 6.0` | EKS |
-| `hashicorp/azurerm` | `~> 4.0` | AKS |
-| `hashicorp/helm` | `~> 3.1` | Helm chart deployment (all clouds) |
-| `hashicorp/kubernetes` | `~> 3.0` | Namespace and secret management (all clouds) |
-
-### GKE
-
-```bash
-cd infra/terraform/gke
-terraform init
-terraform apply \
-  -var="project_id=my-gcp-project" \
-  -var="anthropic_api_key=$ANTHROPIC_API_KEY"
-```
-
-### EKS
-
-```bash
-cd infra/terraform/eks
-terraform init
-terraform apply \
-  -var="anthropic_api_key=$ANTHROPIC_API_KEY"
-```
-
-### AKS
-
-**Prerequisites**: Azure CLI authenticated (`az login`), Terraform >= 1.6.
-
-```bash
-cd infra/terraform/aks
-terraform init
-
-# Development
-terraform apply \
-  -var="subscription_id=$ARM_SUBSCRIPTION_ID" \
-  -var="resource_group_name=langgraph-rg" \
-  -var="anthropic_api_key=$ANTHROPIC_API_KEY"
-
-# Production
-terraform apply \
-  -var="subscription_id=$ARM_SUBSCRIPTION_ID" \
-  -var="resource_group_name=langgraph-rg" \
-  -var="environment=prod" \
-  -var="anthropic_api_key=$ANTHROPIC_API_KEY" \
-  -var="redis_url=$REDIS_URL"
-
-# Get kubeconfig
-terraform output -raw kube_config > ~/.kube/config-aks
-export KUBECONFIG=~/.kube/config-aks
-kubectl get pods -n langgraph-agents
-```
-
-## API Reference
+## API (summary)
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/` | Redirect to interactive API docs (`/docs`). |
-| `POST` | `/run` | Run the full Research + Analysis pipeline. Returns a structured `AnalysisReport`. |
-| `POST` | `/run/stream` | Same pipeline streamed as Server-Sent Events. |
-| `POST` | `/research` | Run the Research phase only. Returns a `ResearchResult` without downstream analysis. |
-| `GET` | `/health` | Liveness probe. Returns service status, version, uptime, and environment. |
-| `GET` | `/ready` | Readiness probe. Returns 200 when LLM and checkpointer are initialised; 503 otherwise. |
-| `GET` | `/sessions/{session_id}/history` | Retrieve all run records for a session, ordered newest-first. |
-| `GET` | `/metrics` | Prometheus metrics (available when `observability` extra is installed). |
+| `GET` | `/packs` | List registered packs and metadata |
+| `POST` | `/packs/{pack_id}/run` | Run a pack (typed body per pack schema) |
+| `POST` | `/packs/{pack_id}/run/stream` | SSE stream for a pack |
+| `POST` | `/run`, `/run/stream` | Legacy routes → `DEFAULT_PACK_ID` (`research_analysis`) |
+| `POST` | `/research` | Research phase only |
+| `GET` | `/health`, `/ready` | Probes |
+| `GET` | `/sessions/{id}/history` | Session run history |
+| `GET` | `/metrics` | Prometheus (with `observability` extra) |
 
----
+Responses include `cost_usd` when cost tracking is active; HTTP **402** on budget exceed. See `/docs` for request/response schemas.
 
-**POST /run**
+## LLM providers
 
-```bash
-curl -X POST http://localhost:8000/run \
-  -H "Content-Type: application/json" \
-  -d '{"query": "Latest advances in quantum computing"}'
-```
+Set `LLM_PROVIDER` and install the matching extra. Details and gateway overrides: `.env.example`.
 
-```json
-{
-  "query": "Latest advances in quantum computing",
-  "executive_summary": "string",
-  "key_insights": ["string"],
-  "patterns": ["string"],
-  "implications": ["string"],
-  "confidence": 0.87,
-  "research_summary": "string",
-  "metadata": {},
-  "session_id": "uuid"
-}
-```
+| Provider | Value | Extra | Key env vars |
+|----------|-------|-------|--------------|
+| Anthropic | `anthropic` | `--extra anthropic` | `ANTHROPIC_API_KEY` |
+| OpenAI | `openai` | `--extra openai` | `OPENAI_API_KEY` |
+| Google | `google` | `--extra google` | `GOOGLE_API_KEY` |
+| Bedrock | `bedrock` | `--extra bedrock` | `AWS_REGION`, `BEDROCK_MODEL` |
+| Azure OpenAI | `azure` | `--extra openai` | `AZURE_OPENAI_*` |
+| Ollama | `ollama` | `--extra ollama` | `OLLAMA_BASE_URL` |
+| Mock (CI/dev) | `mock` | *(none)* | — |
 
----
+## Run & deploy
 
-**POST /run/stream**
+**Docker Compose**
 
 ```bash
-curl -X POST http://localhost:8000/run/stream \
-  -H "Content-Type: application/json" \
-  -H "Accept: text/event-stream" \
-  -d '{"query": "Latest AI advances"}'
+docker compose -f infra/docker-compose.yml up
+docker compose -f infra/docker-compose.yml --profile redis up   # Redis memory backend
 ```
 
-Events are delivered as Server-Sent Events in real time via `MultiAgentGraph.stream_events()` (backed by LangGraph's `astream_events` API):
+**Helm**
 
-```
-data: {"type": "status", "message": "Starting pipeline..."}
-data: {"type": "phase_started", "phase": "research"}
-data: {"type": "phase_completed", "phase": "research"}
-data: {"type": "phase_started", "phase": "analysis"}
-data: {"type": "token", "content": "The", "node": "analysis_node"}
-data: {"type": "phase_completed", "phase": "analysis"}
-data: {"type": "done", "run_id": "...", "session_id": "...", "confidence": 0.87, ...}
+```bash
+helm install langgraph ./infra/helm/langgraph-agent-stack \
+  -f infra/helm/langgraph-agent-stack/values.prod.yaml \
+  --namespace langgraph-agents --create-namespace
 ```
 
-| Event type | Description |
-|------------|-------------|
-| `status` | Progress message emitted at the start of the stream |
-| `phase_started` | A pipeline phase has begun executing |
-| `phase_completed` | A pipeline phase has finished |
-| `token` | An LLM token chunk (real-time streaming when the provider supports it) |
-| `done` | Final result with the full analysis report and traceability metadata |
-| `error` | Terminal error event |
+Production: set `secrets.existingSecret` (External Secrets Operator), `config.environment=production`, `networkPolicy.enabled=true`. Autoscaling defaults to **KEDA** on `active_pipelines` (not CPU). See chart `values.yaml` / `values.prod.yaml`.
 
-The stream enforces a wall-clock timeout controlled by `STREAM_TIMEOUT_SECONDS` (default 120s). On timeout, a `{"type": "error", "message": "..."}` event is emitted.
+**Terraform** — entry points under `infra/terraform/{gke,eks,aks}/` (no shared root module). Configure a remote backend before production apply. GKE module expects [External Secrets Operator](docs/security.md#3-secret-management) installed before `ClusterSecretStore` resources.
 
----
-
-**POST /research**
-
-```json
-// Request
-{ "query": "string (max 2000 characters)", "session_id": "optional string (max 128 chars, alphanumeric/dash/underscore)" }
-
-// Response
-{
-  "query": "string",
-  "summary": "string",
-  "findings": ["string"],
-  "sources": ["string"],
-  "confidence": 0.91,
-  "metadata": {},
-  "session_id": "uuid"
-}
-```
-
----
-
-**GET /health**
-
-```json
-{
-  "status": "ok",
-  "version": "0.3.0",
-  "uptime_seconds": 142.3,
-  "environment": "development",
-  "components": {
-    "llm": { "status": "ok", "detail": "anthropic (initialised)" },
-    "memory": { "status": "ok", "detail": ":memory:" },
-    "checkpointer": { "status": "ok", "detail": "sqlite" }
-  }
-}
-```
-
-This endpoint is exempt from rate limiting so Kubernetes probes are never blocked.
-
-> **Note on LLM health:** The `llm` component reports whether the LLM client is initialised, not whether the upstream provider is reachable. A real provider call on every probe would add latency, consume tokens, and risk hitting rate limits. An expired API key or provider outage will surface on the first pipeline request, not on the liveness probe. The `memory` and `checkpointer` components perform actual connectivity checks (SQLite `SELECT 1`, Redis `PING`, Postgres `SELECT 1`).
-
----
-
-**GET /sessions/{session_id}/history**
-
-```json
-{
-  "session_id": "uuid",
-  "total": 3,
-  "entries": [
-    {
-      "run_id": "uuid",
-      "query": "string",
-      "result_summary": "string",
-      "created_at": "ISO 8601",
-      "metadata": {}
-    }
-  ]
-}
-```
+**Infra CI locally:** `make infra-check` (template Checkov profile). Before production hardening: `make infra-check-prod` ([checklist](docs/security.md#before-going-to-production-checkov)).
 
 ## Security
 
-### API authentication (`API_KEY`)
-
-The template ships a **single shared Bearer secret** (`API_KEY` env var). When set, pipeline routes require `Authorization: Bearer <token>`; comparison uses constant-time `hmac.compare_digest`. Exempt paths: `/health`, `/ready`, `/docs`, `/redoc`, `/openapi.json`, `/metrics`.
-
-```bash
-curl -X POST http://localhost:8000/run \
-  -H "Authorization: Bearer your-api-key" \
-  -H "Content-Type: application/json" \
-  -d '{"query": "..."}'
-```
-
-`ENVIRONMENT=production` requires `API_KEY` to be set (startup fails otherwise). Leave `API_KEY` unset only for local dev or when auth is terminated upstream (Ingress + oauth2-proxy, API gateway, service mesh).
-
-**Limitations (by design — not bugs):**
-
-| Capability | Built-in `API_KEY` | Typical multi-tenant production |
-|------------|-------------------|--------------------------------|
-| Key rotation | Manual redeploy / secret reload | Named keys, grace period, automated rotation |
-| Scopes / permissions | All-or-nothing | Per-key or per-user RBAC |
-| Per-tenant isolation | One secret for all callers | Tenant-scoped keys or OIDC claims |
-| Audit by caller | Rate limit buckets only | Structured audit log (key id, subject, tenant) |
-| Revocation | Rotate the one secret | Revoke individual keys in DB |
-
-For **multi-tenant SaaS**, add one of:
-
-- **OAuth2 / OIDC** — validate JWTs in middleware (issuer, audience, scopes); map `sub` / `tenant_id` to rate limits and policies.
-- **Named API keys in a datastore** — hash at rest, metadata (tenant, scopes, expiry), revocation without redeploy.
-- **Edge auth** — Kubernetes Ingress with oauth2-proxy, Cloudflare Access, AWS API Gateway, etc., in front of this service.
-
-Rate limiting uses the Bearer token as bucket identity when auth is enabled (per-token, not per-tenant metadata).
-
-**CORS**
-
-The template ships with `allow_origins=["*"]` for maximum compatibility during development. **For production deployments**, restrict this to your trusted frontend origins:
-
-```python
-allow_origins=["https://your-frontend.example.com"]
-```
-
-Never combine `allow_origins=["*"]` with `allow_credentials=True`.
-
-**Rate limiting**
-
-60 requests per minute per IP, enforced by a per-IP sliding-window limiter. Exceeding the limit returns `429 Too Many Requests` with a `Retry-After` header.
-
-The rate limiter backend is controlled by `RATE_LIMIT_BACKEND`:
-
-| Value | Scope | Use case |
-|-------|-------|----------|
-| `memory` (default) | Per-process | Local development, single-replica deployments |
-| `redis` | Shared across replicas | Production with multiple pods behind a load balancer |
-
-When using `redis`, the limiter uses a Lua-scripted sliding window on Redis sorted sets, providing a consistent view of request counts across all replicas. Set `REDIS_URL` in your environment to point to a shared Redis instance.
-
-**Fail-open behaviour:** If the Redis instance becomes unreachable, the rate limiter fails open — requests are allowed through and a warning is logged (`Redis rate limiter unreachable — failing open (request allowed)`). This is intentional: rate limiting is a non-critical function and should never block legitimate traffic during a Redis outage. Operators should monitor this log message and the rate of `429` responses to detect degraded rate limiting.
-
-**Input validation**
-
-All queries are validated by `InputValidator` before reaching agent code. Queries exceeding 2000 characters or matching dangerous patterns are rejected with `400 Bad Request`.
-
-**Security headers**
-
-Every response includes `X-Content-Type-Options`, `X-Frame-Options`, `Content-Security-Policy: default-src 'self'`, `Referrer-Policy`, and `Cache-Control: no-store`. The `Server` header is stripped to avoid advertising the runtime stack. The CSP is relaxed on `/docs`, `/redoc`, and `/openapi.json` to allow the Swagger/ReDoc CDN assets.
-
-**Log sanitization**
-
-`sanitize_log_data()` in `core/security.py` recursively redacts sensitive keys (passwords, tokens, URLs with credentials) before structured log output.
-
-## Configuration
-
-All configuration is loaded from environment variables. Copy `.env.example` to `.env` to get started.
-
-### Core
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `LLM_PROVIDER` | `anthropic` | LLM provider: `anthropic`, `openai`, `google`, `bedrock`, `azure`, `ollama`, `mock` |
-| `MEMORY_BACKEND` | `sqlite` | Checkpoint backend: `sqlite`, `redis`, `postgres` |
-| `ENVIRONMENT` | `development` | Deployment label: `development`, `staging`, `production` |
-| `LOG_LEVEL` | `INFO` | Logging verbosity: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` |
-| `DEFAULT_PACK_ID` | `research_analysis` | Pack for legacy `POST /run` / `/run/stream` (must be registered) |
-| `API_HOST` | `0.0.0.0` | Host the FastAPI server binds to |
-| `API_PORT` | `8000` | TCP port the FastAPI server listens on |
-| `API_KEY` | — | Single shared Bearer secret (required when `ENVIRONMENT=production`). Not multi-tenant — see [Security](#security). |
-| `CONNECTOR_ENABLED` | `false` | Inject retrieval connector into `research_analysis` runs |
-| `CONNECTOR_ID` | `example_memory` | `example_memory`, `http`, or `rag` (see `core/connectors.py`) |
-| `CONNECTOR_HTTP_URL` | — | Required when `CONNECTOR_ID=http` |
-| `CONNECTOR_HTTP_MAX_RESPONSE_BYTES` | `1048576` | Max HTTP connector response body (bytes) |
-| `CONNECTOR_HTTP_MAX_REDIRECTS` | `5` | Redirect cap; each hop SSRF-validated |
-
-### LLM providers
-
-| Variable | Default | Used when |
-|----------|---------|-----------|
-| `ANTHROPIC_API_KEY` | — | `LLM_PROVIDER=anthropic` |
-| `ANTHROPIC_MODEL` | `claude-3-5-sonnet-20241022` | `LLM_PROVIDER=anthropic` |
-| `ANTHROPIC_BASE_URL` | — | Optional gateway for `LLM_PROVIDER=anthropic` |
-| `OPENAI_API_KEY` | — | `LLM_PROVIDER=openai` |
-| `OPENAI_MODEL` | `gpt-4o` | `LLM_PROVIDER=openai` |
-| `OPENAI_BASE_URL` | — | Optional OpenAI-compatible gateway (`LLM_PROVIDER=openai`) |
-| `GOOGLE_API_KEY` | — | `LLM_PROVIDER=google` |
-| `GOOGLE_MODEL` | `gemini-1.5-pro` | `LLM_PROVIDER=google` |
-| `GOOGLE_BASE_URL` | — | Optional gateway for `LLM_PROVIDER=google` |
-| `AWS_ACCESS_KEY_ID` | — | Optional static creds for `LLM_PROVIDER=bedrock` (local dev) |
-| `AWS_SECRET_ACCESS_KEY` | — | Optional static creds for `LLM_PROVIDER=bedrock` (local dev) |
-| `AWS_REGION` | `us-east-1` | `LLM_PROVIDER=bedrock` |
-| `BEDROCK_MODEL` | `anthropic.claude-3-5-sonnet-20241022-v2:0` | `LLM_PROVIDER=bedrock` |
-| `BEDROCK_ENDPOINT_URL` | — | Optional Bedrock Runtime endpoint (VPC / proxy) |
-| `AZURE_OPENAI_API_KEY` | — | `LLM_PROVIDER=azure` |
-| `AZURE_OPENAI_ENDPOINT` | — | `LLM_PROVIDER=azure` |
-| `AZURE_OPENAI_BASE_URL` | — | Optional gateway for `LLM_PROVIDER=azure` |
-| `AZURE_OPENAI_DEPLOYMENT` | `gpt-4o` | `LLM_PROVIDER=azure` |
-| `OLLAMA_BASE_URL` | `http://localhost:11434` | `LLM_PROVIDER=ollama` |
-| `OLLAMA_MODEL` | `llama3.2` | `LLM_PROVIDER=ollama` |
-| `MAX_TOKENS` | `4096` | All providers |
-
-### Memory and storage
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `SQLITE_PATH` | `./data/agent_memory.db` | SQLite database file path |
-| `REDIS_URL` | `redis://localhost:6379/0` | Redis connection URL (required when `MEMORY_BACKEND=redis`) |
-| `POSTGRES_URL` | — | PostgreSQL DSN (required when `MEMORY_BACKEND=postgres`) |
-| `RAG_ENABLED` | `false` | Provision vector store infra only — not wired into pack/agent pipelines yet |
-
-### Agent behaviour
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MAX_RESEARCH_ITERATIONS` | `3` | Safety cap on research loop iterations (max 10) |
-| `MAX_STEP_COUNT` | `20` | Hard limit on total graph steps per run (max 100) |
-| `LLM_REQUEST_TIMEOUT_SECONDS` | `120` | Per-call HTTP timeout for synchronous `llm.invoke()` (distinct from stream timeout) |
-| `MAX_REQUEST_BODY_BYTES` | `1048576` (1 MiB) | Max inbound HTTP body size; enforced before JSON parsing |
-| `STREAM_TIMEOUT_SECONDS` | `120` | Wall-clock timeout for SSE streaming runs |
-| `THREAD_POOL_MAX_WORKERS` | `4` | Size of the thread pool for blocking agent calls (1–64) |
-
-### Observability
-
-The stack includes three complementary observability pillars:
-
-| Feature | Package | Install |
-|---------|---------|---------|
-| **Structured JSON logging** | `python-json-logger` | `uv sync --extra observability` |
-| **Prometheus metrics** | `prometheus-client` | `uv sync --extra observability` |
-| **OpenTelemetry tracing** | `opentelemetry-sdk` | `uv sync --extra observability` |
-
-**Logging** — Every request is logged as a single JSON line containing
-`timestamp`, `level`, `logger`, `message`, `request_id`, and all `extra`
-fields. Sensitive keys (passwords, tokens, API keys) are automatically
-redacted by a `SanitizingFilter` before serialisation.
-
-**Prometheus metrics** — When `prometheus-client` is installed, the
-`/metrics` endpoint exposes:
-
-| Metric | Type | Labels | Description |
-|--------|------|--------|-------------|
-| `http_requests_total` | Counter | method, path, status_code | Total HTTP requests |
-| `http_request_duration_seconds` | Histogram | path | Request latency (buckets: 0.1s–30s) |
-| `llm_requests_total` | Counter | provider, status | LLM API calls per attempt (success / retryable_error / fatal_error) |
-| `active_pipelines` | Gauge | — | Currently running agent pipelines |
-| `server_shutting_down` | Gauge | — | 1 during graceful drain, 0 otherwise |
-| `requests_rejected_during_shutdown_total` | Counter | — | Requests rejected with 503 during shutdown |
-
-To include metrics in your Docker image, build with:
-
-```bash
-docker build --build-arg LLM_EXTRAS=anthropic --build-arg OBS_EXTRAS=observability -f infra/Dockerfile .
-```
-
-**OpenTelemetry** — Set `OTEL_ENABLED=true` and configure `OTEL_EXPORTER_OTLP_ENDPOINT`
-to ship traces to Jaeger, Tempo, or any OTLP-compatible backend.
+Rate limiting (memory or Redis), request body cap, prompt-injection / SSRF input validation, security headers, optional `API_KEY` Bearer auth, graceful shutdown drain. Full model, env vars, K8s hardening, and scanning pipeline: **[docs/security.md](docs/security.md)**.
 
 ## Development
 
-### Running tests
-
 ```bash
-# Full test suite
-uv run pytest
-
-# With coverage report
-uv run pytest --cov=. --cov-report=term-missing
-
-# Single file
-uv run pytest tests/test_api.py -v
+make help          # all targets
+make check         # ruff + pyright (CI lint)
+make test          # pytest (mocked; use -m integration for testcontainers)
+make infra-check   # helm lint + kubeconform + checkov
 ```
 
-The default test suite is fully mocked — no external API calls or databases are needed. `conftest.py` patches LLM calls and memory backends automatically. Real backend integration tests (Postgres, Redis via testcontainers) live in `tests/test_integration_real.py` and are marked with `@pytest.mark.integration`:
+Contributor workflow, pre-commit, and PR expectations: **[CONTRIBUTING.md](CONTRIBUTING.md)**.
 
-```bash
-# Skip integration tests (fast CI path)
-uv run pytest -m "not integration"
+**LangGraph patterns** (standalone scripts, not served by the API): [examples/README.md](examples/README.md).
 
-# Run only integration tests (requires Docker)
-uv run pytest -m integration -v
-```
-
-### Test files
-
-| File | What it covers |
-|------|----------------|
-| `tests/conftest.py` | Shared fixtures, mocks, and test settings used by all test files |
-| `tests/test_api.py` | FastAPI endpoint tests, auth middleware, SSE streaming, session history |
-| `tests/test_agents.py` | `ResearchAgent` and `AnalystAgent` unit tests |
-| `tests/test_graph.py` | `MultiAgentGraph` orchestration and state transition tests |
-| `tests/test_llm.py` | `get_llm()` provider switching tests covering all 6 providers |
-| `tests/test_memory.py` | `ConversationMemory` backend tests (SQLite, Redis, PostgreSQL) |
-| `tests/test_security.py` | `InputValidator` and `RateLimiter` unit tests |
-| `tests/test_tools.py` | LangChain agent tool tests |
-| `tests/test_vectorstore.py` | Vector store integration and RAG tests |
-| `tests/test_config.py` | `get_settings()` caching, `llm_config` property, cross-field validators |
-| `tests/test_observability.py` | Structured logging and OpenTelemetry tracing tests |
-
-### Lint, format, and typecheck
-
-```bash
-uv run ruff check .          # lint
-uv run ruff check . --fix    # lint + auto-fix
-uv run ruff format .         # format
-uv run ruff format --check . # format check (CI mode)
-uv run pyright               # typecheck (CI job)
-```
-
-Ruff (lint + format), pyright, and pytest run in CI (see `.github/workflows/ci.yml` for optional docker-smoke and integration jobs). Security scanning (gitleaks, bandit, dependency audit, Syft SBOM, Trivy) runs via `.github/workflows/security.yml`. Pushes to `main` also publish a signed image to GHCR — see [docs/security.md § Supply chain](docs/security.md#8-supply-chain-sbom--image-signing).
-
-### Makefile shortcuts
-
-Run `make help` to list all targets. Key commands:
-
-```bash
-# Development
-make install       # uv sync --all-extras
-make run           # Start API server with hot reload
-make run-ollama    # Start API server using Ollama provider
-
-# Quality
-make test          # Run test suite with verbose output
-make test-cov      # Run tests with coverage report
-make lint          # Check code style with ruff
-make format        # Format source code with ruff
-make check         # Lint + format check + pyright (CI lint + typecheck)
-make typecheck     # pyright only
-make check-security # bandit + pip-audit (CI security gates)
-
-# Docker
-make docker-build  # Build the Docker image
-make docker-run    # Start all services with docker compose
-make docker-redis  # Start all services including Redis profile
-make docker-down   # Stop and remove all containers
-
-# Helm
-make helm-lint     # Lint the Helm chart
-make infra-check       # DevSecOps: checkov (template) + kubeconform + kube-linter
-make infra-check-prod  # Stricter Checkov prod gate — see docs/security.md
-make helm-dev      # Deploy to dev environment
-make helm-prod     # Deploy to production environment
-make helm-dry-run  # Simulate a Helm install
-make helm-uninstall # Uninstall the Helm release
-
-# Terraform (set TF_CLOUD=gke|eks|aks, default: gke)
-make tf-init       # Initialize Terraform working directory
-make tf-plan       # Generate Terraform execution plan
-make tf-apply      # Apply the Terraform plan
-make tf-fmt        # Check Terraform formatting (all modules)
-
-# Utilities
-make clean         # Remove build artifacts and caches
-```
-
-### Project structure
+## Project structure
 
 ```
 langgraph-agent-stack/
-├── pack_kernel/
-│   ├── base_pack.py        # BaseDomainPack contract; PackRegistry in registry.py
-│   └── __init__.py         # Registers built-in packs at import time
-├── domain_packs/
-│   ├── research_analysis/  # Default pack: Research → Analysis
-│   ├── research_only/      # ResearchAgent only
-│   ├── summariser/         # Single-agent bullet summary
-│   └── analysis_only/      # AnalystAgent on supplied research
-├── connectors/             # BaseConnector contract + example_memory stub
-├── control_plane/          # Policy types (foundation)
-├── agents/
-│   ├── base_agent.py       # Abstract BaseAgent, error types, retry logic
-│   ├── models.py           # ResearchResult and AnalysisReport dataclasses
-│   ├── researcher.py       # ResearchAgent — query expansion, retrieval, quality checks
-│   └── analyst.py          # AnalystAgent — insight extraction, pattern detection, reporting
-├── core/
-│   ├── config.py           # Pydantic-settings Settings model; use get_settings() not Settings()
-│   ├── connectors.py       # Connector factory for CONNECTOR_ENABLED
-│   ├── graph.py            # Shim — MultiAgentGraph = ResearchAnalysisPack (compat imports)
-│   ├── llm.py              # get_llm() — provider-agnostic LLM instantiation
-│   ├── memory.py           # ConversationMemory — SQLite / Redis / PostgreSQL checkpointing
-│   ├── observability.py    # Structured JSON logging and optional OpenTelemetry tracing
-│   ├── security.py         # InputValidator, RateLimiter, sanitize_log_data
-│   ├── tools.py            # LangChain tools shared across agents
-│   └── vectorstore.py      # Optional RAG vector store integration
-├── api/
-│   ├── main.py             # FastAPI app, lifespan, endpoints
-│   └── models.py           # Pydantic request/response models
-├── infra/
-│   ├── Dockerfile          # Multi-stage build (builder + non-root runtime)
-│   ├── docker-compose.yml  # Local stack with optional Redis profile
-│   ├── helm/               # Helm chart for Kubernetes deployment
-│   └── terraform/          # Terraform modules for GKE Autopilot, EKS, and AKS
-├── examples/
-│   ├── sequential/         # Linear Research → Analysis pipeline
-│   ├── parallel/           # Three analysts running simultaneously
-│   ├── supervisor/         # Dynamic routing to specialist agents
-│   └── human_in_loop/      # Pause graph execution for human approval
-├── tests/                  # Unit tests (mocked) + real backend integration tests
-├── docs/                   # Additional documentation (security, architecture)
-├── .github/workflows/
-│   ├── ci.yml              # ruff + pyright + pytest (+ optional jobs)
-│   └── security.yml        # gitleaks, bandit, dependency audit
-├── .dockerignore           # Excludes .env, .git, tests, docs from Docker context
-├── Makefile                # Developer shortcuts (make test, make lint, etc.)
-├── pyproject.toml
-└── .env.example
+├── api/                 # FastAPI application
+├── pack_kernel/         # Pack contract + PackRegistry
+├── domain_packs/        # Workflows (core + vertical + rh/)
+├── agents/              # Reusable LangGraph agents
+├── connectors/          # Retrieval connector implementations
+├── control_plane/       # Pack policies
+├── core/                # Config, LLM, memory, security, cost, observability
+├── infra/               # Dockerfile, compose, helm/, terraform/
+├── examples/            # LangGraph pattern demos
+├── tests/
+├── docs/                # security.md, …
+└── scripts/             # infra-devsecops.sh, …
 ```
 
-## Extending the Template
+## Documentation
 
-### Add a new agent
-
-1. Create `agents/my_agent.py` inheriting from `BaseAgent` in `agents/base_agent.py`. Implement `build_graph()` and `run()`. Add `run_structured()` if you need typed output (it is not abstract).
-2. Wire the agent into the LangGraph **inside the relevant domain pack** (for the default pipeline, edit `domain_packs/research_analysis/pack.py` — add nodes and edges there). Do not put new orchestration logic in `core/graph.py`; that file remains a backward-compatibility shim.
-3. If you add a **new** domain pack, register it in `pack_kernel/builtin_packs.py` (see `PackRegistry.register`) and declare schemas if you want typed pack routes.
-4. Expose behavior via existing pack routes (registry-driven) or add a dedicated endpoint in `api/main.py` following the `/research` pattern for a standalone agent.
-5. Add or extend tests (e.g. `tests/test_agents.py`, pack tests); agent patches in tests still target `core.graph` for compatibility — see `CLAUDE.md` Gotchas.
-
-### Change the LLM provider
-
-Set `LLM_PROVIDER` in `.env` to one of: `anthropic`, `openai`, `google`, `bedrock`, `azure`, `ollama`, `mock`.
-Install the matching extra: `uv sync --extra <provider>` (Azure uses the `openai` extra).
-No code changes required — `core/llm.py` handles instantiation.
-
-### Enable Redis for production
-
-1. Set `MEMORY_BACKEND=redis` and `REDIS_URL=redis://your-host:6379/0` in your environment.
-2. Install the Redis extras: `uv sync --extra redis`.
-3. When deploying with Docker Compose, start with `--profile redis` to bring up the Redis service.
-
-### Enable PostgreSQL for production
-
-1. Set `MEMORY_BACKEND=postgres` and `POSTGRES_URL=postgresql+psycopg://user:pass@host:5432/dbname`.
-2. Install the PostgreSQL extras: `uv sync --extra postgres`.
-
-### Enable optional retrieval connector
-
-1. Set `CONNECTOR_ENABLED=true` and `CONNECTOR_ID=example_memory` in `.env`.
-2. Restart the API. Research runs on `research_analysis` merge connector snippets when the query matches the stub (e.g. include `demo` for `example_memory`).
-3. Add new connector classes in `core/connectors.py` — no global registry beyond built-in ids.
-
-### Enable RAG (experimental)
-
-> **Note:** `RAG_ENABLED=true` provisions vector store infrastructure (ChromaDB or PGVector) but does **not** wire it into agents or domain packs yet.
-
-1. Set `RAG_ENABLED=true` in your environment.
-2. Install the RAG extras: `uv sync --extra rag`.
-
-## Examples
-
-Four ready-to-run multi-agent patterns in `examples/`:
-
-| Pattern | Description | Run |
-|---------|-------------|-----|
-| Sequential | Linear Research → Analysis pipeline | `uv run python examples/sequential/graph.py` |
-| Parallel | Three analysts run simultaneously | `uv run python examples/parallel/graph.py` |
-| Supervisor | Dynamic routing to specialist agents | `uv run python examples/supervisor/graph.py` |
-| Human-in-loop | Pause for human approval | `uv run python examples/human_in_loop/graph.py` |
-
-See `examples/README.md` for architecture details.
+| Doc | Contents |
+|-----|----------|
+| [docs/security.md](docs/security.md) | Auth, secrets, K8s hardening, CI scans, supply chain, Checkov prod gate |
+| [domain_packs/README.md](domain_packs/README.md) | Pack catalogue and authoring |
+| [connectors/README.md](connectors/README.md) | Connector contract and wiring |
+| [control_plane/README.md](control_plane/README.md) | Policy registry |
+| [examples/README.md](examples/README.md) | Sequential, parallel, supervisor, human-in-loop |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Dev setup, tests, PR process |
+| [CHANGELOG.md](CHANGELOG.md) | Release history |
 
 ## License
 
