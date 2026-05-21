@@ -14,8 +14,11 @@ from core.security import InputValidator
 
 
 def test_default_policies_registered() -> None:
-    assert "research_analysis" in PolicyRegistry.list_policies()
-    assert "research_only" in PolicyRegistry.list_policies()
+    policies = PolicyRegistry.list_policies()
+    assert "research_analysis" in policies
+    assert "research_only" in policies
+    assert "summariser" in policies
+    assert "analysis_only" in policies
 
 
 def test_effective_budget_prefers_global_setting() -> None:

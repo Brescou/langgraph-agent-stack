@@ -60,6 +60,8 @@ User Query
 | `AnalystAgent` | `agents/analyst.py` | Consumes research findings, extracts insights, identifies patterns, produces a structured report |
 | `ResearchAnalysisPack` | `domain_packs/research_analysis/pack.py` | Domain pack that owns the LangGraph graph (Research → Analysis); registered in `PackRegistry` |
 | `ResearchOnlyPack` | `domain_packs/research_only/pack.py` | Second built-in pack — research phase only (`POST /packs/research_only/run`) |
+| `SummariserPack` | `domain_packs/summariser/pack.py` | Single-agent text summariser (`POST /packs/summariser/run`) |
+| `AnalysisOnlyPack` | `domain_packs/analysis_only/pack.py` | Analysis on pre-supplied research (`POST /packs/analysis_only/run`) |
 | `MultiAgentGraph` | `core/graph.py` | Backward-compat alias for `ResearchAnalysisPack` (shim only — new orchestration belongs in a domain pack) |
 | `PackRegistry` | `platform/registry.py` | Explicit registration of domain packs and versions (`platform/__init__.py` registers built-ins at import) |
 | `ConversationMemory` | `core/memory.py` | Pluggable checkpoint backend (SQLite, Redis, or PostgreSQL) |
@@ -77,6 +79,7 @@ User Query
 **Platform kernel (Sprint 2)**
 
 - **Second domain pack** — `research_only` (`ResearchOnlyPack`) registered alongside `research_analysis`; use `POST /packs/research_only/run` for research-only output.
+- **Summariser and analysis-only packs** — `summariser` and `analysis_only` for single-step summary and analysis-without-research workflows (`domain_packs/README.md`).
 - **Optional retrieval connector** — `CONNECTOR_ENABLED` + `CONNECTOR_ID` inject a built-in connector into `ResearchAnalysisPack` on `/run` and `/packs/research_analysis/*` (default id: `example_memory`; query containing `demo` returns canned snippets).
 
 **Platform kernel (Sprint 3)**
@@ -707,7 +710,9 @@ langgraph-agent-stack/
 │   └── __init__.py         # Registers built-in packs at import time
 ├── domain_packs/
 │   ├── research_analysis/  # Default pack: Research → Analysis
-│   └── research_only/      # Second pack: ResearchAgent only
+│   ├── research_only/      # ResearchAgent only
+│   ├── summariser/         # Single-agent bullet summary
+│   └── analysis_only/      # AnalystAgent on supplied research
 ├── connectors/             # BaseConnector contract + example_memory stub
 ├── control_plane/          # Policy types (foundation)
 ├── agents/

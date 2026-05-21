@@ -19,6 +19,8 @@ import pytest
 from pydantic import ValidationError
 
 from agents.models import AnalysisReport, ResearchResult
+from domain_packs.analysis_only.pack import AnalysisOnlyPack
+from domain_packs.analysis_only.schemas import AnalysisOnlyInput, AnalysisOnlyOutput
 from domain_packs.research_analysis.pack import ResearchAnalysisPack
 from domain_packs.research_analysis.schemas import (
     ResearchAnalysisInput,
@@ -26,6 +28,8 @@ from domain_packs.research_analysis.schemas import (
 )
 from domain_packs.research_only.pack import ResearchOnlyPack
 from domain_packs.research_only.schemas import ResearchOnlyInput, ResearchOnlyOutput
+from domain_packs.summariser.pack import SummariserPack
+from domain_packs.summariser.schemas import SummaryInput, SummaryOutput
 
 # ---------------------------------------------------------------------------
 # BaseDomainPack default schema tests
@@ -213,6 +217,24 @@ def test_research_only_pack_is_registered() -> None:
     assert "research_only" in PackRegistry.list_packs()
 
 
+def test_summariser_pack_is_registered() -> None:
+    """``summariser`` must appear in ``list_packs()``."""
+    assert "summariser" in PackRegistry.list_packs()
+
+
+def test_analysis_only_pack_is_registered() -> None:
+    """``analysis_only`` must appear in ``list_packs()``."""
+    assert "analysis_only" in PackRegistry.list_packs()
+
+
+def test_registry_get_summariser_returns_correct_class() -> None:
+    assert PackRegistry.get("summariser") is SummariserPack
+
+
+def test_registry_get_analysis_only_returns_correct_class() -> None:
+    assert PackRegistry.get("analysis_only") is AnalysisOnlyPack
+
+
 def test_registry_get_research_only_returns_correct_class() -> None:
     """``get('research_only')`` must return ``ResearchOnlyPack``."""
     assert PackRegistry.get("research_only") is ResearchOnlyPack
@@ -323,3 +345,23 @@ def test_research_only_output_from_research_result() -> None:
     assert output.query == "demo topic"
     assert output.findings == ["a"]
     assert output.cost_usd == 0.01
+
+
+def test_summariser_pack_schemas() -> None:
+    assert SummariserPack.input_schema is SummaryInput
+    assert SummariserPack.output_schema is SummaryOutput
+
+
+def test_analysis_only_pack_schemas() -> None:
+    assert AnalysisOnlyPack.input_schema is AnalysisOnlyInput
+    assert AnalysisOnlyPack.output_schema is AnalysisOnlyOutput
+
+
+def test_summary_input_rejects_empty_text() -> None:
+    with pytest.raises(ValidationError):
+        SummaryInput(text="")
+
+
+def test_analysis_only_input_requires_query() -> None:
+    with pytest.raises(ValidationError):
+        AnalysisOnlyInput(query="")

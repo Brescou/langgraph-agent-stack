@@ -35,6 +35,28 @@ PolicyRegistry.register(
         labels=frozenset({"research-only"}),
     )
 )
+PolicyRegistry.register(
+    PackPolicy(
+        pack_id="summariser",
+        constraints=ExecutionConstraints(
+            max_query_chars=4000,
+            stream_timeout_seconds=None,
+            budget_usd_ceiling=None,
+        ),
+        labels=frozenset({"single-agent", "summarise"}),
+    )
+)
+PolicyRegistry.register(
+    PackPolicy(
+        pack_id="analysis_only",
+        constraints=ExecutionConstraints(
+            max_query_chars=2000,
+            stream_timeout_seconds=None,
+            budget_usd_ceiling=None,
+        ),
+        labels=frozenset({"analysis-only"}),
+    )
+)
 
 __all__ = [
     "ExecutionConstraints",

@@ -352,6 +352,62 @@ def get_shared_memory() -> Any:
     return _shared_memory
 
 
+def _pack_primary_text(body: Any) -> str:
+    """Extract the main free-text field from a typed pack request body."""
+    if hasattr(body, "query"):
+        return str(body.query)
+    if hasattr(body, "text"):
+        return str(body.text)
+    return str(body)
+
+
+def _pack_has_structured_input(pack_cls: type) -> bool:
+    """True when the pack class defines ``run_from_input`` (not a MagicMock artefact)."""
+    return "run_from_input" in pack_cls.__dict__
+
+
+def _pack_has_structured_stream(pack_cls: type) -> bool:
+    """True when the pack class defines ``stream_events_from_input``."""
+    return "stream_events_from_input" in pack_cls.__dict__
+
+
+def _invoke_pack_run(pack_cls: type, pipeline: Any, body: Any) -> Any:
+    """Call ``run_from_input`` when implemented on the pack class, else ``run(query)``."""
+    if _pack_has_structured_input(pack_cls):
+        return pipeline.run_from_input(body)
+    return pipeline.run(_pack_primary_text(body))
+
+
+async def _iter_pack_stream_events(
+    pack_cls: type, pipeline: Any, body: Any
+) -> AsyncIterator[Any]:
+    """Stream pack events using structured input when the pack class supports it."""
+    if _pack_has_structured_stream(pack_cls):
+        events = pipeline.stream_events_from_input(body)
+        async for event in cast(AsyncIterator[dict[str, Any]], events):
+            yield event
+        return
+    async for event in cast(
+        AsyncIterator[dict[str, Any]],
+        pipeline.stream_events(_pack_primary_text(body)),
+    ):
+        yield event
+
+
+def _serialize_pack_result(
+    result: Any, output_model: type, cost_usd: float | None
+) -> Any:
+    if hasattr(output_model, "from_analysis_report"):
+        return output_model.from_analysis_report(result, cost_usd=cost_usd)
+    if hasattr(output_model, "from_research_result"):
+        return output_model.from_research_result(result, cost_usd=cost_usd)
+    if hasattr(output_model, "from_summary_result"):
+        return output_model.from_summary_result(result, cost_usd=cost_usd)
+    if hasattr(result, "model_dump"):
+        return result.model_dump()
+    return result
+
+
 def _validate_pack_query(pack_id: str, raw_query: str) -> str:
     """Validate query text using pack policy constraints and global sanitizer."""
     try:
@@ -533,7 +589,7 @@ def _build_pack_router(
         )
         response.headers["X-Pack-Version-Used"] = used_version
 
-        raw_query = body.query if hasattr(body, "query") else str(body)
+        raw_query = _pack_primary_text(body)
         try:
             query = _validate_pack_query(pack_id, raw_query)
         except AgentValidationError as exc:
@@ -549,8 +605,15 @@ def _build_pack_router(
                 checkpointer=get_shared_checkpointer(),
                 **_pack_runtime_kwargs(pack_cls_to_use),
             ) as pipeline:
-                result = pipeline.run(query)
+                result = _invoke_pack_run(pack_cls_to_use, pipeline, body)
                 cost_usd = getattr(pipeline, "cost_usd", None)
+
+                if hasattr(result, "to_dict"):
+                    result_payload = result.to_dict()
+                elif hasattr(result, "model_dump"):
+                    result_payload = result.model_dump()
+                else:
+                    result_payload = {}
 
                 # Record run in history with pack_version metadata
                 if _shared_memory is not None:
@@ -558,9 +621,7 @@ def _build_pack_router(
                     _shared_memory.save_run(
                         run_id=run_id,
                         query=query,
-                        result=(
-                            {} if not hasattr(result, "to_dict") else result.to_dict()
-                        ),
+                        result=result_payload,
                         metadata={
                             "pack_id": pack_id,
                             "pack_version": used_version,
@@ -572,11 +633,7 @@ def _build_pack_router(
                         },
                     )
 
-                if hasattr(output_model, "from_analysis_report"):
-                    return output_model.from_analysis_report(result, cost_usd=cost_usd)
-                if hasattr(output_model, "from_research_result"):
-                    return output_model.from_research_result(result, cost_usd=cost_usd)
-                return result
+                return _serialize_pack_result(result, output_model, cost_usd)
 
         try:
             return await _run_in_executor(_execute)
@@ -631,9 +688,9 @@ def _build_pack_router(
             "unknown",
         )
 
-        raw_query = body.query if hasattr(body, "query") else str(body)
+        raw_query = _pack_primary_text(body)
         try:
-            query = _validate_pack_query(pack_id, raw_query)
+            _validate_pack_query(pack_id, raw_query)
         except AgentValidationError as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -648,8 +705,9 @@ def _build_pack_router(
                 **_pack_runtime_kwargs(pack_cls_to_use),
             )
             try:
-                _events = pack.stream_events(query)
-                async for event in cast(AsyncIterator[dict[str, Any]], _events):
+                async for event in _iter_pack_stream_events(
+                    pack_cls_to_use, pack, body
+                ):
                     yield f"data: {json.dumps(event, default=str)}\n\n"
             finally:
                 pack.close()

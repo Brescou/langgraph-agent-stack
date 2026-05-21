@@ -1,34 +1,26 @@
-# Custom Pack Example — SummariserPack
+# Custom Pack Example
 
-This example shows how to build and wire up a custom domain pack.
+The **SummariserPack** ships as a first-class domain pack at `domain_packs/summariser/`.
 
-## Register and use
+This folder remains a minimal tutorial for authoring packs outside the built-in tree.
+
+## Register and use (tutorial copy)
 
 ```python
 from platform.registry import PackRegistry
-from examples.custom_pack.pack import SummariserPack
+from domain_packs.summariser.pack import SummariserPack
 
-# Register once at application startup (not in platform/__init__.py)
 PackRegistry.register(SummariserPack)
-
-# Retrieve and instantiate
 Pack = PackRegistry.get("summariser")
 pack = Pack(run_id="my-run", llm=llm, checkpointer=checkpointer)
-
-# Synchronous
-result = pack.run("Your long text here...")
-
-# Asynchronous
-result = await pack.arun("Your long text here...")
-
-# Streaming
-async for event in pack.stream_events("Your long text here..."):
-    print(event)
+result = pack.run_from_input(SummaryInput(text="...", bullet_count=3))
 ```
 
-## Via API (after registration at startup)
+## Via API (built-in registration)
 
 ```
 POST /packs/summariser/run
 {"text": "Your long text here...", "bullet_count": 3}
 ```
+
+See `domain_packs/README.md` for the full pack catalog.

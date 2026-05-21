@@ -20,7 +20,7 @@ from agents.base_agent import (
     AgentTimeoutError,
     AgentValidationError,
 )
-from agents.models import ResearchResult
+from agents.models import AnalysisReport, ResearchResult
 
 # ---------------------------------------------------------------------------
 # GET /health
@@ -1024,6 +1024,8 @@ def test_list_packs_returns_registered_packs(test_client: TestClient) -> None:
     pack_ids = [p["pack_id"] for p in packs]
     assert "research_analysis" in pack_ids
     assert "research_only" in pack_ids
+    assert "summariser" in pack_ids
+    assert "analysis_only" in pack_ids
 
     ra_pack = next(p for p in packs if p["pack_id"] == "research_analysis")
     assert "name" in ra_pack
@@ -1108,6 +1110,64 @@ def test_pack_run_endpoint_exists_for_research_only(
     body = response.json()
     assert "summary" in body
     assert "findings" in body
+
+
+def test_pack_run_endpoint_exists_for_summariser(test_client: TestClient) -> None:
+    """POST /packs/summariser/run must return 200 with bullet summary fields."""
+    from domain_packs.summariser.pack import SummariserPack
+    from domain_packs.summariser.schemas import SummaryOutput
+
+    mock_output = SummaryOutput(original_length=42, bullets=["a", "b", "c"])
+
+    def _noop_init(self, **kwargs):  # type: ignore[override]
+        pass
+
+    with (
+        patch.object(SummariserPack, "__init__", _noop_init),
+        patch.object(SummariserPack, "run_from_input", return_value=mock_output),
+        patch.object(SummariserPack, "close", return_value=None),
+    ):
+        response = test_client.post(
+            "/packs/summariser/run",
+            json={"text": "Long article about microservices.", "bullet_count": 3},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["bullets"] == ["a", "b", "c"]
+    assert body["original_length"] == 42
+
+
+def test_pack_run_endpoint_exists_for_analysis_only(
+    test_client: TestClient,
+    mock_analysis_report: AnalysisReport,
+) -> None:
+    """POST /packs/analysis_only/run must return 200 with analysis output fields."""
+    from domain_packs.analysis_only.pack import AnalysisOnlyPack
+
+    def _noop_init(self, **kwargs):  # type: ignore[override]
+        pass
+
+    with (
+        patch.object(AnalysisOnlyPack, "__init__", _noop_init),
+        patch.object(
+            AnalysisOnlyPack, "run_from_input", return_value=mock_analysis_report
+        ),
+        patch.object(AnalysisOnlyPack, "close", return_value=None),
+    ):
+        response = test_client.post(
+            "/packs/analysis_only/run",
+            json={
+                "query": "What is a microservice?",
+                "summary": "Prior research summary.",
+                "findings": ["Services are small."],
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "executive_summary" in body
+    assert "key_insights" in body
 
 
 # ---------------------------------------------------------------------------
