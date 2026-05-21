@@ -140,7 +140,7 @@ def test_client(
     ):
         from api.main import app
 
-        with TestClient(app, raise_server_exceptions=False) as client:
+        with TestClient(app) as client:
             yield client
 
 
