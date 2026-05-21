@@ -31,7 +31,7 @@ from core.config import get_settings
 from core.memory import create_checkpointer
 from core.observability import trace_span
 from domain_packs.analysis_only.schemas import AnalysisOnlyInput, AnalysisOnlyOutput
-from pack_kernel.base_pack import BaseDomainPack
+from pack_kernel.base_pack import BaseDomainPack, normalize_pack_stream_event, pack_stream_event
 
 logger = logging.getLogger(__name__)
 
@@ -192,6 +192,12 @@ class AnalysisOnlyPack(BaseDomainPack):
     async def stream_events_from_input(
         self, body: BaseModel
     ) -> AsyncIterator[dict[str, Any]]:
+        async for raw in self._iter_stream_events_from_input(body):
+            yield normalize_pack_stream_event(raw)
+
+    async def _iter_stream_events_from_input(
+        self, body: BaseModel
+    ) -> AsyncIterator[dict[str, Any]]:
         if not isinstance(body, AnalysisOnlyInput):
             body = AnalysisOnlyInput.model_validate(body)
         research = self._input_to_research(body)
@@ -210,9 +216,9 @@ class AnalysisOnlyPack(BaseDomainPack):
             kind = event.get("event", "")
             name = event.get("name", "")
             if kind == "on_chain_start" and name == "analysis_node":
-                yield {"event": "phase_started", "data": {"phase": "analysis"}}
+                yield pack_stream_event("phase_started", phase="analysis")
             elif kind == "on_chain_end" and name == "analysis_node":
-                yield {"event": "phase_completed", "data": {"phase": "analysis"}}
+                yield pack_stream_event("phase_completed", phase="analysis")
                 output = event.get("data", {}).get("output", {})
                 if isinstance(output, dict):
                     rd = output.get("analysis_report")
@@ -226,11 +232,11 @@ class AnalysisOnlyPack(BaseDomainPack):
             raise AgentExecutionError(
                 "[AnalysisOnlyPack] Stream completed without AnalysisReport."
             )
-        yield {"event": "pipeline_completed", "data": {"report": final_report}}
+        yield pack_stream_event("pipeline_completed", report=final_report)
 
-    async def stream_events(self, query: str) -> AsyncIterator[dict[str, Any]]:
+    async def _iter_stream_events(self, query: str) -> AsyncIterator[dict[str, Any]]:
         inp = AnalysisOnlyInput(query=query, summary=query)
-        async for event in self.stream_events_from_input(inp):
+        async for event in self._iter_stream_events_from_input(inp):
             yield event
 
     def close(self) -> None:

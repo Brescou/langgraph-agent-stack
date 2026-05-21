@@ -309,13 +309,11 @@ class TestMultiAgentGraphStreamEvents:
         async for evt in graph.stream_events("test query"):
             collected.append(evt)
 
-        event_types = [e["event"] for e in collected]
+        event_types = [e["type"] for e in collected]
         assert event_types.count("phase_started") == 2
         assert event_types.count("phase_completed") == 2
 
-        phases = [
-            e["data"]["phase"] for e in collected if e["event"] == "phase_started"
-        ]
+        phases = [e["phase"] for e in collected if e["type"] == "phase_started"]
         assert phases == ["research", "analysis"]
 
     @pytest.mark.asyncio
@@ -351,10 +349,10 @@ class TestMultiAgentGraphStreamEvents:
         async for evt in graph.stream_events("test query"):
             collected.append(evt)
 
-        token_events = [e for e in collected if e["event"] == "token"]
+        token_events = [e for e in collected if e["type"] == "token"]
         assert len(token_events) == 1
-        assert token_events[0]["data"]["content"] == "hello"
-        assert token_events[0]["data"]["node"] == "research_node"
+        assert token_events[0]["content"] == "hello"
+        assert token_events[0]["node"] == "research_node"
 
     @pytest.mark.asyncio
     async def test_stream_events_yields_pipeline_completed(self, graph):
@@ -381,9 +379,9 @@ class TestMultiAgentGraphStreamEvents:
             collected.append(evt)
 
         last = collected[-1]
-        assert last["event"] == "pipeline_completed"
-        assert isinstance(last["data"]["report"], AnalysisReport)
-        assert last["data"]["report"].confidence == 0.92
+        assert last["type"] == "pipeline_completed"
+        assert isinstance(last["report"], dict)
+        assert last["report"]["confidence"] == 0.92
 
     @pytest.mark.asyncio
     async def test_stream_events_raises_when_no_report(self, graph):

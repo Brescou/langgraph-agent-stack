@@ -56,6 +56,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from langchain_core.language_models import BaseChatModel
 
+from agents.analyst import AnalysisReport
 from agents.base_agent import (
     AgentBudgetExceededError,
     AgentExecutionError,
@@ -111,6 +112,7 @@ configure_logging(level=get_settings().log_level.value)
 logger = logging.getLogger(__name__)
 
 from pack_kernel.builtin_packs import register_builtin_packs  # noqa: E402
+from pack_kernel.base_pack import normalize_pack_stream_event  # noqa: E402
 from pack_kernel.registry import PackRegistry  # noqa: E402
 
 register_builtin_packs()
@@ -435,7 +437,7 @@ async def _iter_pack_stream_events(
     if _pack_has_structured_stream(pack_cls):
         events = pipeline.stream_events_from_input(body)
         async for event in cast(AsyncIterator[dict[str, Any]], events):
-            yield event
+            yield normalize_pack_stream_event(event)
         return
     async for event in cast(
         AsyncIterator[dict[str, Any]],
@@ -1429,19 +1431,17 @@ async def _stream_pipeline(
 
         try:
             async for event in pipeline.stream_events(query):
-                kind = event["event"]
+                kind = event["type"]
 
-                if kind == "phase_started":
-                    yield f"data: {json.dumps({'type': 'phase_started', 'phase': event['data']['phase']})}\n\n"
-
-                elif kind == "phase_completed":
-                    yield f"data: {json.dumps({'type': 'phase_completed', 'phase': event['data']['phase']})}\n\n"
-
-                elif kind == "token":
-                    yield f"data: {json.dumps({'type': 'token', 'content': event['data']['content'], 'node': event['data'].get('node', '')})}\n\n"
+                if kind in ("phase_started", "phase_completed", "token"):
+                    yield f"data: {json.dumps(event)}\n\n"
 
                 elif kind == "pipeline_completed":
-                    report = event["data"]["report"]
+                    report_raw = event.get("report")
+                    if isinstance(report_raw, dict):
+                        report = AnalysisReport(**report_raw)
+                    else:
+                        report = report_raw
         finally:
             pipeline.close()
 

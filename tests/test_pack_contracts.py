@@ -28,7 +28,13 @@ from domain_packs.research_only.pack import ResearchOnlyPack
 from domain_packs.research_only.schemas import ResearchOnlyInput, ResearchOnlyOutput
 from domain_packs.summariser.pack import SummariserPack
 from domain_packs.summariser.schemas import SummaryInput, SummaryOutput
-from pack_kernel.base_pack import BaseDomainPack, _DefaultPackInput, _DefaultPackOutput
+from pack_kernel.base_pack import (
+    BaseDomainPack,
+    _DefaultPackInput,
+    _DefaultPackOutput,
+    normalize_pack_stream_event,
+    pack_stream_event,
+)
 from pack_kernel.registry import PackRegistry
 
 # ---------------------------------------------------------------------------
@@ -44,6 +50,19 @@ def test_base_pack_has_default_input_schema() -> None:
 def test_base_pack_has_default_output_schema() -> None:
     """BaseDomainPack.output_schema must equal _DefaultPackOutput."""
     assert BaseDomainPack.output_schema is _DefaultPackOutput
+
+
+def test_pack_stream_event_uses_top_level_type_field() -> None:
+    event = pack_stream_event("phase_started", phase="research")
+    assert event == {"type": "phase_started", "phase": "research"}
+
+
+def test_normalize_pack_stream_event_converts_legacy_shape() -> None:
+    legacy = {"event": "phase_started", "data": {"phase": "research"}}
+    assert normalize_pack_stream_event(legacy) == {
+        "type": "phase_started",
+        "phase": "research",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -288,10 +307,15 @@ def test_research_analysis_pack_has_required_class_attrs() -> None:
 
 
 def test_research_analysis_pack_implements_abstract_methods() -> None:
-    abstract_methods = {"run", "arun", "stream_events"}
+    abstract_methods = {"run", "arun", "_iter_stream_events"}
     pack_methods = set(dir(ResearchAnalysisPack))
     missing = abstract_methods - pack_methods
     assert not missing, f"Missing abstract method implementations: {missing}"
+
+
+def test_research_analysis_pack_exposes_normalized_stream_events() -> None:
+    assert inspect.isasyncgenfunction(ResearchAnalysisPack.stream_events)
+    assert inspect.isasyncgenfunction(ResearchAnalysisPack._iter_stream_events)
 
 
 def test_research_analysis_pack_run_is_not_abstract() -> None:
@@ -300,10 +324,6 @@ def test_research_analysis_pack_run_is_not_abstract() -> None:
 
 def test_research_analysis_pack_arun_is_coroutine() -> None:
     assert inspect.iscoroutinefunction(ResearchAnalysisPack.arun)
-
-
-def test_research_analysis_pack_stream_events_is_async_gen() -> None:
-    assert inspect.isasyncgenfunction(ResearchAnalysisPack.stream_events)
 
 
 def test_research_analysis_pack_supports_context_manager() -> None:

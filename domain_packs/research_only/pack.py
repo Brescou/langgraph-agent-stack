@@ -29,7 +29,7 @@ from core.config import get_settings
 from core.memory import create_checkpointer
 from core.observability import trace_span
 from domain_packs.research_only.schemas import ResearchOnlyInput, ResearchOnlyOutput
-from pack_kernel.base_pack import BaseDomainPack
+from pack_kernel.base_pack import BaseDomainPack, pack_stream_event
 
 logger = logging.getLogger(__name__)
 
@@ -187,7 +187,7 @@ class ResearchOnlyPack(BaseDomainPack):
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self._get_executor(), self.run, query)
 
-    async def stream_events(self, query: str) -> AsyncIterator[dict[str, Any]]:
+    async def _iter_stream_events(self, query: str) -> AsyncIterator[dict[str, Any]]:
         if not query or not query.strip():
             raise AgentValidationError(
                 "ResearchOnlyPack.stream_events() requires a non-empty query."
@@ -210,10 +210,10 @@ class ResearchOnlyPack(BaseDomainPack):
             name = event.get("name", "")
 
             if kind == "on_chain_start" and name == "research_node":
-                yield {"event": "phase_started", "data": {"phase": "research"}}
+                yield pack_stream_event("phase_started", phase="research")
 
             elif kind == "on_chain_end" and name == "research_node":
-                yield {"event": "phase_completed", "data": {"phase": "research"}}
+                yield pack_stream_event("phase_completed", phase="research")
                 output = event.get("data", {}).get("output", {})
                 result_dict = None
                 if isinstance(output, dict):
@@ -229,7 +229,7 @@ class ResearchOnlyPack(BaseDomainPack):
                 "[ResearchOnlyPack] Stream completed without a ResearchResult."
             )
 
-        yield {"event": "pipeline_completed", "data": {"result": final_result}}
+        yield pack_stream_event("pipeline_completed", result=final_result)
 
     def close(self) -> None:
         if self._executor is not None:

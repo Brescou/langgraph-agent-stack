@@ -30,7 +30,7 @@ from core.config import get_settings
 from core.memory import create_checkpointer
 from core.observability import trace_span
 from domain_packs.summariser.schemas import SummaryInput, SummaryOutput
-from pack_kernel.base_pack import BaseDomainPack
+from pack_kernel.base_pack import BaseDomainPack, normalize_pack_stream_event, pack_stream_event
 
 logger = logging.getLogger(__name__)
 
@@ -171,16 +171,22 @@ class SummariserPack(BaseDomainPack):
     async def stream_events_from_input(
         self, body: BaseModel
     ) -> AsyncIterator[dict[str, Any]]:
+        async for raw in self._iter_stream_events_from_input(body):
+            yield normalize_pack_stream_event(raw)
+
+    async def _iter_stream_events_from_input(
+        self, body: BaseModel
+    ) -> AsyncIterator[dict[str, Any]]:
         if not isinstance(body, SummaryInput):
             body = SummaryInput.model_validate(body)
+        yield pack_stream_event("phase_started", phase="summarise")
         result = self.run_from_input(body)
-        yield {"event": "phase_started", "data": {"phase": "summarise"}}
-        yield {"event": "phase_completed", "data": {"phase": "summarise"}}
-        yield {"event": "pipeline_completed", "data": {"result": result.model_dump()}}
+        yield pack_stream_event("phase_completed", phase="summarise")
+        yield pack_stream_event("pipeline_completed", result=result)
 
-    async def stream_events(self, query: str) -> AsyncIterator[dict[str, Any]]:
+    async def _iter_stream_events(self, query: str) -> AsyncIterator[dict[str, Any]]:
         inp = SummaryInput(text=query, bullet_count=3)
-        async for event in self.stream_events_from_input(inp):
+        async for event in self._iter_stream_events_from_input(inp):
             yield event
 
     def close(self) -> None:

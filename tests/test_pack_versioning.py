@@ -39,8 +39,8 @@ class _PackV1(BaseDomainPack):
     async def arun(self, query: str) -> Any:
         return {"version": "1.0"}
 
-    async def stream_events(self, query: str) -> AsyncGenerator[dict[str, Any], None]:
-        yield {"version": "1.0"}
+    async def _iter_stream_events(self, query: str) -> AsyncGenerator[dict[str, Any], None]:
+        yield {"type": "test", "version": "1.0"}
 
 
 class _PackV2(BaseDomainPack):
@@ -55,8 +55,8 @@ class _PackV2(BaseDomainPack):
     async def arun(self, query: str) -> Any:
         return {"version": "2.0"}
 
-    async def stream_events(self, query: str) -> AsyncGenerator[dict[str, Any], None]:
-        yield {"version": "2.0"}
+    async def _iter_stream_events(self, query: str) -> AsyncGenerator[dict[str, Any], None]:
+        yield {"type": "test", "version": "2.0"}
 
 
 class _PackV1Replacement(BaseDomainPack):
@@ -73,8 +73,8 @@ class _PackV1Replacement(BaseDomainPack):
     async def arun(self, query: str) -> Any:
         return {"version": "1.0-replaced"}
 
-    async def stream_events(self, query: str) -> AsyncGenerator[dict[str, Any], None]:
-        yield {"version": "1.0-replaced"}
+    async def _iter_stream_events(self, query: str) -> AsyncGenerator[dict[str, Any], None]:
+        yield {"type": "test", "version": "1.0-replaced"}
 
 
 # ---------------------------------------------------------------------------

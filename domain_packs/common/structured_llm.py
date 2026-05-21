@@ -38,7 +38,7 @@ from domain_packs.common.output_guard import (
     cross_check_output_if_enabled,
     guard_llm_output,
 )
-from pack_kernel.base_pack import BaseDomainPack
+from pack_kernel.base_pack import BaseDomainPack, normalize_pack_stream_event, pack_stream_event
 
 logger = logging.getLogger(__name__)
 
@@ -328,16 +328,41 @@ class StructuredLLMPack(BaseDomainPack):
     async def stream_events_from_input(
         self, body: BaseModel
     ) -> AsyncIterator[dict[str, Any]]:
-        yield {"event": "phase_started", "data": {"phase": self.pack_id}}
-        result = self.run_from_input(body)
-        yield {"event": "phase_completed", "data": {"phase": self.pack_id}}
-        yield {"event": "pipeline_completed", "data": {"result": result.model_dump()}}
+        async for raw in self._iter_stream_events_from_input(body):
+            yield normalize_pack_stream_event(raw)
 
-    async def stream_events(self, query: str) -> AsyncIterator[dict[str, Any]]:
-        result = self.run(query)
-        yield {"event": "phase_started", "data": {"phase": self.pack_id}}
-        yield {"event": "phase_completed", "data": {"phase": self.pack_id}}
-        yield {"event": "pipeline_completed", "data": {"result": result.model_dump()}}
+    async def _iter_stream_events_from_input(
+        self, body: BaseModel
+    ) -> AsyncIterator[dict[str, Any]]:
+        yield pack_stream_event("phase_started", phase=self.pack_id)
+        result = self.run_from_input(body)
+        yield pack_stream_event("phase_completed", phase=self.pack_id)
+        yield pack_stream_event("pipeline_completed", result=result)
+
+    async def _iter_stream_events(self, query: str) -> AsyncIterator[dict[str, Any]]:
+        if not query or not query.strip():
+            raise AgentValidationError(f"{self.__class__.__name__}.run() needs text.")
+        fields = self.input_schema.model_fields
+        if "query" in fields:
+            body = self.input_schema(query=query.strip())
+        elif "text" in fields:
+            body = self.input_schema(text=query.strip())
+        elif "company" in fields:
+            body = self.input_schema(company=query.strip())
+        elif "topic" in fields:
+            body = self.input_schema(topic=query.strip())
+        elif "ticket_subject" in fields:
+            body = self.input_schema(
+                ticket_subject=query.strip(), body=query.strip()
+            )
+        elif "question" in fields:
+            body = self.input_schema(question=query.strip())
+        else:
+            raise AgentValidationError(
+                f"{self.__class__.__name__} has no string fallback field."
+            )
+        async for event in self._iter_stream_events_from_input(body):
+            yield event
 
     def close(self) -> None:
         if self._executor is not None:

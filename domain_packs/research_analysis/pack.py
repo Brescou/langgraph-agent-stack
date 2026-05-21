@@ -38,7 +38,7 @@ from domain_packs.research_analysis.schemas import (
     ResearchAnalysisInput,
     ResearchAnalysisOutput,
 )
-from pack_kernel.base_pack import BaseDomainPack
+from pack_kernel.base_pack import BaseDomainPack, pack_stream_event
 
 logger = logging.getLogger(__name__)
 
@@ -465,7 +465,7 @@ class ResearchAnalysisPack(BaseDomainPack):
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self._get_executor(), self.run, query)
 
-    async def stream_events(self, query: str) -> AsyncIterator[dict[str, Any]]:
+    async def _iter_stream_events(self, query: str) -> AsyncIterator[dict[str, Any]]:
         """Stream pipeline execution events in real time."""
         if not query or not query.strip():
             raise AgentValidationError(
@@ -492,11 +492,11 @@ class ResearchAnalysisPack(BaseDomainPack):
 
             if kind == "on_chain_start" and name in ("research_node", "analysis_node"):
                 phase = "research" if name == "research_node" else "analysis"
-                yield {"event": "phase_started", "data": {"phase": phase}}
+                yield pack_stream_event("phase_started", phase=phase)
 
             elif kind == "on_chain_end" and name in ("research_node", "analysis_node"):
                 phase = "research" if name == "research_node" else "analysis"
-                yield {"event": "phase_completed", "data": {"phase": phase}}
+                yield pack_stream_event("phase_completed", phase=phase)
 
                 if name == "analysis_node":
                     output = event.get("data", {}).get("output", {})
@@ -512,20 +512,18 @@ class ResearchAnalysisPack(BaseDomainPack):
             elif kind == "on_chat_model_stream":
                 chunk = event.get("data", {}).get("chunk")
                 if chunk and hasattr(chunk, "content") and chunk.content:
-                    yield {
-                        "event": "token",
-                        "data": {
-                            "content": chunk.content,
-                            "node": event.get("metadata", {}).get("langgraph_node", ""),
-                        },
-                    }
+                    yield pack_stream_event(
+                        "token",
+                        content=chunk.content,
+                        node=event.get("metadata", {}).get("langgraph_node", ""),
+                    )
 
         if final_report is None:
             raise AgentExecutionError(
                 "[ResearchAnalysisPack] Stream completed without an AnalysisReport."
             )
 
-        yield {"event": "pipeline_completed", "data": {"report": final_report}}
+        yield pack_stream_event("pipeline_completed", report=final_report)
 
     # ------------------------------------------------------------------
     # Additional method kept for API backward-compat

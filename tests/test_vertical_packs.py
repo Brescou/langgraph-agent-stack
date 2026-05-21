@@ -223,3 +223,32 @@ def test_vertical_pack_run_from_input_parametrized(
         inp = input_model(question="How many PTO days?", document_text="25 days/year")
     result = pack.run_from_input(inp)
     assert getattr(result, field) == expected
+
+
+@pytest.mark.asyncio
+async def test_vertical_pack_stream_events_use_canonical_sse_schema() -> None:
+    """Structured vertical packs must emit ``{type, ...}`` events, not ``{event, data}``."""
+    payload = {
+        "company": "Acme Corp",
+        "person": "Jane Doe",
+        "company_overview": "B2B SaaS",
+        "recent_news": [],
+        "talking_points": [],
+        "questions_to_ask": [],
+        "landmines": [],
+        "confidence": 0.8,
+    }
+    pack = MeetingPrepPack(run_id="mp-stream", llm=_mock_llm_json(payload))
+    events = [
+        event
+        async for event in pack.stream_events_from_input(
+            MeetingPrepInput(company="Acme Corp", person="Jane Doe")
+        )
+    ]
+    assert events
+    assert all("type" in event for event in events)
+    assert all("event" not in event for event in events)
+    assert events[0]["type"] == "phase_started"
+    assert events[0]["phase"] == "meeting_prep"
+    assert events[-1]["type"] == "pipeline_completed"
+    assert "result" in events[-1]

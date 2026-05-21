@@ -52,11 +52,11 @@ def _make_mock_app():
     )
 
     async def _success_stream(query):
-        yield {"event": "phase_started", "data": {"phase": "research"}}
-        yield {"event": "phase_completed", "data": {"phase": "research"}}
-        yield {"event": "phase_started", "data": {"phase": "analysis"}}
-        yield {"event": "phase_completed", "data": {"phase": "analysis"}}
-        yield {"event": "pipeline_completed", "data": {"report": mock_report}}
+        yield {"type": "phase_started", "phase": "research"}
+        yield {"type": "phase_completed", "phase": "research"}
+        yield {"type": "phase_started", "phase": "analysis"}
+        yield {"type": "phase_completed", "phase": "analysis"}
+        yield {"type": "pipeline_completed", "report": mock_report}
 
     mock_graph_instance = MagicMock()
     mock_graph_instance.run.return_value = mock_report

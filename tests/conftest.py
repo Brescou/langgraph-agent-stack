@@ -85,11 +85,11 @@ def _make_mock_stream_events(report: AnalysisReport):
     """Build an async generator function mimicking ``MultiAgentGraph.stream_events``."""
 
     async def stream_events(query: str):
-        yield {"event": "phase_started", "data": {"phase": "research"}}
-        yield {"event": "phase_completed", "data": {"phase": "research"}}
-        yield {"event": "phase_started", "data": {"phase": "analysis"}}
-        yield {"event": "phase_completed", "data": {"phase": "analysis"}}
-        yield {"event": "pipeline_completed", "data": {"report": report}}
+        yield {"type": "phase_started", "phase": "research"}
+        yield {"type": "phase_completed", "phase": "research"}
+        yield {"type": "phase_started", "phase": "analysis"}
+        yield {"type": "phase_completed", "phase": "analysis"}
+        yield {"type": "pipeline_completed", "report": report.to_dict()}
 
     return stream_events
 
