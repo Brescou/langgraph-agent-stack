@@ -43,19 +43,6 @@ variable "helm_chart_path" {
   default = "../../helm/langgraph-agent-stack"
 }
 
-variable "anthropic_api_key" {
-  description = "Anthropic API key — injected as a Kubernetes secret, never logged."
-  type        = string
-  sensitive   = true
-}
-
-variable "redis_url" {
-  description = "Redis connection URL (optional). Required in prod for distributed rate limiting."
-  type        = string
-  sensitive   = true
-  default     = ""
-}
-
 variable "llm_provider" {
   description = "LLM provider name (e.g. anthropic, openai, google)."
   type        = string

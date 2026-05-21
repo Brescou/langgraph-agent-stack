@@ -100,6 +100,8 @@ serviceAccount:
   create: true
   name: ""
   annotations: {}
+  # GKE Workload Identity (set by Terraform on the pre-created SA):
+  #   iam.gke.io/gcp-service-account: langgraph-dev@PROJECT_ID.iam.gserviceaccount.com
   # IRSA / EKS Pod Identity — bind an IAM role; do NOT mount static AWS keys:
   #   eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/langgraph-bedrock
 

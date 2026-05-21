@@ -14,9 +14,7 @@
 # environment  = "dev"
 # namespace    = "langgraph-agents"
 # llm_provider = "anthropic"
-# # Set via TF_VAR_anthropic_api_key or -var:
-# # anthropic_api_key = ""
-# # redis_url         = ""
+# # API keys: populate GCP Secret Manager after apply (see terraform output populate_secrets_commands).
 
 # ═══════════════════════════════════════════════════════════════════════════
 # EKS  (cd infra/terraform/eks && terraform init && terraform apply)

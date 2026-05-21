@@ -96,26 +96,10 @@ resource "kubernetes_namespace_v1" "langgraph" {
 }
 
 # ---------------------------------------------------------------------------
-# 6. Kubernetes secret for the Anthropic API key
-#    The secret key name matches the Helm chart's expected reference:
-#    secrets.anthropicApiKey
+# 6. Helm release — langgraph-agent-stack
+#    Credentials: GCP Secret Manager → ESO ExternalSecret → secrets.existingSecret
+#    (see secrets.tf). Never pass API keys via Terraform variables.
 # ---------------------------------------------------------------------------
-resource "kubernetes_secret_v1" "langgraph_secrets" {
-  metadata {
-    name      = "langgraph-secrets"
-    namespace = kubernetes_namespace_v1.langgraph.metadata[0].name
-  }
-
-  type = "Opaque"
-
-  data = {
-    ANTHROPIC_API_KEY = var.anthropic_api_key
-    REDIS_URL         = var.redis_url
-  }
-}
-
-# ---------------------------------------------------------------------------
-# 7. Helm release — langgraph-agent-stack
 #    Chart version and appVersion sourced from Chart.yaml (see infra/helm)
 #    Default image: langgraph-agent-stack:latest
 #    Default namespace from values.yaml: langgraph-agents
@@ -137,9 +121,21 @@ resource "helm_release" "langgraph" {
     },
     {
       name  = "secrets.existingSecret"
-      value = kubernetes_secret_v1.langgraph_secrets.metadata[0].name
+      value = local.k8s_secret_name
+    },
+    {
+      name  = "serviceAccount.create"
+      value = "false"
+    },
+    {
+      name  = "serviceAccount.name"
+      value = local.k8s_service_account_name
     },
   ]
 
-  depends_on = [kubernetes_namespace_v1.langgraph]
+  depends_on = [
+    kubernetes_namespace_v1.langgraph,
+    kubernetes_service_account_v1.workload,
+    kubernetes_manifest.langgraph_external_secret,
+  ]
 }
