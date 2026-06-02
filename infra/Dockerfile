@@ -6,20 +6,16 @@
 # Pin to a specific patch version for reproducibility across builds.
 # For stricter supply-chain control, append @sha256:<digest> for your target platform.
 
-# Global ARG — must be declared before FROM to be usable in COPY --from= references
-ARG UV_VERSION=0.11.18
-
 FROM python:3.12.13-slim AS builder
-
-# Re-declare within stage scope so it's also usable in RUN/ENV instructions
-ARG UV_VERSION
 
 # Prevent Python from writing .pyc files and enable unbuffered stdout/stderr
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 # Copy uv from the official image — no curl|sh, no build-time network fetch.
-COPY --from=ghcr.io/astral-sh/uv:${UV_VERSION} /uv /usr/local/bin/uv
+# Version pinned here; COPY --from= does not support ARG variable substitution
+# on all BuildKit versions used by GitHub Actions runners.
+COPY --from=ghcr.io/astral-sh/uv:0.11.18 /uv /usr/local/bin/uv
 
 WORKDIR /build
 
