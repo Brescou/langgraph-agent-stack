@@ -5,9 +5,14 @@
 # =============================================================================
 # Pin to a specific patch version for reproducibility across builds.
 # For stricter supply-chain control, append @sha256:<digest> for your target platform.
+
+# Global ARG — must be declared before FROM to be usable in COPY --from= references
+ARG UV_VERSION=0.11.18
+
 FROM python:3.12.13-slim AS builder
 
-ARG UV_VERSION=0.11.18
+# Re-declare within stage scope so it's also usable in RUN/ENV instructions
+ARG UV_VERSION
 
 # Prevent Python from writing .pyc files and enable unbuffered stdout/stderr
 ENV PYTHONDONTWRITEBYTECODE=1 \
