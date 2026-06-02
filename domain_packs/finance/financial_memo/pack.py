@@ -8,7 +8,10 @@ from pydantic import BaseModel
 
 from domain_packs.common.prompt_safety import format_vertical_prompt
 from domain_packs.common.structured_llm import StructuredLLMPack
-from domain_packs.finance.financial_memo.schemas import FinancialMemoInput, FinancialMemoOutput
+from domain_packs.finance.financial_memo.schemas import (
+    FinancialMemoInput,
+    FinancialMemoOutput,
+)
 
 
 class FinancialMemoPack(StructuredLLMPack):

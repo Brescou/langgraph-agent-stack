@@ -26,7 +26,7 @@ executor: ThreadPoolExecutor | None = None
 shared_llm: BaseChatModel | None = None
 shared_checkpointer: Any | None = None
 shared_memory: Any | None = None
-active_pack_cls: Any | None = None   # default pack resolved from PackRegistry
+active_pack_cls: Any | None = None  # default pack resolved from PackRegistry
 shared_connector: Any | None = None  # optional BaseConnector
 
 # ---------------------------------------------------------------------------

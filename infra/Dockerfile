@@ -7,7 +7,7 @@
 # For stricter supply-chain control, append @sha256:<digest> for your target platform.
 FROM python:3.12.13-slim AS builder
 
-ARG UV_VERSION=0.11.15
+ARG UV_VERSION=0.11.18
 
 # Prevent Python from writing .pyc files and enable unbuffered stdout/stderr
 ENV PYTHONDONTWRITEBYTECODE=1 \

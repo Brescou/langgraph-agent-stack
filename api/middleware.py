@@ -28,7 +28,16 @@ logger = logging.getLogger(__name__)
 
 _DRAIN_EXEMPT_PATHS = frozenset({"/health", "/ready", "/metrics"})
 _AUTH_EXEMPT_PATHS = frozenset(
-    {"/", "/health", "/ready", "/metrics", "/docs", "/redoc", "/openapi.json", "/favicon.ico"}
+    {
+        "/",
+        "/health",
+        "/ready",
+        "/metrics",
+        "/docs",
+        "/redoc",
+        "/openapi.json",
+        "/favicon.ico",
+    }
 )
 _RATE_LIMIT_EXEMPT_PATHS = frozenset({"/health", "/ready", "/metrics"})
 
@@ -120,7 +129,9 @@ async def rate_limit_middleware(request: Request, call_next: Any) -> Any:
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             media_type="application/json",
             headers={
-                "Retry-After": str(int(getattr(state.rate_limiter, "window_seconds", 60)))
+                "Retry-After": str(
+                    int(getattr(state.rate_limiter, "window_seconds", 60))
+                )
             },
         )
     return await call_next(request)

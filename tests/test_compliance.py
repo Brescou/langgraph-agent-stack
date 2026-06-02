@@ -15,8 +15,6 @@ from domain_packs.common.compliance import (
     assert_regulated_pack_runtime_enabled,
     regulated_pack_disabled_detail,
 )
-from domain_packs.legal.contract_reviewer.pack import ContractReviewerPack
-from domain_packs.legal.contract_reviewer.schemas import ContractReviewerInput
 from domain_packs.finance.financial_memo.pack import FinancialMemoPack
 from domain_packs.finance.financial_memo.schemas import FinancialMemoInput
 from domain_packs.hr.hr_policy_qa.pack import HrPolicyQaPack
@@ -25,6 +23,8 @@ from domain_packs.hr.job_description_writer.pack import JobDescriptionWriterPack
 from domain_packs.hr.job_description_writer.schemas import JobDescriptionWriterInput
 from domain_packs.hr.talent_screening.pack import TalentScreeningPack
 from domain_packs.hr.talent_screening.schemas import TalentScreeningInput
+from domain_packs.legal.contract_reviewer.pack import ContractReviewerPack
+from domain_packs.legal.contract_reviewer.schemas import ContractReviewerInput
 from pack_kernel.registry import PackRegistry
 
 

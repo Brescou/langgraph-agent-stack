@@ -203,7 +203,7 @@ def _resolve_outbound_host_ips(
         sockaddr = info[4]
         if not sockaddr:
             continue
-        ip_str = sockaddr[0]
+        ip_str = str(sockaddr[0])
         if ip_str in seen:
             continue
         seen.add(ip_str)
