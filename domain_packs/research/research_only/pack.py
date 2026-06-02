@@ -28,7 +28,10 @@ from agents.researcher import ResearchAgent, ResearchResult
 from core.config import get_settings
 from core.memory import create_checkpointer
 from core.observability import trace_span
-from domain_packs.research.research_only.schemas import ResearchOnlyInput, ResearchOnlyOutput
+from domain_packs.research.research_only.schemas import (
+    ResearchOnlyInput,
+    ResearchOnlyOutput,
+)
 from pack_kernel.base_pack import BaseDomainPack, pack_stream_event
 
 logger = logging.getLogger(__name__)

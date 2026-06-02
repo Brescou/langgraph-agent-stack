@@ -7,22 +7,25 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from domain_packs.legal.contract_reviewer.pack import ContractReviewerPack
-from domain_packs.legal.contract_reviewer.schemas import ContractReviewerInput
-from domain_packs.productivity.executive_brief.pack import ExecutiveBriefPack
-from domain_packs.productivity.executive_brief.schemas import ExecutiveBriefInput
 from domain_packs.finance.financial_memo.pack import FinancialMemoPack
 from domain_packs.finance.financial_memo.schemas import FinancialMemoInput
-from domain_packs.productivity.meeting_prep.pack import MeetingPrepPack
-from domain_packs.productivity.meeting_prep.schemas import MeetingPrepInput, MeetingPrepOutput
-from domain_packs.productivity.rfp_assistant.pack import RfpAssistantPack
-from domain_packs.productivity.rfp_assistant.schemas import RfpAssistantInput
 from domain_packs.hr.hr_policy_qa.pack import HrPolicyQaPack
 from domain_packs.hr.hr_policy_qa.schemas import HrPolicyQaInput
 from domain_packs.hr.job_description_writer.pack import JobDescriptionWriterPack
 from domain_packs.hr.job_description_writer.schemas import JobDescriptionWriterInput
 from domain_packs.hr.talent_screening.pack import TalentScreeningPack
 from domain_packs.hr.talent_screening.schemas import TalentScreeningInput
+from domain_packs.legal.contract_reviewer.pack import ContractReviewerPack
+from domain_packs.legal.contract_reviewer.schemas import ContractReviewerInput
+from domain_packs.productivity.executive_brief.pack import ExecutiveBriefPack
+from domain_packs.productivity.executive_brief.schemas import ExecutiveBriefInput
+from domain_packs.productivity.meeting_prep.pack import MeetingPrepPack
+from domain_packs.productivity.meeting_prep.schemas import (
+    MeetingPrepInput,
+    MeetingPrepOutput,
+)
+from domain_packs.productivity.rfp_assistant.pack import RfpAssistantPack
+from domain_packs.productivity.rfp_assistant.schemas import RfpAssistantInput
 from domain_packs.productivity.support_triage.pack import SupportTriagePack
 from domain_packs.productivity.support_triage.schemas import SupportTriageInput
 from pack_kernel.registry import PackRegistry

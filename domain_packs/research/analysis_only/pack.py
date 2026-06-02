@@ -30,7 +30,10 @@ from agents.researcher import ResearchResult
 from core.config import get_settings
 from core.memory import create_checkpointer
 from core.observability import trace_span
-from domain_packs.research.analysis_only.schemas import AnalysisOnlyInput, AnalysisOnlyOutput
+from domain_packs.research.analysis_only.schemas import (
+    AnalysisOnlyInput,
+    AnalysisOnlyOutput,
+)
 from pack_kernel.base_pack import (
     BaseDomainPack,
     normalize_pack_stream_event,

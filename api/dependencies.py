@@ -116,7 +116,15 @@ def pack_runtime_kwargs(pack_cls: type) -> dict[str, Any]:
 
 def pack_primary_text(body: Any) -> str:
     """Extract the main free-text field from a typed pack request body."""
-    for field in ("query", "text", "company", "topic", "ticket_subject", "question", "role_title"):
+    for field in (
+        "query",
+        "text",
+        "company",
+        "topic",
+        "ticket_subject",
+        "question",
+        "role_title",
+    ):
         if hasattr(body, field):
             value = getattr(body, field)
             if value:

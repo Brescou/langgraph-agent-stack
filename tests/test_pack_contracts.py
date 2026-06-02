@@ -17,17 +17,23 @@ import pytest
 from pydantic import ValidationError
 
 from agents.models import AnalysisReport, ResearchResult
+from domain_packs.productivity.summariser.pack import SummariserPack
+from domain_packs.productivity.summariser.schemas import SummaryInput, SummaryOutput
 from domain_packs.research.analysis_only.pack import AnalysisOnlyPack
-from domain_packs.research.analysis_only.schemas import AnalysisOnlyInput, AnalysisOnlyOutput
+from domain_packs.research.analysis_only.schemas import (
+    AnalysisOnlyInput,
+    AnalysisOnlyOutput,
+)
 from domain_packs.research.research_analysis.pack import ResearchAnalysisPack
 from domain_packs.research.research_analysis.schemas import (
     ResearchAnalysisInput,
     ResearchAnalysisOutput,
 )
 from domain_packs.research.research_only.pack import ResearchOnlyPack
-from domain_packs.research.research_only.schemas import ResearchOnlyInput, ResearchOnlyOutput
-from domain_packs.productivity.summariser.pack import SummariserPack
-from domain_packs.productivity.summariser.schemas import SummaryInput, SummaryOutput
+from domain_packs.research.research_only.schemas import (
+    ResearchOnlyInput,
+    ResearchOnlyOutput,
+)
 from pack_kernel.base_pack import (
     BaseDomainPack,
     _DefaultPackInput,

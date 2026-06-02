@@ -15,7 +15,10 @@ instantiation inside the pack.
 
 from agents.analyst import AnalystAgent  # noqa: F401 — backward-compat re-export
 from agents.researcher import ResearchAgent  # noqa: F401 — backward-compat re-export
-from domain_packs.research.research_analysis.pack import OrchestratorState, ResearchAnalysisPack
+from domain_packs.research.research_analysis.pack import (
+    OrchestratorState,
+    ResearchAnalysisPack,
+)
 
 MultiAgentGraph = ResearchAnalysisPack
 

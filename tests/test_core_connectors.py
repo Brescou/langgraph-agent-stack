@@ -11,8 +11,8 @@ from pydantic import ValidationError
 from connectors.examples.example_connector import ExampleMemoryConnector
 from connectors.http_connector import HttpConnector
 from connectors.rag_connector import RagConnector
-from core.config import Settings, get_settings
 from connectors.resolver import create_connector, resolve_connector
+from core.config import Settings, get_settings
 
 
 def _settings_env(**env: str) -> Settings:

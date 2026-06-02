@@ -15,12 +15,12 @@ from domain_packs.common.output_guard import (
     scan_structured_output,
     scan_text_for_integrity_signals,
 )
-from domain_packs.legal.contract_reviewer.pack import ContractReviewerPack
-from domain_packs.legal.contract_reviewer.schemas import ContractReviewerInput
 from domain_packs.finance.financial_memo.pack import FinancialMemoPack
 from domain_packs.finance.financial_memo.schemas import FinancialMemoInput
 from domain_packs.hr.talent_screening.pack import TalentScreeningPack
 from domain_packs.hr.talent_screening.schemas import TalentScreeningInput
+from domain_packs.legal.contract_reviewer.pack import ContractReviewerPack
+from domain_packs.legal.contract_reviewer.schemas import ContractReviewerInput
 
 
 def test_scan_detects_instruction_override_in_summary() -> None:

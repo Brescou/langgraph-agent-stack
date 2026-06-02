@@ -72,8 +72,8 @@ def _make_mock_app():
     for p in patches:
         p.start()
 
-    from api.main import app
     from api.dependencies import get_legacy_pack_cls
+    from api.main import app
 
     app.dependency_overrides[get_legacy_pack_cls] = lambda: mock_graph_cls
 
@@ -89,8 +89,8 @@ async def async_client():
         yield client
     for p in patches:
         p.stop()
-    from api.main import app
     from api.dependencies import get_legacy_pack_cls
+    from api.main import app
 
     app.dependency_overrides.pop(get_legacy_pack_cls, None)
 

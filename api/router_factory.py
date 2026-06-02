@@ -6,6 +6,7 @@ Each router exposes typed /run and /run/stream endpoints for one pack.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -23,19 +24,17 @@ from agents.base_agent import (
     AgentValidationError,
 )
 from api.dependencies import (
+    _rate_limit_key,
     pack_primary_text,
     pack_runtime_kwargs,
     validate_pack_body_fields,
     validate_pack_query,
     verify_api_key,
-    _rate_limit_key,
 )
 from control_plane.enforce import effective_stream_timeout_seconds
 from core.config import get_settings
 from pack_kernel.base_pack import normalize_pack_stream_event
 from pack_kernel.registry import PackRegistry
-
-import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +68,9 @@ async def _iter_pack_stream_events(
         yield event
 
 
-def _serialize_pack_result(result: Any, output_model: type, cost_usd: float | None) -> Any:
+def _serialize_pack_result(
+    result: Any, output_model: type, cost_usd: float | None
+) -> Any:
     if hasattr(output_model, "from_analysis_report"):
         return output_model.from_analysis_report(result, cost_usd=cost_usd)
     if hasattr(output_model, "from_research_result"):
@@ -83,9 +84,10 @@ def _serialize_pack_result(result: Any, output_model: type, cost_usd: float | No
 
 async def _run_in_executor(fn: Any, *args: Any) -> Any:
     """Execute a blocking callable in the application thread pool."""
-    from core.observability import active_pipelines
     import contextvars
     import functools
+
+    from core.observability import active_pipelines
 
     if state.executor is None:
         raise RuntimeError("Application not started — call during lifespan only")
@@ -127,7 +129,9 @@ def build_pack_router(
 
         if requested_version is None and state.shared_memory is not None:
             session_id = getattr(body, "session_id", None) or None
-            if session_id and hasattr(state.shared_memory, "get_pack_version_for_session"):
+            if session_id and hasattr(
+                state.shared_memory, "get_pack_version_for_session"
+            ):
                 requested_version = state.shared_memory.get_pack_version_for_session(
                     session_id, pack_id
                 )
@@ -139,10 +143,16 @@ def build_pack_router(
                 affinity_key=_rate_limit_key(request),
             )
         except KeyError as exc:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+            ) from exc
 
         used_version = next(
-            (pv.version for pv in PackRegistry._get_versions(pack_id) if pv.pack_cls is pack_cls_to_use),
+            (
+                pv.version
+                for pv in PackRegistry._get_versions(pack_id)
+                if pv.pack_cls is pack_cls_to_use
+            ),
             "unknown",
         )
         response.headers["X-Pack-Version-Used"] = used_version
@@ -187,7 +197,11 @@ def build_pack_router(
                         metadata={
                             "pack_id": pack_id,
                             "pack_version": used_version,
-                            **({"session_id": session_id_for_history} if session_id_for_history else {}),
+                            **(
+                                {"session_id": session_id_for_history}
+                                if session_id_for_history
+                                else {}
+                            ),
                         },
                     )
                 return _serialize_pack_result(result, output_model, cost_usd)
@@ -195,16 +209,25 @@ def build_pack_router(
         try:
             return await _run_in_executor(_execute)
         except AgentBudgetExceededError as exc:
-            raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=str(exc)
+            ) from exc
         except AgentTimeoutError as exc:
-            raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=str(exc)
+            ) from exc
         except (AgentExecutionError, AgentValidationError) as exc:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+            ) from exc
 
     run_pack.__annotations__["body"] = input_model
     router.add_api_route(
-        "/run", run_pack, methods=["POST"],
-        summary=f"Run {pack_id} pipeline", response_model=output_model,
+        "/run",
+        run_pack,
+        methods=["POST"],
+        summary=f"Run {pack_id} pipeline",
+        response_model=output_model,
     )
 
     async def stream_pack(
@@ -221,20 +244,30 @@ def build_pack_router(
         requested_version = request.headers.get("X-Pack-Version") or None
         if requested_version is None and state.shared_memory is not None:
             session_id = getattr(body, "session_id", None) or None
-            if session_id and hasattr(state.shared_memory, "get_pack_version_for_session"):
+            if session_id and hasattr(
+                state.shared_memory, "get_pack_version_for_session"
+            ):
                 requested_version = state.shared_memory.get_pack_version_for_session(
                     session_id, pack_id
                 )
 
         try:
             pack_cls_to_use = PackRegistry.get(
-                pack_id, version=requested_version, affinity_key=_rate_limit_key(request)
+                pack_id,
+                version=requested_version,
+                affinity_key=_rate_limit_key(request),
             )
         except KeyError as exc:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+            ) from exc
 
         used_version = next(
-            (pv.version for pv in PackRegistry._get_versions(pack_id) if pv.pack_cls is pack_cls_to_use),
+            (
+                pv.version
+                for pv in PackRegistry._get_versions(pack_id)
+                if pv.pack_cls is pack_cls_to_use
+            ),
             "unknown",
         )
 
@@ -249,7 +282,9 @@ def build_pack_router(
                 **pack_runtime_kwargs(pack_cls_to_use),
             )
             try:
-                async for event in _iter_pack_stream_events(pack_cls_to_use, pack, body):
+                async for event in _iter_pack_stream_events(
+                    pack_cls_to_use, pack, body
+                ):
                     yield f"data: {json.dumps(event, default=str)}\n\n"
             finally:
                 pack.close()
@@ -276,7 +311,9 @@ def build_pack_router(
 
     stream_pack.__annotations__["body"] = input_model
     router.add_api_route(
-        "/run/stream", stream_pack, methods=["POST"],
+        "/run/stream",
+        stream_pack,
+        methods=["POST"],
         summary=f"Stream {pack_id} pipeline",
     )
 

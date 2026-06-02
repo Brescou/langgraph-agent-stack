@@ -8,7 +8,10 @@ from pydantic import BaseModel
 
 from domain_packs.common.prompt_safety import format_vertical_prompt
 from domain_packs.common.structured_llm import StructuredLLMPack
-from domain_packs.productivity.support_triage.schemas import SupportTriageInput, SupportTriageOutput
+from domain_packs.productivity.support_triage.schemas import (
+    SupportTriageInput,
+    SupportTriageOutput,
+)
 
 
 class SupportTriagePack(StructuredLLMPack):
