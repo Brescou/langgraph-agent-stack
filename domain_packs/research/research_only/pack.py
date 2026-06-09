@@ -9,10 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import threading
 import uuid
 from collections.abc import AsyncIterator
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from langgraph.graph import END, StateGraph
@@ -57,6 +55,7 @@ class ResearchOnlyPack(BaseDomainPack):
     )
     input_schema = ResearchOnlyInput
     output_schema = ResearchOnlyOutput
+    executor_thread_name_prefix = "research-only-pack"
 
     def __init__(
         self,
@@ -70,8 +69,6 @@ class ResearchOnlyPack(BaseDomainPack):
         )
         self.run_id = run_id or str(uuid.uuid4())
         self._checkpointer = checkpointer or create_checkpointer(get_settings())
-        self._executor: ThreadPoolExecutor | None = None
-        self._executor_lock = threading.Lock()
         self._research_agent: ResearchAgent | None = None
         self._graph = self._build_graph()
 
@@ -233,18 +230,3 @@ class ResearchOnlyPack(BaseDomainPack):
             )
 
         yield pack_stream_event("pipeline_completed", result=final_result)
-
-    def close(self) -> None:
-        if self._executor is not None:
-            self._executor.shutdown(wait=True)
-            self._executor = None
-
-    def _get_executor(self) -> ThreadPoolExecutor:
-        if self._executor is None:
-            with self._executor_lock:
-                if self._executor is None:
-                    self._executor = ThreadPoolExecutor(
-                        max_workers=get_settings().thread_pool_max_workers,
-                        thread_name_prefix="research-only-pack",
-                    )
-        return self._executor

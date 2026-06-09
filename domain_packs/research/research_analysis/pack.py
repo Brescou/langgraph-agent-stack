@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import threading
 import uuid
 from collections.abc import AsyncIterator
 from concurrent.futures import ThreadPoolExecutor
@@ -97,6 +96,7 @@ class ResearchAnalysisPack(BaseDomainPack):
     )
     input_schema = ResearchAnalysisInput
     output_schema = ResearchAnalysisOutput
+    executor_thread_name_prefix = "agent-graph"
 
     def __init__(
         self,
@@ -126,8 +126,6 @@ class ResearchAnalysisPack(BaseDomainPack):
         self.run_id = run_id or str(uuid.uuid4())
         self._checkpointer = checkpointer or create_checkpointer(get_settings())
         self._connector = connector
-        self._executor: ThreadPoolExecutor | None = None
-        self._executor_lock = threading.Lock()
         self._research_agent: ResearchAgent | None = None
         self._analyst_agent: AnalystAgent | None = None
         self._graph = self._build_graph()
@@ -550,22 +548,3 @@ class ResearchAnalysisPack(BaseDomainPack):
             budget_usd=self._budget_usd,
         )
         return agent.run_structured(query.strip())
-
-    # ------------------------------------------------------------------
-    # Lifecycle
-    # ------------------------------------------------------------------
-
-    def close(self) -> None:
-        if self._executor is not None:
-            self._executor.shutdown(wait=True)
-            self._executor = None
-
-    def _get_executor(self) -> ThreadPoolExecutor:
-        if self._executor is None:
-            with self._executor_lock:
-                if self._executor is None:
-                    self._executor = ThreadPoolExecutor(
-                        max_workers=get_settings().thread_pool_max_workers,
-                        thread_name_prefix="agent-graph",
-                    )
-        return self._executor

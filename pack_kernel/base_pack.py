@@ -9,10 +9,14 @@ pack_id, name, and description are required metadata used by PackRegistry.
 from __future__ import annotations
 
 import abc
+import threading
 from collections.abc import AsyncIterator
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, ClassVar
 
 from pydantic import BaseModel
+
+from core.config import get_settings
 
 # ---------------------------------------------------------------------------
 # Canonical SSE event shape (wire format for all pack stream consumers)
@@ -118,6 +122,9 @@ class BaseDomainPack(abc.ABC):
     version: ClassVar[str] = "1.0"
     input_schema: ClassVar[type[BaseModel]] = _DefaultPackInput
     output_schema: ClassVar[type[BaseModel]] = _DefaultPackOutput
+    # Thread name prefix for the lazily-created executor (see _get_executor).
+    # Defaults to "<pack_id>-pack" when left as None.
+    executor_thread_name_prefix: ClassVar[str | None] = None
 
     def __init__(
         self,
@@ -132,6 +139,8 @@ class BaseDomainPack(abc.ABC):
         self._llm = llm
         self._checkpointer = checkpointer
         self._budget_usd = budget_usd
+        self._executor: ThreadPoolExecutor | None = None
+        self._executor_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # Abstract interface
@@ -178,11 +187,37 @@ class BaseDomainPack(abc.ABC):
         return 0.0
 
     # ------------------------------------------------------------------
+    # Shared blocking-call executor (lazy init + close)
+    # ------------------------------------------------------------------
+
+    def _get_executor(self) -> ThreadPoolExecutor:
+        """Return the pack's thread pool for blocking ``run()`` calls.
+
+        Lazily created on first use (double-checked locking) with
+        ``Settings.thread_pool_max_workers`` workers and the pack's
+        ``executor_thread_name_prefix`` (default: ``"<pack_id>-pack"``).
+        """
+        if self._executor is None:
+            with self._executor_lock:
+                if self._executor is None:
+                    prefix = (
+                        self.executor_thread_name_prefix or f"{self.pack_id}-pack"
+                    )
+                    self._executor = ThreadPoolExecutor(
+                        max_workers=get_settings().thread_pool_max_workers,
+                        thread_name_prefix=prefix,
+                    )
+        return self._executor
+
+    # ------------------------------------------------------------------
     # Optional lifecycle hooks
     # ------------------------------------------------------------------
 
     def close(self) -> None:
         """Release any resources held by the pack (thread pools, connections)."""
+        if self._executor is not None:
+            self._executor.shutdown(wait=True)
+            self._executor = None
 
     def __enter__(self) -> BaseDomainPack:
         return self

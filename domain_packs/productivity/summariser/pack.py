@@ -10,10 +10,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import threading
 import uuid
 from collections.abc import AsyncIterator
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from langgraph.graph import END, StateGraph
@@ -68,8 +66,6 @@ class SummariserPack(BaseDomainPack):
         )
         self.run_id = run_id or str(uuid.uuid4())
         self._checkpointer = checkpointer or create_checkpointer(get_settings())
-        self._executor: ThreadPoolExecutor | None = None
-        self._executor_lock = threading.Lock()
         self._graph = self._build_graph()
 
     def _build_graph(self) -> Any:
@@ -192,18 +188,3 @@ class SummariserPack(BaseDomainPack):
         inp = SummaryInput(text=query, bullet_count=3)
         async for event in self._iter_stream_events_from_input(inp):
             yield event
-
-    def close(self) -> None:
-        if self._executor is not None:
-            self._executor.shutdown(wait=True)
-            self._executor = None
-
-    def _get_executor(self) -> ThreadPoolExecutor:
-        if self._executor is None:
-            with self._executor_lock:
-                if self._executor is None:
-                    self._executor = ThreadPoolExecutor(
-                        max_workers=get_settings().thread_pool_max_workers,
-                        thread_name_prefix="summariser-pack",
-                    )
-        return self._executor

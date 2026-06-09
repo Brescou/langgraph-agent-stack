@@ -306,12 +306,24 @@ class AnalystAgent(BaseAgent):
     # ------------------------------------------------------------------
 
     def _execute(self, query: str, research_dict: dict[str, Any]) -> AgentState:
-        """Execute the analysis graph and return the final state."""
+        """Execute the analysis graph and return the final state.
+
+        Validates the serialised ``ResearchResult`` contract before invoking
+        the graph so that malformed payloads from upstream orchestrators fail
+        fast with a clear error instead of corrupting downstream nodes.
+        """
         if not query or not query.strip():
             raise AgentValidationError(f"[{self.name}] Query must not be empty.")
         query = input_validator.validate(query)
+        try:
+            research_result = ResearchResult.from_dict(research_dict)
+        except ValueError as exc:
+            raise AgentValidationError(
+                f"[{self.name}] Invalid ResearchResult payload from "
+                f"ResearchAgent: {exc}"
+            ) from exc
         initial_state = self._make_initial_state(query)
-        initial_state["context"][self._CTX_RESEARCH] = research_dict
+        initial_state["context"][self._CTX_RESEARCH] = research_result.to_dict()
         self._log.info(
             "Starting analysis run",
             extra={"query": research_dict.get("query", "")[:120]},

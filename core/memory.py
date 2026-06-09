@@ -56,12 +56,37 @@ from datetime import UTC, datetime
 from pathlib import Path
 from types import TracebackType
 from typing import Any, Protocol, cast, runtime_checkable
+from urllib.parse import urlparse
 
 from langgraph.checkpoint.memory import MemorySaver
 
 from core.config import MemoryBackend, Settings
 
 logger = logging.getLogger(__name__)
+
+
+def _redact_url(url: str) -> str:
+    """Return ``scheme://host:port/...`` with credentials stripped for logging.
+
+    Robust to URLs without credentials and to malformed inputs: when no
+    hostname can be parsed the constant ``"[REDACTED]"`` is returned so a
+    secret can never leak into log sinks.
+
+    Args:
+        url: Connection URL/DSN, possibly containing ``user:password@``.
+
+    Returns:
+        The URL without userinfo, query, or fragment — or ``"[REDACTED]"``.
+    """
+    try:
+        parsed = urlparse(url)
+        host = parsed.hostname
+        if not host:
+            return "[REDACTED]"
+        netloc = f"{host}:{parsed.port}" if parsed.port is not None else host
+        return f"{parsed.scheme}://{netloc}{parsed.path}"
+    except ValueError:
+        return "[REDACTED]"
 
 
 def _fallback_or_raise(message: str) -> MemorySaver:
@@ -213,7 +238,7 @@ def _create_redis_checkpointer(redis_url: str) -> Any:
         _set_checkpointer_cm(conn)
         logger.info(
             "Checkpointer: RedisSaver initialised",
-            extra={"url": redis_url.split("@")[-1]},
+            extra={"url": _redact_url(redis_url)},
         )
         return checkpointer
 
@@ -221,7 +246,7 @@ def _create_redis_checkpointer(redis_url: str) -> Any:
         logger.warning(
             "langgraph-checkpoint-redis not installed — falling back to "
             "MemorySaver.  Install with: pip install langgraph-checkpoint-redis",
-            extra={"redis_url": redis_url.split("@")[-1]},
+            extra={"redis_url": _redact_url(redis_url)},
         )
         return _fallback_or_raise("langgraph-checkpoint-redis not installed.")
 
@@ -268,7 +293,7 @@ def _create_postgres_checkpointer(postgres_url: str | None) -> Any:
         checkpointer.setup()
         logger.info(
             "Checkpointer: PostgresSaver initialised (tables created)",
-            extra={"url": postgres_url.split("@")[-1]},
+            extra={"url": _redact_url(postgres_url)},
         )
         return checkpointer
 
@@ -276,7 +301,7 @@ def _create_postgres_checkpointer(postgres_url: str | None) -> Any:
         logger.warning(
             "langgraph-checkpoint-postgres not installed — falling back to "
             "MemorySaver.  Install with: uv sync --extra postgres",
-            extra={"postgres_url": postgres_url.split("@")[-1]},
+            extra={"postgres_url": _redact_url(postgres_url)},
         )
         return _fallback_or_raise("langgraph-checkpoint-postgres not installed.")
 
@@ -766,7 +791,7 @@ class RedisRunHistory:
         self._prefix = self._KEY_PREFIX
         logger.info(
             "RedisRunHistory initialised",
-            extra={"url": redis_url.split("@")[-1]},
+            extra={"url": _redact_url(redis_url)},
         )
 
     def _run_key(self, run_id: str) -> str:
@@ -937,7 +962,7 @@ class PostgresRunHistory:
         self._conn.execute(self._DDL)
         logger.info(
             "PostgresRunHistory initialised",
-            extra={"url": postgres_url.split("@")[-1]},
+            extra={"url": _redact_url(postgres_url)},
         )
 
     def save_run(
