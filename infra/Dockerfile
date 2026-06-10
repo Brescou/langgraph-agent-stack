@@ -6,7 +6,7 @@
 # Pin to a specific patch version for reproducibility across builds.
 # For stricter supply-chain control, append @sha256:<digest> for your target platform.
 
-FROM python:3.13-slim AS builder
+FROM python:3.14-slim AS builder
 
 # Prevent Python from writing .pyc files and enable unbuffered stdout/stderr
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -51,7 +51,7 @@ RUN uv sync --locked --no-dev \
 # Minimal image that only carries the application code and pre-built venv.
 # Runs as a non-root user for defence-in-depth.
 # =============================================================================
-FROM python:3.13-slim AS runtime
+FROM python:3.14-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
