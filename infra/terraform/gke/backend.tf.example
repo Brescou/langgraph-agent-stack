@@ -1,0 +1,20 @@
+# Remote state backend for the GKE deployment — REQUIRED for production.
+#
+# Local state stores secrets in plaintext, has no locking and no history.
+# To enable: copy this file to backend.tf, fill in your bucket, then run:
+#   terraform init -migrate-state
+#
+# The GCS bucket must exist beforehand, with versioning enabled:
+#   gcloud storage buckets create gs://YOUR-TFSTATE-BUCKET \
+#     --location=EU --uniform-bucket-level-access
+#   gcloud storage buckets update gs://YOUR-TFSTATE-BUCKET --versioning
+#
+# GCS encrypts state at rest by default (Google-managed keys); set
+# encryption_key below for CMEK. Locking is built in (no extra setup).
+
+terraform {
+  backend "gcs" {
+    bucket = "YOUR-TFSTATE-BUCKET"
+    prefix = "langgraph-agent-stack/gke"
+  }
+}

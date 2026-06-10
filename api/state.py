@@ -44,6 +44,34 @@ shutting_down: threading.Event = threading.Event()
 _init_lock: threading.Lock = threading.Lock()
 
 # ---------------------------------------------------------------------------
+# In-flight session registry — dedupes concurrent runs per session_id
+# ---------------------------------------------------------------------------
+
+_inflight_sessions: set[str] = set()
+_inflight_sessions_lock: threading.Lock = threading.Lock()
+
+
+def try_acquire_session(session_id: str) -> bool:
+    """Mark *session_id* as having a run in flight.
+
+    Returns:
+        True if the session was free and is now marked in flight;
+        False if a run is already in progress for this session.
+    """
+    with _inflight_sessions_lock:
+        if session_id in _inflight_sessions:
+            return False
+        _inflight_sessions.add(session_id)
+        return True
+
+
+def release_session(session_id: str) -> None:
+    """Release the in-flight marker for *session_id* (idempotent)."""
+    with _inflight_sessions_lock:
+        _inflight_sessions.discard(session_id)
+
+
+# ---------------------------------------------------------------------------
 # Accessor helpers (lazy-retry on None)
 # ---------------------------------------------------------------------------
 

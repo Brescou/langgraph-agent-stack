@@ -1,0 +1,24 @@
+# Remote state backend for the AKS deployment — REQUIRED for production.
+#
+# Local state stores secrets in plaintext, has no locking and no history.
+# To enable: copy this file to backend.tf, fill in your storage account, then:
+#   terraform init -migrate-state
+#
+# The storage account and container must exist beforehand:
+#   az group create --name YOUR-TFSTATE-RG --location westeurope
+#   az storage account create --name yourtfstatesa \
+#     --resource-group YOUR-TFSTATE-RG --sku Standard_LRS \
+#     --allow-blob-public-access false
+#   az storage container create --name tfstate --account-name yourtfstatesa
+#
+# Azure Blob Storage provides locking via blob leases and encrypts at rest
+# by default.
+
+terraform {
+  backend "azurerm" {
+    resource_group_name  = "YOUR-TFSTATE-RG"
+    storage_account_name = "yourtfstatesa"
+    container_name       = "tfstate"
+    key                  = "langgraph-agent-stack-aks.tfstate"
+  }
+}

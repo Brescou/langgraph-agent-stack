@@ -7,6 +7,7 @@ Each router exposes typed /run and /run/stream endpoints for one pack.
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import logging
 import uuid
@@ -37,6 +38,12 @@ from pack_kernel.base_pack import normalize_pack_stream_event
 from pack_kernel.registry import PackRegistry
 
 logger = logging.getLogger(__name__)
+
+#: Maximum time (seconds) granted to history persistence before giving up.
+SAVE_RUN_TIMEOUT_SECONDS = 5.0
+
+#: Detail message returned when a session already has a run in flight.
+SESSION_IN_FLIGHT_DETAIL = "A run is already in progress for this session."
 
 
 def _pack_has_structured_input(pack_cls: type) -> bool:
@@ -104,6 +111,45 @@ async def _run_in_executor(fn: Any, *args: Any) -> Any:
             active_pipelines.dec()
 
 
+async def _save_run_best_effort(
+    *,
+    run_id: str,
+    query: str,
+    result: dict[str, Any],
+    metadata: dict[str, Any],
+    session_id: str | None = None,
+) -> None:
+    """Persist run history without ever failing the request.
+
+    The save is best-effort: the client response is already computed, so a
+    slow or broken history backend must neither block nor fail the request.
+    Bounded by ``SAVE_RUN_TIMEOUT_SECONDS``; all errors are logged as warnings.
+    """
+    if state.shared_memory is None:
+        return
+    save_fn = functools.partial(
+        state.shared_memory.save_run,
+        run_id=run_id,
+        query=query,
+        result=result,
+        metadata=metadata,
+    )
+    try:
+        await asyncio.wait_for(
+            _run_in_executor(save_fn), timeout=SAVE_RUN_TIMEOUT_SECONDS
+        )
+    except TimeoutError:
+        logger.warning(
+            "save_run — timed out, run history not persisted",
+            extra={"run_id": run_id, "session_id": session_id},
+        )
+    except Exception as exc:
+        logger.warning(
+            "save_run — failed, run history not persisted",
+            extra={"run_id": run_id, "session_id": session_id, "error": str(exc)},
+        )
+
+
 def build_pack_router(
     pack_id: str,
     pack_cls: type,
@@ -126,15 +172,17 @@ def build_pack_router(
             )
         run_id = str(uuid.uuid4())
         requested_version = request.headers.get("X-Pack-Version") or None
+        session_id = getattr(body, "session_id", None) or None
 
-        if requested_version is None and state.shared_memory is not None:
-            session_id = getattr(body, "session_id", None) or None
-            if session_id and hasattr(
-                state.shared_memory, "get_pack_version_for_session"
-            ):
-                requested_version = state.shared_memory.get_pack_version_for_session(
-                    session_id, pack_id
-                )
+        if (
+            requested_version is None
+            and state.shared_memory is not None
+            and session_id
+            and hasattr(state.shared_memory, "get_pack_version_for_session")
+        ):
+            requested_version = state.shared_memory.get_pack_version_for_session(
+                session_id, pack_id
+            )
 
         try:
             pack_cls_to_use = PackRegistry.get(
@@ -172,7 +220,7 @@ def build_pack_router(
                 status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)
             ) from exc
 
-        def _execute() -> Any:
+        def _execute() -> tuple[Any, dict[str, Any]]:
             with pack_cls_to_use(
                 run_id=run_id,
                 llm=state.get_shared_llm(),
@@ -188,38 +236,45 @@ def build_pack_router(
                     if hasattr(result, "model_dump")
                     else {}
                 )
-                if state.shared_memory is not None:
-                    session_id_for_history = getattr(body, "session_id", None) or None
-                    state.shared_memory.save_run(
-                        run_id=run_id,
-                        query=query,
-                        result=result_payload,
-                        metadata={
-                            "pack_id": pack_id,
-                            "pack_version": used_version,
-                            **(
-                                {"session_id": session_id_for_history}
-                                if session_id_for_history
-                                else {}
-                            ),
-                        },
-                    )
-                return _serialize_pack_result(result, output_model, cost_usd)
+                serialized = _serialize_pack_result(result, output_model, cost_usd)
+                return serialized, result_payload
 
+        if session_id and not state.try_acquire_session(session_id):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=SESSION_IN_FLIGHT_DETAIL,
+            )
         try:
-            return await _run_in_executor(_execute)
-        except AgentBudgetExceededError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=str(exc)
-            ) from exc
-        except AgentTimeoutError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=str(exc)
-            ) from exc
-        except (AgentExecutionError, AgentValidationError) as exc:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
-            ) from exc
+            try:
+                serialized, result_payload = await _run_in_executor(_execute)
+            except AgentBudgetExceededError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=str(exc)
+                ) from exc
+            except AgentTimeoutError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=str(exc)
+                ) from exc
+            except (AgentExecutionError, AgentValidationError) as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+                ) from exc
+
+            await _save_run_best_effort(
+                run_id=run_id,
+                query=query,
+                result=result_payload,
+                metadata={
+                    "pack_id": pack_id,
+                    "pack_version": used_version,
+                    **({"session_id": session_id} if session_id else {}),
+                },
+                session_id=session_id,
+            )
+            return serialized
+        finally:
+            if session_id:
+                state.release_session(session_id)
 
     run_pack.__annotations__["body"] = input_model
     router.add_api_route(
@@ -242,14 +297,16 @@ def build_pack_router(
             )
         run_id = str(uuid.uuid4())
         requested_version = request.headers.get("X-Pack-Version") or None
-        if requested_version is None and state.shared_memory is not None:
-            session_id = getattr(body, "session_id", None) or None
-            if session_id and hasattr(
-                state.shared_memory, "get_pack_version_for_session"
-            ):
-                requested_version = state.shared_memory.get_pack_version_for_session(
-                    session_id, pack_id
-                )
+        session_id = getattr(body, "session_id", None) or None
+        if (
+            requested_version is None
+            and state.shared_memory is not None
+            and session_id
+            and hasattr(state.shared_memory, "get_pack_version_for_session")
+        ):
+            requested_version = state.shared_memory.get_pack_version_for_session(
+                session_id, pack_id
+            )
 
         try:
             pack_cls_to_use = PackRegistry.get(
@@ -319,6 +376,12 @@ def build_pack_router(
 
         stream_timeout = effective_stream_timeout_seconds(pack_id, get_settings())
 
+        if session_id and not state.try_acquire_session(session_id):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=SESSION_IN_FLIGHT_DETAIL,
+            )
+
         async def _timed_event_generator() -> AsyncGenerator[str, None]:
             try:
                 async with asyncio.timeout(stream_timeout):
@@ -326,6 +389,9 @@ def build_pack_router(
                         yield chunk
             except TimeoutError:
                 yield f"data: {json.dumps({'type': 'error', 'message': f'Stream timed out after {stream_timeout}s'})}\n\n"
+            finally:
+                if session_id:
+                    state.release_session(session_id)
 
         return StreamingResponse(
             _timed_event_generator(),

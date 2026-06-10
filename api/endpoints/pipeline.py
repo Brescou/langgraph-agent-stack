@@ -30,6 +30,7 @@ from api.dependencies import (
     validate_pack_query,
 )
 from api.models import ResearchRequest, ResearchResponse, RunRequest, RunResponse
+from api.router_factory import SESSION_IN_FLIGHT_DETAIL, _save_run_best_effort
 from control_plane.enforce import effective_stream_timeout_seconds
 from core.config import Settings, get_settings
 from core.observability import active_pipelines
@@ -104,7 +105,7 @@ async def run_pipeline(
         },
     )
 
-    def _execute() -> RunResponse:
+    def _execute() -> tuple[RunResponse, dict[str, Any]]:
         with pack_cls(
             run_id=run_id,
             llm=state.shared_llm,
@@ -113,58 +114,77 @@ async def run_pipeline(
         ) as pipeline:
             report = pipeline.run(query)
             cost_usd = getattr(pipeline, "cost_usd", None)
-            if state.shared_memory is not None:
-                state.shared_memory.save_run(
-                    run_id=run_id,
-                    query=query,
-                    result=report.to_dict() if hasattr(report, "to_dict") else {},
-                    metadata={"session_id": session_id, "agent": "MultiAgentGraph"},
-                )
-            return RunResponse.from_analysis_report(
-                report, session_id=session_id, cost_usd=cost_usd
+            report_payload = report.to_dict() if hasattr(report, "to_dict") else {}
+            return (
+                RunResponse.from_analysis_report(
+                    report, session_id=session_id, cost_usd=cost_usd
+                ),
+                report_payload,
             )
 
+    if body.session_id and not state.try_acquire_session(session_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=SESSION_IN_FLIGHT_DETAIL,
+        )
     try:
-        response = await _run_in_executor(_execute)
-    except AgentValidationError as exc:
-        logger.warning(
-            "POST /run — validation error", extra={"run_id": run_id, "error": str(exc)}
+        try:
+            response, report_payload = await _run_in_executor(_execute)
+        except AgentValidationError as exc:
+            logger.warning(
+                "POST /run — validation error",
+                extra={"run_id": run_id, "error": str(exc)},
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+        except AgentTimeoutError as exc:
+            logger.error(
+                "POST /run — pipeline timeout",
+                extra={"run_id": run_id, "error": str(exc)},
+            )
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail="The agent pipeline exceeded its step budget. Try a simpler query.",
+            ) from exc
+        except AgentBudgetExceededError as exc:
+            logger.warning(
+                "POST /run — budget exceeded",
+                extra={"run_id": run_id, "error": str(exc)},
+            )
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail="Run cost budget exceeded.",
+            ) from exc
+        except AgentExecutionError as exc:
+            logger.error(
+                "POST /run — execution error",
+                extra={"run_id": run_id, "error": str(exc)},
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="The agent pipeline encountered an internal error.",
+            ) from exc
+        except Exception as exc:
+            logger.exception(
+                "POST /run — unexpected error",
+                extra={"run_id": run_id, "error": str(exc)},
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="An unexpected error occurred.",
+            ) from exc
+
+        await _save_run_best_effort(
+            run_id=run_id,
+            query=query,
+            result=report_payload,
+            metadata={"session_id": session_id, "agent": "MultiAgentGraph"},
+            session_id=session_id,
         )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
-        ) from exc
-    except AgentTimeoutError as exc:
-        logger.error(
-            "POST /run — pipeline timeout", extra={"run_id": run_id, "error": str(exc)}
-        )
-        raise HTTPException(
-            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-            detail="The agent pipeline exceeded its step budget. Try a simpler query.",
-        ) from exc
-    except AgentBudgetExceededError as exc:
-        logger.warning(
-            "POST /run — budget exceeded", extra={"run_id": run_id, "error": str(exc)}
-        )
-        raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail="Run cost budget exceeded.",
-        ) from exc
-    except AgentExecutionError as exc:
-        logger.error(
-            "POST /run — execution error", extra={"run_id": run_id, "error": str(exc)}
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="The agent pipeline encountered an internal error.",
-        ) from exc
-    except Exception as exc:
-        logger.exception(
-            "POST /run — unexpected error", extra={"run_id": run_id, "error": str(exc)}
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An unexpected error occurred.",
-        ) from exc
+    finally:
+        if body.session_id:
+            state.release_session(session_id)
 
     logger.info(
         "POST /run — pipeline completed",
@@ -232,18 +252,13 @@ async def _stream_pipeline(
             },
         )
 
-        if state.shared_memory is not None:
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(
-                state.executor,
-                functools.partial(
-                    state.shared_memory.save_run,
-                    run_id=run_id,
-                    query=query,
-                    result=report.to_dict(),
-                    metadata={"session_id": session_id, "agent": "stream_pipeline"},
-                ),
-            )
+        await _save_run_best_effort(
+            run_id=run_id,
+            query=query,
+            result=report.to_dict(),
+            metadata={"session_id": session_id, "agent": "stream_pipeline"},
+            session_id=session_id,
+        )
 
         done_payload = {
             "type": "done",
@@ -331,6 +346,12 @@ async def run_stream(
         },
     )
 
+    if body.session_id and not state.try_acquire_session(session_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=SESSION_IN_FLIGHT_DETAIL,
+        )
+
     async def _guarded_stream() -> AsyncGenerator[str, None]:
         try:
             async with asyncio.timeout(stream_timeout):
@@ -340,6 +361,9 @@ async def run_stream(
                     yield event
         except TimeoutError:
             yield f"data: {json.dumps({'type': 'error', 'message': f'Stream timed out after {stream_timeout}s'})}\n\n"
+        finally:
+            if body.session_id:
+                state.release_session(session_id)
 
     return StreamingResponse(
         _guarded_stream(),
@@ -400,7 +424,7 @@ async def run_research(
         },
     )
 
-    def _execute() -> ResearchResponse:
+    def _execute() -> tuple[ResearchResponse, dict[str, Any]]:
         agent = ResearchAgent(
             thread_id=run_id,
             llm=state.shared_llm,
@@ -408,19 +432,15 @@ async def run_research(
         )
         result = agent.run_structured(query)
         cost_usd = getattr(agent, "cost_usd", None)
-        if state.shared_memory is not None:
-            state.shared_memory.save_run(
-                run_id=run_id,
-                query=query,
-                result=result.to_dict(),
-                metadata={"session_id": session_id, "agent": "ResearchAgent"},
-            )
-        return ResearchResponse.from_research_result(
-            result, session_id=session_id, cost_usd=cost_usd
+        return (
+            ResearchResponse.from_research_result(
+                result, session_id=session_id, cost_usd=cost_usd
+            ),
+            result.to_dict(),
         )
 
     try:
-        response = await _run_in_executor(_execute)
+        response, result_payload = await _run_in_executor(_execute)
     except AgentValidationError as exc:
         logger.warning(
             "POST /research — validation error",
@@ -464,6 +484,14 @@ async def run_research(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An unexpected error occurred.",
         ) from exc
+
+    await _save_run_best_effort(
+        run_id=run_id,
+        query=query,
+        result=result_payload,
+        metadata={"session_id": session_id, "agent": "ResearchAgent"},
+        session_id=session_id,
+    )
 
     logger.info(
         "POST /research — completed",

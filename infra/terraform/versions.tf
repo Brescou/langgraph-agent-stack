@@ -22,7 +22,10 @@ terraform {
 #   * No history or audit trail
 #
 # REQUIRED for production: configure a remote backend in the cloud-specific
-# entry-point directory (gke/, eks/, or aks/).
+# entry-point directory (gke/, eks/, or aks/). Each directory ships a ready
+# template — copy it and migrate the state:
+#   cp gke/backend.tf.example gke/backend.tf   # then edit the bucket name
+#   terraform -chdir=gke init -migrate-state
 #
 # For GCP (GCS):
 #   terraform {

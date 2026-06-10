@@ -1,0 +1,23 @@
+# Remote state backend for the EKS deployment — REQUIRED for production.
+#
+# Local state stores secrets in plaintext, has no locking and no history.
+# To enable: copy this file to backend.tf, fill in your bucket/region, then:
+#   terraform init -migrate-state
+#
+# The S3 bucket must exist beforehand, with versioning and encryption:
+#   aws s3api create-bucket --bucket YOUR-TFSTATE-BUCKET --region us-east-1
+#   aws s3api put-bucket-versioning --bucket YOUR-TFSTATE-BUCKET \
+#     --versioning-configuration Status=Enabled
+#
+# use_lockfile (Terraform >= 1.10) provides S3-native locking without a
+# DynamoDB table; on older Terraform use dynamodb_table instead.
+
+terraform {
+  backend "s3" {
+    bucket       = "YOUR-TFSTATE-BUCKET"
+    key          = "langgraph-agent-stack/eks/terraform.tfstate"
+    region       = "us-east-1"
+    encrypt      = true
+    use_lockfile = true
+  }
+}

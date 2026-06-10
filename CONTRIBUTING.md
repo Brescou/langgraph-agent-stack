@@ -221,6 +221,19 @@ See `domain_packs/research/research_only/` for a minimal second-pack example alr
 
 When `CONNECTOR_ENABLED=true`, the API injects the connector resolved from `CONNECTOR_ID` into any pack whose constructor accepts `connector=` (see `api/dependencies.py` → `pack_runtime_kwargs`). To test locally without the API, pass `connector=...` to `ResearchAnalysisPack(...)`. Built-in ids are defined in `connectors/resolver.py` (`core/connectors.py` is a compat shim).
 
+## Terraform Remote State
+
+The Terraform roots under `infra/terraform/{gke,eks,aks}/` default to **local state**, which is fine for experiments but unsuitable for teams or production (state may contain secrets, has no locking and no history). Before any shared or production use, enable the remote backend:
+
+```bash
+cd infra/terraform/gke          # or eks/ / aks/
+cp backend.tf.example backend.tf
+# edit backend.tf: bucket / storage account names
+terraform init -migrate-state
+```
+
+Each `backend.tf.example` documents the one-time bucket/storage-account setup for its cloud. `*.tfstate` files are git-ignored; never commit them.
+
 ## Reporting Issues
 
 - Check existing issues before opening a new one.
