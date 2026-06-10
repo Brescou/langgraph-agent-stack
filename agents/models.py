@@ -1,13 +1,69 @@
-"""agents/models.py — Shared data models for agent outputs."""
+"""agents/models.py — Shared data models for agent outputs.
+
+``ResearchResult`` and ``AnalysisReport`` form the inter-agent contract
+between ``ResearchAgent`` and ``AnalystAgent``.  Both are strict Pydantic
+models (``extra="forbid"``) so that malformed payloads from upstream
+orchestrators fail fast with clear, aggregated error messages.
+"""
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
-from typing import Any, ClassVar
+from typing import Any, Self
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 
-@dataclass
-class ResearchResult:
+class _ContractModel(BaseModel):
+    """Base class for the strict inter-agent contract models."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise the model to a plain dictionary."""
+        return self.model_dump()
+
+    @classmethod
+    def from_dict(cls, data: Any) -> Self:
+        """Rebuild a model instance from a serialised dict, validating shape.
+
+        Args:
+            data: Dict produced by :meth:`to_dict` (possibly round-tripped
+                through JSON by an orchestrator).
+
+        Returns:
+            A populated model instance.
+
+        Raises:
+            ValueError: When ``data`` is not a dict, a required field is
+                missing, a field has the wrong type, or unknown fields are
+                present.
+        """
+        if not isinstance(data, dict):
+            raise ValueError(
+                f"{cls.__name__} payload must be a dict, got {type(data).__name__}."
+            )
+
+        try:
+            return cls.model_validate(data, strict=True)
+        except ValidationError as exc:
+            errors: list[str] = []
+            unknown: list[str] = []
+            for err in exc.errors():
+                loc = ".".join(str(part) for part in err["loc"])
+                if err["type"] == "missing":
+                    errors.append(f"missing required field '{loc}'")
+                elif err["type"] == "extra_forbidden":
+                    unknown.append(loc)
+                else:
+                    errors.append(f"field '{loc}': {err['msg']}")
+            if unknown:
+                errors.append(f"unknown fields: {', '.join(sorted(unknown))}")
+            raise ValueError(
+                f"Invalid {cls.__name__} payload: " + "; ".join(errors) + "."
+            ) from exc
+
+
+class ResearchResult(_ContractModel):
     """
     Structured output produced by the ResearchAgent.
 
@@ -21,84 +77,14 @@ class ResearchResult:
     """
 
     query: str
-    findings: list[str] = field(default_factory=list)
+    findings: list[str] = Field(default_factory=list)
     summary: str = ""
-    sources: list[str] = field(default_factory=list)
+    sources: list[str] = Field(default_factory=list)
     confidence: float = 0.0
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-    # Expected type per field — used by ``from_dict`` for shape validation.
-    _FIELD_TYPES: ClassVar[dict[str, type | tuple[type, ...]]] = {
-        "query": str,
-        "findings": list,
-        "summary": str,
-        "sources": list,
-        "confidence": (int, float),
-        "metadata": dict,
-    }
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialise the result to a plain dictionary."""
-        return asdict(self)
-
-    @classmethod
-    def from_dict(cls, data: Any) -> ResearchResult:
-        """Rebuild a ``ResearchResult`` from a serialised dict, validating shape.
-
-        Args:
-            data: Dict produced by :meth:`to_dict` (possibly round-tripped
-                through JSON by an orchestrator).
-
-        Returns:
-            A populated ``ResearchResult``.
-
-        Raises:
-            ValueError: When ``data`` is not a dict, a required field is
-                missing, a field has the wrong type, or unknown fields are
-                present.
-        """
-        if not isinstance(data, dict):
-            raise ValueError(
-                f"ResearchResult payload must be a dict, got {type(data).__name__}."
-            )
-
-        errors: list[str] = []
-        if "query" not in data:
-            errors.append("missing required field 'query'")
-
-        unknown = sorted(set(data) - set(cls._FIELD_TYPES))
-        if unknown:
-            errors.append(f"unknown fields: {', '.join(unknown)}")
-
-        for name, expected in cls._FIELD_TYPES.items():
-            if name in data and not isinstance(data[name], expected):
-                expected_names = (
-                    "/".join(t.__name__ for t in expected)
-                    if isinstance(expected, tuple)
-                    else expected.__name__
-                )
-                errors.append(
-                    f"field '{name}' must be {expected_names}, "
-                    f"got {type(data[name]).__name__}"
-                )
-
-        for name in ("findings", "sources"):
-            value = data.get(name)
-            if isinstance(value, list) and not all(
-                isinstance(item, str) for item in value
-            ):
-                errors.append(f"field '{name}' must contain only strings")
-
-        if errors:
-            raise ValueError(
-                "Invalid ResearchResult payload: " + "; ".join(errors) + "."
-            )
-
-        return cls(**data)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-@dataclass
-class AnalysisReport:
+class AnalysisReport(_ContractModel):
     """
     Structured output produced by the AnalystAgent.
 
@@ -115,16 +101,12 @@ class AnalysisReport:
 
     query: str
     executive_summary: str = ""
-    key_insights: list[str] = field(default_factory=list)
-    patterns: list[str] = field(default_factory=list)
-    implications: list[str] = field(default_factory=list)
+    key_insights: list[str] = Field(default_factory=list)
+    patterns: list[str] = Field(default_factory=list)
+    implications: list[str] = Field(default_factory=list)
     confidence: float = 0.0
     research_summary: str = ""
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialise the report to a plain dictionary."""
-        return asdict(self)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     def to_markdown(self) -> str:
         """Render the report as a Markdown string."""

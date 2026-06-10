@@ -389,7 +389,7 @@ class AnalystAgent(BaseAgent):
             research_result: Structured output from ``ResearchAgent``.
 
         Returns:
-            A populated ``AnalysisReport`` dataclass.
+            A populated ``AnalysisReport`` model.
 
         Raises:
             AgentExecutionError: On unrecoverable graph errors.

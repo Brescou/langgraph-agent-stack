@@ -417,7 +417,7 @@ class ResearchAgent(BaseAgent):
             query: The research question or topic.
 
         Returns:
-            A populated ``ResearchResult`` dataclass.
+            A populated ``ResearchResult`` model.
 
         Raises:
             AgentExecutionError: On unrecoverable graph errors.
