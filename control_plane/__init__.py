@@ -76,6 +76,7 @@ _BUILTIN_POLICIES: tuple[PackPolicy, ...] = (
         labels=frozenset({"finance", "strategy", "regulated"}),
         human_review_required=True,
         compliance_disclaimer=FINANCIAL_MEMO_DISCLAIMER,
+        extensions={"output_integrity_fail_closed": True},
     ),
     PackPolicy(
         pack_id="talent_screening",
@@ -91,6 +92,7 @@ _BUILTIN_POLICIES: tuple[PackPolicy, ...] = (
         labels=frozenset({"hr", "recruiting", "regulated"}),
         human_review_required=True,
         compliance_disclaimer=JOB_DESCRIPTION_WRITER_DISCLAIMER,
+        extensions={"output_integrity_fail_closed": True},
     ),
     PackPolicy(
         pack_id="hr_policy_qa",
@@ -98,6 +100,7 @@ _BUILTIN_POLICIES: tuple[PackPolicy, ...] = (
         labels=frozenset({"hr", "rag", "regulated"}),
         human_review_required=True,
         compliance_disclaimer=HR_POLICY_QA_DISCLAIMER,
+        extensions={"output_integrity_fail_closed": True},
     ),
 )
 
