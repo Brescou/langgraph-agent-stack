@@ -57,7 +57,8 @@ def test_guard_fail_closed_blocks_talent_screening_injection() -> None:
         guard_llm_output("talent_screening", raw, json.loads(raw), run_id="run-1")
 
 
-def test_guard_audit_only_for_non_fail_closed_regulated_pack(caplog) -> None:
+def test_guard_fail_closed_for_financial_memo(caplog) -> None:
+    """financial_memo is now fail-closed — a critical finding raises ValueError at guard level."""
     caplog.set_level(logging.WARNING)
     raw = json.dumps(
         {
@@ -71,7 +72,8 @@ def test_guard_audit_only_for_non_fail_closed_regulated_pack(caplog) -> None:
             "confidence": 0.8,
         }
     )
-    guard_llm_output("financial_memo", raw, json.loads(raw), run_id="run-2")
+    with pytest.raises(ValueError, match="integrity check"):
+        guard_llm_output("financial_memo", raw, json.loads(raw), run_id="run-2")
     assert any("output integrity" in r.message.lower() for r in caplog.records)
 
 
