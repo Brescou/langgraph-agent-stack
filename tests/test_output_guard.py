@@ -58,9 +58,7 @@ def test_guard_fail_closed_blocks_talent_screening_injection() -> None:
 
 
 def test_guard_fail_closed_for_financial_memo(caplog) -> None:
-    """financial_memo is now fail-closed — a critical finding raises AgentExecutionError."""
-    from agents.base_agent import AgentExecutionError
-
+    """financial_memo is now fail-closed — a critical finding raises ValueError at guard level."""
     caplog.set_level(logging.WARNING)
     raw = json.dumps(
         {
