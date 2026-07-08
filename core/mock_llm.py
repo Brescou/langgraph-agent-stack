@@ -205,7 +205,9 @@ class MockProviderChatModel(BaseChatModel):
 
         bullet_count = _mock_plain_bullets.get()
         if bullet_count is not None:
-            return "\n".join(f"- Mock bullet {index + 1}" for index in range(bullet_count))
+            return "\n".join(
+                f"- Mock bullet {index + 1}" for index in range(bullet_count)
+            )
 
         index = _research_index()
         if index < len(RESEARCH_PIPELINE_RESPONSES):
