@@ -270,7 +270,10 @@ class StructuredLLMPack(BaseDomainPack):
                         f"{self.__class__.__name__} requires an LLM instance."
                     )
                 prompt = self.build_prompt(inp, reference_text=reference_text)
-                response = self._llm.invoke(prompt)
+                from core.mock_llm import mock_output_schema_context
+
+                with mock_output_schema_context(self.output_schema):
+                    response = self._llm.invoke(prompt)
                 raw = extract_text_content(
                     response.content if hasattr(response, "content") else response
                 )

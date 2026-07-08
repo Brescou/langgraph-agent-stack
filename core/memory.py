@@ -235,20 +235,21 @@ async def _init_sqlite_checkpointer(sqlite_path: str) -> Any:
 
 
 def _create_sqlite_checkpointer(sqlite_path: str) -> Any:
-    """Build an ``AsyncSqliteSaver`` checkpointer (sync factory / tests)."""
+    """Build a ``SqliteSaver`` checkpointer for sync ``run()`` callers (tests)."""
     db_path = Path(sqlite_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        from langgraph.checkpoint.sqlite.aio import (  # type: ignore[import]
-            AsyncSqliteSaver,
-        )
+        from langgraph.checkpoint.sqlite import SqliteSaver  # type: ignore[import]
 
-        cm = AsyncSqliteSaver.from_conn_string(str(db_path))
-        checkpointer = _sync_enter_async_checkpointer_cm(cm)
-        _set_async_checkpointer_cm(cm)
+        conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA busy_timeout=5000")
+        conn.execute("PRAGMA cache_size=1000")
+        checkpointer = SqliteSaver(conn)
         logger.info(
-            "Checkpointer: AsyncSqliteSaver initialised",
+            "Checkpointer: SqliteSaver initialised",
             extra={"path": str(db_path)},
         )
         return checkpointer
@@ -339,17 +340,15 @@ async def _init_redis_checkpointer(redis_url: str) -> Any:
 
 
 def _create_redis_checkpointer(redis_url: str) -> Any:
-    """Build an ``AsyncRedisSaver`` checkpointer (sync factory / tests)."""
+    """Build a ``RedisSaver`` checkpointer for sync ``run()`` callers (tests)."""
     try:
-        from langgraph.checkpoint.redis.aio import (  # type: ignore[import]
-            AsyncRedisSaver,
-        )
+        from langgraph.checkpoint.redis import RedisSaver  # type: ignore[import]
 
-        cm = AsyncRedisSaver.from_conn_string(redis_url)
-        checkpointer = _sync_enter_async_checkpointer_cm(cm)
-        _set_async_checkpointer_cm(cm)
+        conn = RedisSaver.from_conn_string(redis_url)
+        checkpointer = conn.__enter__()
+        _set_checkpointer_cm(conn)
         logger.info(
-            "Checkpointer: AsyncRedisSaver initialised",
+            "Checkpointer: RedisSaver initialised",
             extra={"url": _redact_url(redis_url)},
         )
         return checkpointer
@@ -398,7 +397,7 @@ async def _init_postgres_checkpointer(postgres_url: str | None) -> Any:
 
 
 def _create_postgres_checkpointer(postgres_url: str | None) -> Any:
-    """Build an ``AsyncPostgresSaver`` checkpointer (sync factory / tests)."""
+    """Build a ``PostgresSaver`` checkpointer for sync ``run()`` callers (tests)."""
     if not postgres_url:
         logger.warning(
             "MEMORY_BACKEND=postgres but POSTGRES_URL is not set — "
@@ -409,15 +408,16 @@ def _create_postgres_checkpointer(postgres_url: str | None) -> Any:
         )
 
     try:
-        from langgraph.checkpoint.postgres.aio import (  # type: ignore[import]
-            AsyncPostgresSaver,
+        from langgraph.checkpoint.postgres import (
+            PostgresSaver,  # type: ignore[import]
         )
 
-        cm = AsyncPostgresSaver.from_conn_string(postgres_url)
-        checkpointer = _sync_enter_async_checkpointer_cm(cm)
-        _set_async_checkpointer_cm(cm)
+        conn = PostgresSaver.from_conn_string(postgres_url)
+        checkpointer = conn.__enter__()
+        _set_checkpointer_cm(conn)
+        checkpointer.setup()
         logger.info(
-            "Checkpointer: AsyncPostgresSaver initialised (tables created)",
+            "Checkpointer: PostgresSaver initialised (tables created)",
             extra={"url": _redact_url(postgres_url)},
         )
         return checkpointer

@@ -273,51 +273,9 @@ def get_llm(config: LLMConfig) -> BaseChatModel:
             )
 
         case "mock":
-            from langchain_core.language_models.fake_chat_models import (
-                FakeListChatModel,
-            )
+            from core.mock_llm import MockProviderChatModel
 
-            # Ordered to match the exact sequence of LLM calls made by the
-            # research_analysis pipeline (ResearchAgent then AnalystAgent),
-            # 3 calls each — see agents/researcher.py and agents/analyst.py.
-            # FakeListChatModel returns these in order (cycling once
-            # exhausted), so misordering here silently produces incoherent
-            # mock output rather than an error.
-            responses = [
-                # ResearchAgent._node_research — query expansion
-                json.dumps(["sub-query 1", "sub-query 2", "sub-query 3"]),
-                # ResearchAgent._node_validate — sufficiency check
-                json.dumps({"sufficient": True, "reason": "Mock validation passed."}),
-                # ResearchAgent._node_summarize — final research summary
-                json.dumps(
-                    {
-                        "summary": "Mock research summary based on findings.",
-                        "confidence": 0.85,
-                    }
-                ),
-                # AnalystAgent._node_analyze — key insights
-                json.dumps(
-                    {
-                        "insights": [
-                            "Mock insight 1: Key trend identified.",
-                            "Mock insight 2: Pattern detected.",
-                        ],
-                        "confidence": 0.82,
-                    }
-                ),
-                # AnalystAgent._node_synthesize — patterns and implications
-                json.dumps(
-                    {
-                        "patterns": ["Mock pattern: Consistent growth."],
-                        "implications": [
-                            "Mock implication: Continued adoption expected."
-                        ],
-                    }
-                ),
-                # AnalystAgent._node_report — executive summary (plain text)
-                "Mock executive summary: The analysis reveals significant trends across the research domain.",
-            ]
-            return FakeListChatModel(responses=responses)
+            return MockProviderChatModel()
 
         case _:
             raise ValueError(

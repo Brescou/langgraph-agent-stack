@@ -33,16 +33,12 @@ class TestPostgresCheckpointerIntegration:
     """Exercise the full Postgres checkpointer creation path."""
 
     def test_postgres_checkpointer_lifecycle(self) -> None:
-        """create_checkpointer(postgres) → AsyncPostgresSaver with setup() called."""
-        from unittest.mock import AsyncMock, MagicMock, patch
-
+        """create_checkpointer(postgres) → PostgresSaver with setup() called."""
         mock_saver = MagicMock()
-        mock_saver.setup.return_value = None
         mock_ctx = MagicMock()
-        mock_ctx.__aenter__ = AsyncMock(return_value=mock_saver)
-        mock_ctx.__aexit__ = AsyncMock(return_value=None)
-        mock_aio_module = MagicMock()
-        mock_aio_module.AsyncPostgresSaver.from_conn_string.return_value = mock_ctx
+        mock_ctx.__enter__ = MagicMock(return_value=mock_saver)
+        mock_pg_module = MagicMock()
+        mock_pg_module.PostgresSaver.from_conn_string.return_value = mock_ctx
 
         mock_settings = MagicMock()
         mock_settings.memory_backend = "postgres"
@@ -51,12 +47,12 @@ class TestPostgresCheckpointerIntegration:
 
         with patch.dict(
             "sys.modules",
-            {"langgraph.checkpoint.postgres.aio": mock_aio_module},
+            {"langgraph.checkpoint.postgres": mock_pg_module},
         ):
             result = create_checkpointer(mock_settings)
 
         assert result is mock_saver
-        mock_aio_module.AsyncPostgresSaver.from_conn_string.assert_called_once_with(
+        mock_pg_module.PostgresSaver.from_conn_string.assert_called_once_with(
             "postgresql+psycopg://user:pass@db:5432/app"
         )
         mock_saver.setup.assert_called_once()
@@ -109,15 +105,12 @@ class TestRedisCheckpointerIntegration:
     """Exercise the full Redis checkpointer creation path."""
 
     def test_redis_checkpointer_lifecycle(self) -> None:
-        """create_checkpointer(redis) → AsyncRedisSaver with correct URL."""
-        from unittest.mock import AsyncMock
-
+        """create_checkpointer(redis) → RedisSaver with correct URL."""
         mock_saver = MagicMock()
         mock_ctx = MagicMock()
-        mock_ctx.__aenter__ = AsyncMock(return_value=mock_saver)
-        mock_ctx.__aexit__ = AsyncMock(return_value=None)
-        mock_aio_module = MagicMock()
-        mock_aio_module.AsyncRedisSaver.from_conn_string.return_value = mock_ctx
+        mock_ctx.__enter__ = MagicMock(return_value=mock_saver)
+        mock_redis_module = MagicMock()
+        mock_redis_module.RedisSaver.from_conn_string.return_value = mock_ctx
 
         mock_settings = MagicMock()
         mock_settings.memory_backend = "redis"
@@ -126,12 +119,12 @@ class TestRedisCheckpointerIntegration:
 
         with patch.dict(
             "sys.modules",
-            {"langgraph.checkpoint.redis.aio": mock_aio_module},
+            {"langgraph.checkpoint.redis": mock_redis_module},
         ):
             result = create_checkpointer(mock_settings)
 
         assert result is mock_saver
-        mock_aio_module.AsyncRedisSaver.from_conn_string.assert_called_once_with(
+        mock_redis_module.RedisSaver.from_conn_string.assert_called_once_with(
             "redis://:secret@redis-host:6379/0"
         )
 

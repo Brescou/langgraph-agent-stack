@@ -164,6 +164,10 @@ class AnalysisOnlyPack(BaseDomainPack):
         return self.run_from_input(inp)
 
     def _run_research(self, research: ResearchResult) -> AnalysisReport:
+        from core.mock_llm import reset_mock_research_sequence
+
+        reset_mock_research_sequence(start=3)
+
         initial: AnalysisOnlyState = {
             "research_result": research.to_dict(),
             "analysis_report": None,

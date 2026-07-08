@@ -362,26 +362,25 @@ def test_get_run_with_corrupted_json(memory: ConversationMemory) -> None:
 
 
 def test_create_checkpointer_redis_with_mock():
-    """create_checkpointer returns AsyncRedisSaver when redis package is available."""
-    from unittest.mock import AsyncMock, MagicMock, patch
+    """create_checkpointer returns RedisSaver when redis package is available."""
+    from unittest.mock import MagicMock, patch
 
     mock_redis_saver = MagicMock()
     mock_ctx = MagicMock()
-    mock_ctx.__aenter__ = AsyncMock(return_value=mock_redis_saver)
-    mock_ctx.__aexit__ = AsyncMock(return_value=None)
-    mock_aio_module = MagicMock()
-    mock_aio_module.AsyncRedisSaver.from_conn_string.return_value = mock_ctx
+    mock_ctx.__enter__ = MagicMock(return_value=mock_redis_saver)
+    mock_redis_module = MagicMock()
+    mock_redis_module.RedisSaver.from_conn_string.return_value = mock_ctx
 
     with patch.dict(
         "sys.modules",
-        {"langgraph.checkpoint.redis.aio": mock_aio_module},
+        {"langgraph.checkpoint.redis": mock_redis_module},
     ):
         from core.memory import _create_redis_checkpointer
 
         result = _create_redis_checkpointer("redis://localhost:6379/0")
 
     assert result is mock_redis_saver
-    mock_aio_module.AsyncRedisSaver.from_conn_string.assert_called_once_with(
+    mock_redis_module.RedisSaver.from_conn_string.assert_called_once_with(
         "redis://localhost:6379/0"
     )
 
@@ -404,20 +403,18 @@ def test_create_checkpointer_postgres_missing_url():
 
 
 def test_create_checkpointer_postgres_sync_with_setup():
-    """AsyncPostgresSaver is used and setup() is called on creation."""
-    from unittest.mock import AsyncMock, MagicMock, patch
+    """PostgresSaver (sync) is used and setup() is called on creation."""
+    from unittest.mock import MagicMock, patch
 
     mock_saver = MagicMock()
-    mock_saver.setup.return_value = None
     mock_ctx = MagicMock()
-    mock_ctx.__aenter__ = AsyncMock(return_value=mock_saver)
-    mock_ctx.__aexit__ = AsyncMock(return_value=None)
-    mock_aio_module = MagicMock()
-    mock_aio_module.AsyncPostgresSaver.from_conn_string.return_value = mock_ctx
+    mock_ctx.__enter__ = MagicMock(return_value=mock_saver)
+    mock_pg_module = MagicMock()
+    mock_pg_module.PostgresSaver.from_conn_string.return_value = mock_ctx
 
     with patch.dict(
         "sys.modules",
-        {"langgraph.checkpoint.postgres.aio": mock_aio_module},
+        {"langgraph.checkpoint.postgres": mock_pg_module},
     ):
         from core.memory import _create_postgres_checkpointer
 
@@ -426,7 +423,7 @@ def test_create_checkpointer_postgres_sync_with_setup():
         )
 
     assert result is mock_saver
-    mock_aio_module.AsyncPostgresSaver.from_conn_string.assert_called_once_with(
+    mock_pg_module.PostgresSaver.from_conn_string.assert_called_once_with(
         "postgresql+psycopg://u:p@localhost:5432/db"
     )
     mock_saver.setup.assert_called_once()

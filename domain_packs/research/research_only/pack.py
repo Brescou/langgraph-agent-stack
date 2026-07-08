@@ -148,6 +148,10 @@ class ResearchOnlyPack(BaseDomainPack):
                 "ResearchOnlyPack.run() requires a non-empty query."
             )
 
+        from core.mock_llm import reset_mock_research_sequence
+
+        reset_mock_research_sequence(start=0)
+
         initial_state: ResearchOnlyState = {
             "query": query.strip(),
             "research_result": None,

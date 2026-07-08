@@ -101,7 +101,10 @@ class SummariserPack(BaseDomainPack):
                         "SummariserPack requires an LLM instance on the pack."
                     )
                 prompt = self._build_prompt(inp)
-                response = self._llm.invoke(prompt)
+                from core.mock_llm import mock_plain_bullets_context
+
+                with mock_plain_bullets_context(inp.bullet_count):
+                    response = self._llm.invoke(prompt)
                 raw = (
                     response.content if hasattr(response, "content") else str(response)
                 )
