@@ -1,0 +1,34 @@
+# .gitleaks.toml — allowlist for gitleaks false positives in this repo.
+#
+# gitleaks-action auto-detects this file at the repository root (no --config
+# flag needed). Extend the default gitleaks ruleset and allowlist only the
+# specific, verified-fake secrets below — never a real credential.
+#
+# Confirmed against the security.yml "Secrets Scan (gitleaks)" run on main
+# (2026-07-06, run 28774955495): 4 findings, all false positives.
+
+title = "langgraph-agent-stack gitleaks allowlist"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known false positives: test fixtures and doc/manifest placeholders"
+
+regexes = [
+  # tests/test_observability.py — fixture value asserting the log-redaction
+  # filter scrubs `record.api_key`; never a real Anthropic/OpenAI key.
+  '''sk-live-abc123''',
+  # tests/test_llm.py — fake key literals used only to exercise get_llm()'s
+  # "api key present" branch; the real ChatOpenAI/ChatAnthropic client is
+  # replaced by a MagicMock in every one of these tests.
+  '''sk-openai-test''',
+  '''sk-test1234567890''',
+  # README.md quickstart curl example — a documentation placeholder, not a
+  # real Bearer token.
+  '''your-api-key''',
+]
+
+paths = [
+  '''infra/k8s/secret\.yaml''',
+]
