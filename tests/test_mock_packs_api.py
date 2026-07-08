@@ -9,8 +9,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from domain_packs.common.compliance import REGULATED_PACK_IDS
-from pack_kernel.builtin_packs import all_builtin_pack_classes
 from pack_kernel.base_pack import BaseDomainPack
+from pack_kernel.builtin_packs import all_builtin_pack_classes
 
 _BUILTIN_PACK_CLASSES = all_builtin_pack_classes()
 _BUILTIN_PACK_IDS = [pack_cls.pack_id for pack_cls in _BUILTIN_PACK_CLASSES]

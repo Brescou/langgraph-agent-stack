@@ -8,7 +8,6 @@ Usage:
 
 from __future__ import annotations
 
-import json
 from typing import Any, Literal
 
 from langchain_core.language_models import BaseChatModel
