@@ -68,6 +68,11 @@ class Settings(BaseSettings):
         case_sensitive=False,
         extra="ignore",
         populate_by_name=True,
+        # .env.example documents several optional fields as "empty = disabled"
+        # (e.g. PACK_DEFAULT_BUDGET_USD, API_KEY). Without this, `cp
+        # .env.example .env` breaks non-str optional fields: pydantic-settings
+        # otherwise tries to parse "" as e.g. a float and raises.
+        env_parse_none_str="",
     )
 
     # --- LLM ---

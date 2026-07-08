@@ -91,6 +91,23 @@ class TestSettingsLlmConfig:
         assert config.azure_openai_base_url == "https://azure.gateway.example"
 
 
+class TestEnvExampleCompatibility:
+    """.env.example must load as-is (`cp .env.example .env`) — see docs/quickstart."""
+
+    def test_empty_string_env_vars_parse_as_none(self) -> None:
+        """PACK_DEFAULT_BUDGET_USD= (empty, uncommented in .env.example) must
+        not crash Settings() with a float-parsing error."""
+        from core.config import get_settings
+
+        with patch.dict(os.environ, {"PACK_DEFAULT_BUDGET_USD": ""}):
+            get_settings.cache_clear()
+            try:
+                settings = get_settings()
+                assert settings.pack_default_budget_usd is None
+            finally:
+                get_settings.cache_clear()
+
+
 class TestSettingsValidators:
     def test_postgres_backend_requires_postgres_url(self) -> None:
         from core.config import get_settings
