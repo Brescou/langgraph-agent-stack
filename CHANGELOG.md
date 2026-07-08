@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-07-08
+
+### Fixed
+- **SSE streaming broken on default sqlite config (B1)** — `stream_events()` failed with `NotImplementedError` because the lifespan used sync `SqliteSaver`. Async checkpointers (`AsyncSqliteSaver`, `AsyncRedisSaver`, `AsyncPostgresSaver`) now back streaming/async paths; sync savers remain for `run()`. Added `tests/test_sse_integration.py` exercising real checkpointers over `/run/stream` and pack stream routes.
+- **Four structured packs returned HTTP 500 in mock mode (B2)** — `meeting_prep`, `executive_brief`, `rfp_assistant`, and `support_triage` received generic mock JSON that failed Pydantic validation. New `core/mock_llm.py` provides schema-aware mock responses; added parametrized `tests/test_mock_packs_api.py` covering all 13 built-in packs (200 or 403 for regulated).
+- **`docker compose up` failed on REDIS_PASSWORD interpolation (B3)** — `${REDIS_PASSWORD:?}` was evaluated even without the redis profile. Compose now fails explicitly only when the redis profile is active without a password; `.env.example` documents `REDIS_PASSWORD`.
+
+### Changed
+- **`APP_VERSION` derived from package metadata** (M1) — `api/state.py` reads `importlib.metadata.version("langgraph-agent-stack")`; `pyproject.toml` bumped to `0.6.1`.
+- **Bedrock unit tests skip without `botocore`** (M2) — `pytest.importorskip("botocore")` on Bedrock test classes so `make test` passes with `--extra anthropic` only.
+- **Dependency upgrades for known CVEs** (M3) — `aiohttp`, `langgraph-sdk`, `pydantic-settings`, `msgpack`, `cryptography`, `chromadb`.
+- **README badges** — Python 3.13, coverage ~86%.
+
+### Added
+- **CI job `readme-smoke`** (T4) — runs `scripts/readme-smoke.sh`, which executes the README quickstart verbatim (mock server, curl assertions, SSE event, `docker compose config`). Coupled to README by design.
+
 ## [0.6.0] - 2026-07-07
 
 ### Fixed
