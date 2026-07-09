@@ -223,26 +223,43 @@ class TestPipelineE2E:
 
     @pytest.fixture()
     def mock_llm(self) -> MagicMock:
-        """Create a mock LLM that returns plausible JSON for both agents."""
+        """Create a mock LLM that returns plausible JSON for both agents.
+
+        One well-formed response per LLM call site in a full, non-looping
+        pipeline run: ResearchAgent's expand / validate (sufficient=True, so
+        no loop back to research) / summarize, then AnalystAgent's analyze /
+        synthesize / report (plain text, no JSON parsing there).
+        """
         llm = MagicMock(spec=BaseChatModel)
         llm.bind_tools.return_value = llm
 
-        research_response = json.dumps({"sub_queries": ["What is quantum computing?"]})
-        analysis_response = json.dumps(
+        expand_response = json.dumps(["What is quantum computing?"])
+        validate_response = json.dumps(
+            {"sufficient": True, "reason": "Findings cover the topic."}
+        )
+        summarize_response = json.dumps(
             {
-                "insights": [
-                    {"title": "Quantum Advantage", "description": "Speed gains"}
-                ],
-                "confidence": 0.88,
+                "summary": "Quantum computing uses qubits for computation.",
+                "confidence": 0.8,
+            }
+        )
+        analyze_response = json.dumps(
+            {"insights": ["Quantum advantage: speed gains"], "confidence": 0.88}
+        )
+        synthesize_response = json.dumps(
+            {
+                "patterns": ["Exponential speedup on specific problem classes"],
+                "implications": ["Reassess cryptography roadmaps"],
             }
         )
 
         llm.invoke.side_effect = [
-            AIMessage(content=research_response),
-            AIMessage(content="Quantum computing uses qubits for computation."),
+            AIMessage(content=expand_response),
+            AIMessage(content=validate_response),
+            AIMessage(content=summarize_response),
+            AIMessage(content=analyze_response),
+            AIMessage(content=synthesize_response),
             AIMessage(content="Quantum computing is a new paradigm."),
-            AIMessage(content=analysis_response),
-            AIMessage(content=analysis_response),
         ]
         return llm
 

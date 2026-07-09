@@ -292,7 +292,7 @@ Alternative secret management solutions:
 
 | Variable | Default | Description |
 |---|---|---|
-| `ANTHROPIC_MODEL` | `claude-3-5-sonnet-20241022` | Claude model identifier. |
+| `ANTHROPIC_MODEL` | `claude-sonnet-5` | Claude model identifier. |
 | `MAX_TOKENS` | `4096` | Maximum tokens per LLM response (1–32768). |
 | `MEMORY_BACKEND` | `sqlite` | Persistence backend: `sqlite`, `redis`, or `postgres`. |
 | `SQLITE_PATH` | `./data/agent_memory.db` | SQLite file path (dev/test only). |

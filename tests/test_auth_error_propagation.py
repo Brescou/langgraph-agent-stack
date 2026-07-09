@@ -6,6 +6,12 @@ Regression tests for the v0.6.2 fix: an LLM-provider authentication failure
 must surface as ``AgentAuthenticationError`` and an HTTP 502 with an
 actionable message — never as an HTTP 200 with degraded placeholder content
 ("Summary unavailable.", "structured extraction failed").
+
+Also covers the broader sibling bug: *any* fatal, non-auth
+``AgentExecutionError`` from ``_invoke_llm_with_retry`` (a persistent 5xx
+after retries are exhausted, a 404 on a bad model name, a content-policy
+block, ...) must likewise propagate — not be swallowed by a node's
+parsing-fallback ``except Exception`` into the same kind of degraded 200.
 """
 
 from __future__ import annotations
@@ -164,3 +170,59 @@ def test_research_auth_error_returns_502(test_client: TestClient) -> None:
 
     assert response.status_code == 502
     assert "ANTHROPIC_API_KEY" in response.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Non-auth fatal LLM errors must not be swallowed into placeholder output
+# either (e.g. retries exhausted on a persistent 5xx, a bad model name, a
+# content-policy refusal) — only genuine JSON-parsing hiccups get a fallback.
+# ---------------------------------------------------------------------------
+
+
+class TestNonAuthFatalErrorsPropagate:
+    def test_research_agent_propagates_non_auth_execution_error(self) -> None:
+        from agents.base_agent import AgentExecutionError
+
+        mock_llm = MagicMock()
+        mock_llm.invoke.side_effect = AgentExecutionError(
+            "persistent 503, retries exhausted"
+        )
+        mock_llm.bind_tools.return_value = mock_llm
+
+        with patch("agents.base_agent.get_llm", return_value=mock_llm):
+            agent = ResearchAgent()
+            with pytest.raises(AgentExecutionError):
+                agent.run_structured("What is quantum computing?")
+
+    def test_analyst_agent_propagates_non_auth_execution_error(self) -> None:
+        from agents.base_agent import AgentExecutionError
+
+        mock_llm = MagicMock()
+        mock_llm.invoke.side_effect = AgentExecutionError(
+            "persistent 503, retries exhausted"
+        )
+        mock_llm.bind_tools.return_value = mock_llm
+
+        research = ResearchResult(
+            query="q", summary="s", findings=["f"], sources=["src"], confidence=0.9
+        )
+        with patch("agents.base_agent.get_llm", return_value=mock_llm):
+            agent = AnalystAgent()
+            with pytest.raises(AgentExecutionError):
+                agent.run_structured(research)
+
+    def test_research_agent_still_falls_back_on_genuine_json_parse_error(self) -> None:
+        """Sanity check: the narrowed except clauses still cover real parsing hiccups."""
+        from langchain_core.messages import AIMessage
+
+        mock_llm = MagicMock()
+        mock_llm.invoke.return_value = AIMessage(content="not json at all")
+        mock_llm.bind_tools.return_value = mock_llm
+
+        with patch("agents.base_agent.get_llm", return_value=mock_llm):
+            agent = ResearchAgent()
+            # Should not raise: non-JSON expansion output falls back to the
+            # original query, and a non-JSON summary is used as-is.
+            result = agent.run_structured("What is quantum computing?")
+
+        assert result.query == "What is quantum computing?"

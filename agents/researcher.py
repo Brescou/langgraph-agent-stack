@@ -25,7 +25,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.graph import END, StateGraph
 
 from agents.base_agent import (
-    AgentAuthenticationError,
+    AgentBudgetExceededError,
     AgentExecutionError,
     AgentState,
     AgentValidationError,
@@ -158,26 +158,19 @@ class ResearchAgent(BaseAgent):
             "information. Return ONLY a JSON array of strings."
         )
         sub_queries: list[str] = [query]  # fallback when expansion fails
+        expansion_msg = self._invoke_llm_with_retry(
+            [
+                SystemMessage(content="You are a precise research query expander."),
+                HumanMessage(content=expansion_prompt),
+            ]
+        )
         try:
-            expansion_msg = self._invoke_llm_with_retry(
-                [
-                    SystemMessage(content="You are a precise research query expander."),
-                    HumanMessage(content=expansion_prompt),
-                ]
-            )
             parsed = json.loads(extract_text_content(expansion_msg.content))
             if isinstance(parsed, list):
                 sub_queries = list(map(str, parsed))
-        except AgentAuthenticationError:
-            raise
         except json.JSONDecodeError:
             logger.warning(
                 "Query expansion returned non-JSON, falling back to original query"
-            )
-        except Exception:
-            logger.warning(
-                "Query expansion failed unexpectedly, falling back to original query",
-                exc_info=True,
             )
 
         search_tool = next((t for t in self.tools if t.name == "web_search"), None)
@@ -293,26 +286,21 @@ class ResearchAgent(BaseAgent):
             'Reply with a JSON object: {"sufficient": true/false, "reason": "..."}'
         )
 
+        validation_msg = self._invoke_llm_with_retry(
+            [
+                SystemMessage(content="You are a strict research quality assessor."),
+                HumanMessage(content=validation_prompt),
+            ]
+        )
         try:
-            validation_msg = self._invoke_llm_with_retry(
-                [
-                    SystemMessage(
-                        content="You are a strict research quality assessor."
-                    ),
-                    HumanMessage(content=validation_prompt),
-                ]
-            )
             result = json.loads(extract_text_content(validation_msg.content))
             is_sufficient: bool = bool(result.get("sufficient", True))
             reason: str = result.get("reason", "")
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, AttributeError, TypeError):
             is_sufficient = False
             reason = (
                 "Validation parsing failed — defaulting to insufficient for safety."
             )
-        except Exception:
-            is_sufficient = False
-            reason = "Validation failed unexpectedly — defaulting to insufficient."
 
         self._log.info(
             "Validate node completed",
@@ -360,26 +348,18 @@ class ResearchAgent(BaseAgent):
 
         summary_text = "Summary unavailable."
         confidence = 0.5
+        summary_msg = self._invoke_llm_with_retry(
+            [
+                SystemMessage(content="You are a precise research summariser."),
+                HumanMessage(content=summary_prompt),
+            ]
+        )
         try:
-            summary_msg = self._invoke_llm_with_retry(
-                [
-                    SystemMessage(content="You are a precise research summariser."),
-                    HumanMessage(content=summary_prompt),
-                ]
-            )
-            try:
-                parsed = json.loads(extract_text_content(summary_msg.content))
-                summary_text = parsed.get("summary", str(summary_msg.content))
-                confidence = float(parsed.get("confidence", 0.7))
-            except json.JSONDecodeError:
-                summary_text = extract_text_content(summary_msg.content)
-        except AgentAuthenticationError:
-            raise
-        except Exception:
-            logger.warning(
-                "Summarize node parsing failed — using defaults",
-                exc_info=True,
-            )
+            parsed = json.loads(extract_text_content(summary_msg.content))
+            summary_text = parsed.get("summary", str(summary_msg.content))
+            confidence = float(parsed.get("confidence", 0.7))
+        except (json.JSONDecodeError, AttributeError, TypeError, ValueError):
+            summary_text = extract_text_content(summary_msg.content)
 
         metadata: dict[str, Any] = dict(state.get("metadata", {}))
         source_refs: list[dict[str, Any]] = state.get("context", {}).get(
@@ -457,7 +437,7 @@ class ResearchAgent(BaseAgent):
             final_state: AgentState = self._graph.invoke(
                 initial_state, config=self._get_config()
             )
-        except AgentAuthenticationError:
+        except (AgentExecutionError, AgentBudgetExceededError):
             raise
         except Exception as exc:
             raise AgentExecutionError(
