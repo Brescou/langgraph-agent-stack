@@ -1,9 +1,9 @@
 """
-Pack tutoriel autonome — démontre le contrat BaseDomainPack sans LLM.
+Self-contained tutorial pack — demonstrates the BaseDomainPack contract without an LLM.
 
-Ce fichier est volontairement minimal : pas de LangGraph, pas d'appel API.
-Pour un pack vertical piloté par un LLM structuré, voir StructuredLLMPack
-dans domain_packs/common/structured_llm.py.
+This file is intentionally minimal: no LangGraph, no API calls.
+For a structured-LLM-driven vertical pack, see StructuredLLMPack
+in domain_packs/common/structured_llm.py.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from pack_kernel.base_pack import BaseDomainPack, pack_stream_event
 
 
 class EchoPack(BaseDomainPack):
-    """Exemple pédagogique : normalise le texte et renvoie un écho en majuscules."""
+    """Teaching example: normalises the text and returns an uppercased echo."""
 
     pack_id: ClassVar[str] = "echo_tutorial"
     name: ClassVar[str] = "Echo Tutorial Pack"
@@ -32,7 +32,7 @@ class EchoPack(BaseDomainPack):
     primary_field: ClassVar[str] = "text"
 
     def run_from_input(self, body: BaseModel) -> EchoOutput:
-        """Exécution typée — même contrat que les routes POST /packs/{id}/run."""
+        """Typed execution — same contract as the POST /packs/{id}/run routes."""
         inp = body if isinstance(body, EchoInput) else EchoInput.model_validate(body)
         words = inp.text.split()
         echoed = inp.text.strip().upper()
@@ -43,7 +43,7 @@ class EchoPack(BaseDomainPack):
         )
 
     def run(self, query: str) -> EchoOutput:
-        """Interface legacy : une seule chaîne mappée sur ``primary_field``."""
+        """Legacy interface: a single string mapped onto ``primary_field``."""
         if not query or not query.strip():
             raise ValueError("EchoPack.run() requires non-empty text.")
         return self.run_from_input(EchoInput(text=query.strip()))

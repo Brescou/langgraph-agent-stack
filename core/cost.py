@@ -97,6 +97,8 @@ COST_PER_1K: dict[str, ModelPricing] = {
     "claude-opus-4-7": _pricing(0.015, 0.075),
     "claude-haiku-4-5": _pricing(0.001, 0.005),
     # Anthropic — Claude 5 generation (current, July 2026)
+    # Sticker price; an introductory $2/$10 per MTok rate applies through
+    # 2026-08-31, so actual spend may be ~33% lower until then.
     "claude-sonnet-5": _pricing(0.003, 0.015),
     "claude-opus-4-8": _pricing(0.005, 0.025),
     # OpenAI — GPT-4o family

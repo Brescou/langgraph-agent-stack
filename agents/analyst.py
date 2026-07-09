@@ -27,6 +27,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.graph import END, StateGraph
 
 from agents.base_agent import (
+    AgentAuthenticationError,
     AgentExecutionError,
     AgentState,
     AgentValidationError,
@@ -153,6 +154,8 @@ class AnalystAgent(BaseAgent):
             parsed = json.loads(extract_text_content(response.content))
             insights: list[str] = parsed.get("insights", [])
             confidence: float = float(parsed.get("confidence", 0.7))
+        except AgentAuthenticationError:
+            raise
         except Exception:
             logger.warning("Analyze node parsing failed", exc_info=True)
             insights = ["Analysis completed — structured extraction failed."]
@@ -207,6 +210,8 @@ class AnalystAgent(BaseAgent):
             parsed = json.loads(extract_text_content(response.content))
             patterns: list[str] = parsed.get("patterns", [])
             implications: list[str] = parsed.get("implications", [])
+        except AgentAuthenticationError:
+            raise
         except Exception:
             logger.warning("Synthesize node parsing failed", exc_info=True)
             patterns = ["Pattern synthesis unavailable."]
@@ -268,6 +273,8 @@ class AnalystAgent(BaseAgent):
                 ]
             )
             exec_summary: str = extract_text_content(exec_response.content).strip()
+        except AgentAuthenticationError:
+            raise
         except Exception:
             exec_summary = (
                 f"Analysis of '{query}' completed with "
@@ -339,6 +346,8 @@ class AnalystAgent(BaseAgent):
             final_state: AgentState = self._graph.invoke(
                 initial_state, config=self._get_config()
             )
+        except AgentAuthenticationError:
+            raise
         except Exception as exc:
             raise AgentExecutionError(
                 f"[{self.name}] Analysis pipeline failed: {exc}"

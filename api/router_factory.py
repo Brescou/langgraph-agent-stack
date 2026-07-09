@@ -19,11 +19,14 @@ from fastapi.responses import StreamingResponse
 
 import api.state as state
 from agents.base_agent import (
+    AgentAuthenticationError,
     AgentBudgetExceededError,
     AgentExecutionError,
     AgentTimeoutError,
     AgentValidationError,
+    make_auth_error,
 )
+from agents.llm_retry import find_auth_cause
 from api.dependencies import (
     _rate_limit_key,
     pack_primary_text,
@@ -303,7 +306,21 @@ def build_pack_router(
                 raise HTTPException(
                     status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=str(exc)
                 ) from exc
+            except AgentAuthenticationError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)
+                ) from exc
             except (AgentExecutionError, AgentValidationError) as exc:
+                # Third-party packs may wrap a provider 401/403 into a generic
+                # execution error — still surface it as an actionable 502.
+                auth_cause = find_auth_cause(exc)
+                if auth_cause is not None:
+                    raise HTTPException(
+                        status_code=status.HTTP_502_BAD_GATEWAY,
+                        detail=str(
+                            make_auth_error(pack_id, settings.llm_provider, auth_cause)
+                        ),
+                    ) from exc
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
                 ) from exc
@@ -411,12 +428,27 @@ def build_pack_router(
                     extra={"run_id": run_id, "pack_id": pack_id, "error": str(exc)},
                 )
                 yield f"data: {json.dumps({'type': 'error', 'message': 'The pipeline timed out.'})}\n\n"
+            except AgentAuthenticationError as exc:
+                logger.error(
+                    "Pack stream — LLM authentication error",
+                    extra={"run_id": run_id, "pack_id": pack_id, "error": str(exc)},
+                )
+                yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
             except (AgentExecutionError, AgentValidationError) as exc:
                 logger.error(
                     "Pack stream — error",
                     extra={"run_id": run_id, "pack_id": pack_id, "error": str(exc)},
                 )
-                yield f"data: {json.dumps({'type': 'error', 'message': 'The pipeline encountered an error.'})}\n\n"
+                auth_cause = find_auth_cause(exc)
+                if auth_cause is not None:
+                    message = str(
+                        make_auth_error(
+                            pack_id, get_settings().llm_provider, auth_cause
+                        )
+                    )
+                else:
+                    message = "The pipeline encountered an error."
+                yield f"data: {json.dumps({'type': 'error', 'message': message})}\n\n"
             except Exception:
                 logger.exception(
                     "Pack stream — unexpected error",

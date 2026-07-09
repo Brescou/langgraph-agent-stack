@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "langgraph-agent-stack"
-version = "0.6.1"
+version = "0.6.2"
 description = "Deployable multi-agent orchestration stack (LangGraph + FastAPI) with production infra baseline; add your own identity layer for multi-tenant SaaS"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -91,6 +91,7 @@ dev = [
     "testcontainers>=4.0",
     "bandit[sarif]>=1.8",
     "pip-audit>=2.7",
+    "pip>=26.1.2",  # PYSEC-2026-196 fixed in 26.1.2
     "pre-commit>=4.0",
 ]
 

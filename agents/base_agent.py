@@ -33,6 +33,7 @@ from typing_extensions import TypedDict
 
 from agents.llm_retry import (
     before_sleep_log_transient_error,
+    is_auth_llm_error,
     record_retry_exhausted,
     retry_if_transient_llm_error,
 )
@@ -49,6 +50,28 @@ from core.security import InputValidator
 from core.tools import get_default_tools
 
 input_validator = InputValidator()
+
+# Env var to point the user at when a provider rejects the credentials.
+_PROVIDER_KEY_ENV_VARS: dict[str, str] = {
+    "anthropic": "ANTHROPIC_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "google": "GOOGLE_API_KEY",
+    "azure": "AZURE_OPENAI_API_KEY",
+    "bedrock": "your AWS credentials (AWS_REGION / AWS_ACCESS_KEY_ID)",
+    "ollama": "OLLAMA_BASE_URL",
+}
+
+
+def make_auth_error(
+    name: str, provider: str, exc: BaseException
+) -> AgentAuthenticationError:
+    """Build the actionable ``AgentAuthenticationError`` for a rejected credential."""
+    key_hint = _PROVIDER_KEY_ENV_VARS.get(provider, "your provider credentials")
+    return AgentAuthenticationError(
+        f"[{name}] LLM provider '{provider}' rejected the request "
+        f"credentials: {exc}. Check {key_hint} in your .env (see .env.example), "
+        "or set LLM_PROVIDER=mock to run without an API key."
+    )
 
 
 def extract_text_content(content: Any) -> str:
@@ -83,6 +106,16 @@ class AgentConfigurationError(AgentError):
 
 class AgentExecutionError(AgentError):
     """Raised when an agent fails during graph execution."""
+
+
+class AgentAuthenticationError(AgentExecutionError):
+    """Raised when the LLM provider rejects the configured credentials.
+
+    Subclasses ``AgentExecutionError`` so existing handlers still catch it,
+    but is never converted into a degraded in-band response: nodes and packs
+    re-raise it so the API can return an actionable HTTP error instead of a
+    200 with placeholder content.
+    """
 
 
 class AgentTimeoutError(AgentError):
@@ -428,6 +461,10 @@ class BaseAgent(abc.ABC):
                         provider=settings.llm_provider,
                         status="fatal_error",
                     ).inc()
+                if is_auth_llm_error(exc):
+                    raise make_auth_error(
+                        self.name, settings.llm_provider, exc
+                    ) from exc
                 raise AgentExecutionError(
                     f"[{self.name}] LLM call failed: {exc}"
                 ) from exc

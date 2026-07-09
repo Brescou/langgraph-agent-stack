@@ -17,6 +17,7 @@ from langgraph.graph import END, StateGraph
 from typing_extensions import TypedDict
 
 from agents.base_agent import (
+    AgentAuthenticationError,
     AgentBudgetExceededError,
     AgentExecutionError,
     AgentTimeoutError,
@@ -119,6 +120,8 @@ class ResearchOnlyPack(BaseDomainPack):
                     "error": None,
                 }  # type: ignore[return-value]
 
+            except AgentAuthenticationError:
+                raise
             except (
                 AgentBudgetExceededError,
                 AgentExecutionError,
@@ -164,6 +167,8 @@ class ResearchOnlyPack(BaseDomainPack):
             final_state: ResearchOnlyState = self._graph.invoke(
                 initial_state, config=config
             )
+        except AgentAuthenticationError:
+            raise
         except Exception as exc:
             raise AgentExecutionError(
                 f"[ResearchOnlyPack] Pipeline execution failed: {exc}"

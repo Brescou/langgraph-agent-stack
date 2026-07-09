@@ -23,12 +23,15 @@ from pydantic import BaseModel
 from typing_extensions import TypedDict
 
 from agents.base_agent import (
+    AgentAuthenticationError,
     AgentBudgetExceededError,
     AgentExecutionError,
     AgentTimeoutError,
     AgentValidationError,
     extract_text_content,
+    make_auth_error,
 )
+from agents.llm_retry import is_auth_llm_error
 from connectors.base import (
     BaseConnector,
     ConnectorRequest,
@@ -272,8 +275,17 @@ class StructuredLLMPack(BaseDomainPack):
                 prompt = self.build_prompt(inp, reference_text=reference_text)
                 from core.mock_llm import mock_output_schema_context
 
-                with mock_output_schema_context(self.output_schema):
-                    response = self._llm.invoke(prompt)
+                try:
+                    with mock_output_schema_context(self.output_schema):
+                        response = self._llm.invoke(prompt)
+                except Exception as exc:
+                    if is_auth_llm_error(exc):
+                        raise make_auth_error(
+                            self.__class__.__name__,
+                            get_settings().llm_provider,
+                            exc,
+                        ) from exc
+                    raise
                 raw = extract_text_content(
                     response.content if hasattr(response, "content") else response
                 )
@@ -291,6 +303,8 @@ class StructuredLLMPack(BaseDomainPack):
                     "status": "done",
                     "error": None,
                 }  # type: ignore[return-value]
+            except AgentAuthenticationError:
+                raise
             except (
                 AgentBudgetExceededError,
                 AgentExecutionError,
@@ -320,6 +334,8 @@ class StructuredLLMPack(BaseDomainPack):
         config = {"configurable": {"thread_id": self.run_id}}
         try:
             final = self._graph.invoke(initial, config=config)
+        except AgentAuthenticationError:
+            raise
         except Exception as exc:
             raise AgentExecutionError(
                 f"[{self.__class__.__name__}] Pipeline failed: {exc}"
@@ -364,7 +380,9 @@ class StructuredLLMPack(BaseDomainPack):
         self, body: BaseModel
     ) -> AsyncIterator[dict[str, Any]]:
         yield pack_stream_event("phase_started", phase=self.pack_id)
-        result = self.run_from_input(body)
+        # run_from_input drives a sync graph.invoke; keep it off the event
+        # loop thread so async checkpointers (AsyncSqliteSaver, ...) work.
+        result = await asyncio.to_thread(self.run_from_input, body)
         yield pack_stream_event("phase_completed", phase=self.pack_id)
         yield pack_stream_event("pipeline_completed", result=result)
 

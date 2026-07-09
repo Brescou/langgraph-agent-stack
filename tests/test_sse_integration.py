@@ -80,3 +80,34 @@ def test_pack_stream_sse_with_real_sqlite_checkpointer(sse_client: TestClient) -
     types = [event.get("type") for event in events]
     assert "error" not in types, f"Unexpected error events: {events}"
     assert len(events) >= 1
+
+
+@pytest.mark.parametrize(
+    ("pack_id", "body"),
+    [
+        ("summariser", {"text": "LangGraph builds stateful multi-agent apps."}),
+        (
+            "meeting_prep",
+            {"company": "Acme", "person": "Jane", "meeting_goal": "discovery"},
+        ),
+    ],
+)
+def test_sync_graph_pack_stream_sse_with_async_checkpointer(
+    sse_client: TestClient, pack_id: str, body: dict[str, Any]
+) -> None:
+    """Packs whose stream wraps a sync graph.invoke must not fail on AsyncSqliteSaver.
+
+    Regression test (v0.6.2): summariser and StructuredLLMPack streams called
+    ``run_from_input`` on the event loop thread, which AsyncSqliteSaver rejects
+    ("Synchronous calls ... only allowed from a different thread"), turning
+    every typed pack stream into a generic error event on the default config.
+    """
+    with sse_client.stream(
+        "POST", f"/packs/{pack_id}/run/stream", json=body
+    ) as response:
+        assert response.status_code == 200
+        events = _collect_sse_events(response)
+
+    types = [event.get("type") for event in events]
+    assert "error" not in types, f"Unexpected error events: {events}"
+    assert types[-1] == "pipeline_completed"

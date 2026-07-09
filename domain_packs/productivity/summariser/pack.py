@@ -19,11 +19,14 @@ from pydantic import BaseModel
 from typing_extensions import TypedDict
 
 from agents.base_agent import (
+    AgentAuthenticationError,
     AgentBudgetExceededError,
     AgentExecutionError,
     AgentTimeoutError,
     AgentValidationError,
+    make_auth_error,
 )
+from agents.llm_retry import is_auth_llm_error
 from core.config import get_settings
 from core.memory import create_checkpointer
 from core.observability import trace_span
@@ -103,8 +106,17 @@ class SummariserPack(BaseDomainPack):
                 prompt = self._build_prompt(inp)
                 from core.mock_llm import mock_plain_bullets_context
 
-                with mock_plain_bullets_context(inp.bullet_count):
-                    response = self._llm.invoke(prompt)
+                try:
+                    with mock_plain_bullets_context(inp.bullet_count):
+                        response = self._llm.invoke(prompt)
+                except Exception as exc:
+                    if is_auth_llm_error(exc):
+                        raise make_auth_error(
+                            self.__class__.__name__,
+                            get_settings().llm_provider,
+                            exc,
+                        ) from exc
+                    raise
                 raw = (
                     response.content if hasattr(response, "content") else str(response)
                 )
@@ -119,6 +131,8 @@ class SummariserPack(BaseDomainPack):
                     "status": "done",
                     "error": None,
                 }  # type: ignore[return-value]
+            except AgentAuthenticationError:
+                raise
             except (
                 AgentBudgetExceededError,
                 AgentExecutionError,
@@ -153,6 +167,8 @@ class SummariserPack(BaseDomainPack):
         config = {"configurable": {"thread_id": self.run_id}}
         try:
             final = self._graph.invoke(initial, config=config)
+        except AgentAuthenticationError:
+            raise
         except Exception as exc:
             raise AgentExecutionError(
                 f"[SummariserPack] Pipeline execution failed: {exc}"
@@ -183,7 +199,9 @@ class SummariserPack(BaseDomainPack):
         if not isinstance(body, SummaryInput):
             body = SummaryInput.model_validate(body)
         yield pack_stream_event("phase_started", phase="summarise")
-        result = self.run_from_input(body)
+        # run_from_input drives a sync graph.invoke; keep it off the event
+        # loop thread so async checkpointers (AsyncSqliteSaver, ...) work.
+        result = await asyncio.to_thread(self.run_from_input, body)
         yield pack_stream_event("phase_completed", phase="summarise")
         yield pack_stream_event("pipeline_completed", result=result)
 

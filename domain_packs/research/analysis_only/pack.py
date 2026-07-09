@@ -19,6 +19,7 @@ from typing_extensions import TypedDict
 
 from agents.analyst import AnalysisReport, AnalystAgent
 from agents.base_agent import (
+    AgentAuthenticationError,
     AgentBudgetExceededError,
     AgentExecutionError,
     AgentTimeoutError,
@@ -120,6 +121,8 @@ class AnalysisOnlyPack(BaseDomainPack):
                     "status": "done",
                     "error": None,
                 }  # type: ignore[return-value]
+            except AgentAuthenticationError:
+                raise
             except (
                 AgentBudgetExceededError,
                 AgentExecutionError,
@@ -177,6 +180,8 @@ class AnalysisOnlyPack(BaseDomainPack):
         config = {"configurable": {"thread_id": self.run_id}}
         try:
             final = self._graph.invoke(initial, config=config)
+        except AgentAuthenticationError:
+            raise
         except Exception as exc:
             raise AgentExecutionError(
                 f"[AnalysisOnlyPack] Pipeline execution failed: {exc}"

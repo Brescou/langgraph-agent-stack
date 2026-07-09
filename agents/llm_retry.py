@@ -18,6 +18,10 @@ _TRANSIENT_HTTP_STATUS_CODES: frozenset[int] = frozenset(
     {408, 429, 500, 502, 503, 504, 529}
 )
 
+# HTTP statuses that indicate a credential problem (never retryable,
+# never silently degradable — the caller must surface these).
+_AUTH_HTTP_STATUS_CODES: frozenset[int] = frozenset({401, 403})
+
 
 @lru_cache(maxsize=1)
 def retryable_llm_exception_types() -> tuple[type[BaseException], ...]:
@@ -97,6 +101,66 @@ def _http_status_code(exc: BaseException) -> int | None:
         response_status = getattr(response, "status_code", None)
         if isinstance(response_status, int):
             return response_status
+    return None
+
+
+@lru_cache(maxsize=1)
+def auth_llm_exception_types() -> tuple[type[BaseException], ...]:
+    """Return exception classes that indicate an authentication / permission failure."""
+    types: set[type[BaseException]] = set()
+
+    try:
+        import anthropic
+
+        types.update((anthropic.AuthenticationError, anthropic.PermissionDeniedError))
+    except ImportError:
+        pass
+
+    try:
+        import openai
+
+        types.update((openai.AuthenticationError, openai.PermissionDeniedError))
+    except ImportError:
+        pass
+
+    try:
+        from google.api_core import exceptions as google_exceptions
+
+        types.update(
+            (google_exceptions.Unauthenticated, google_exceptions.PermissionDenied)
+        )
+    except ImportError:
+        pass
+
+    return tuple(types)
+
+
+def is_auth_llm_error(exc: BaseException) -> bool:
+    """Return True when ``exc`` represents an authentication / API-key failure.
+
+    Matches typed provider SDK exceptions (Anthropic, OpenAI, Google) as well
+    as any exception carrying an HTTP 401/403 status code.
+    """
+    if isinstance(exc, auth_llm_exception_types()):
+        return True
+    status = _http_status_code(exc)
+    return status is not None and status in _AUTH_HTTP_STATUS_CODES
+
+
+def find_auth_cause(exc: BaseException, max_depth: int = 10) -> BaseException | None:
+    """Walk the ``__cause__`` / ``__context__`` chain looking for an auth failure.
+
+    Packs (including third-party plugins) may wrap a provider 401/403 into a
+    generic ``AgentExecutionError``; this lets the API layer still surface an
+    actionable HTTP 502 instead of a generic 500.
+    """
+    current: BaseException | None = exc
+    for _ in range(max_depth):
+        if current is None:
+            return None
+        if is_auth_llm_error(current):
+            return current
+        current = current.__cause__ or current.__context__
     return None
 
 

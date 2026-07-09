@@ -8,7 +8,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688)](https://fastapi.tiangolo.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![CI](https://github.com/brescou/langgraph-agent-stack/actions/workflows/ci.yml/badge.svg)](https://github.com/brescou/langgraph-agent-stack/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-758%2B%20passing-brightgreen)](tests/)
+[![Tests](https://img.shields.io/badge/tests-790%2B%20passing-brightgreen)](tests/)
 [![Coverage](https://img.shields.io/badge/coverage-~86%25-brightgreen)](tests/)
 
 ## What is this?
@@ -96,7 +96,7 @@ Each pack gets typed `POST /packs/{pack_id}/run` and `/run/stream` when schemas 
 
 Full catalogue and authoring guide: **[domain_packs/README.md](domain_packs/README.md)**.
 
-The HR, legal, and finance packs demonstrate the pack system on regulated-adjacent use cases, but they are **off by default** (`REGULATED_PACKS_ENABLED=false`) — calling them returns HTTP `403` until you complete the pack's `COMPLIANCE.md` checklist and explicitly opt in.
+The HR, legal, and finance packs demonstrate the pack system on regulated-adjacent use cases, but they are **off by default** (`REGULATED_PACKS_ENABLED=false`) — calling them with a valid body returns HTTP `403` until you complete the pack's `COMPLIANCE.md` checklist and explicitly opt in (a body that fails schema validation returns `422` first, as on any pack route).
 
 ### Distributable packs (plugins)
 
@@ -185,6 +185,18 @@ make test          # 758+ tests, mocked by default — no network, no API key re
 make eval          # golden-dataset pack evaluations (deterministic)
 make infra-check   # helm lint + kubeconform + checkov
 ```
+
+## Troubleshooting
+
+| Symptom | Cause / fix |
+|---------|-------------|
+| `POST /run` returns **502** with `LLM provider 'anthropic' rejected the request credentials` | Your API key is missing or invalid. Set `ANTHROPIC_API_KEY` (or your provider's key) in `.env`, or set `LLM_PROVIDER=mock` to run without one. |
+| Responses say `Mock insight 1: Key trend identified.` | You are on `LLM_PROVIDER=mock` (deterministic canned output, $0). Set a real provider + key in `.env`. |
+| `GET /metrics` returns **404** | Prometheus metrics need the observability extra: `uv sync --extra observability`. |
+| Regulated pack (`talent_screening`, `contract_reviewer`, …) returns **403** | Expected: these packs are gated behind `REGULATED_PACKS_ENABLED=false` until you complete the pack's `COMPLIANCE.md`. A **422** means your request body doesn't match the pack's input schema — check `/docs`. |
+| **402** on `/run` or a pack route | The per-run USD budget (`PACK_DEFAULT_BUDGET_USD`) was exceeded. Raise it or unset it. |
+| `/docs` is missing | Interactive docs are disabled when `ENVIRONMENT=production`. |
+| State/history lost across replicas | `MEMORY_BACKEND=sqlite` (default) is single-replica only — switch to `redis` or `postgres` for multi-replica deployments. |
 
 ### Pack evaluation
 

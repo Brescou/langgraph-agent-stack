@@ -18,6 +18,7 @@ from fastapi.responses import StreamingResponse
 import api.state as state
 from agents.analyst import AnalysisReport
 from agents.base_agent import (
+    AgentAuthenticationError,
     AgentBudgetExceededError,
     AgentExecutionError,
     AgentTimeoutError,
@@ -156,6 +157,14 @@ async def run_pipeline(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
                 detail="Run cost budget exceeded.",
             ) from exc
+        except AgentAuthenticationError as exc:
+            logger.error(
+                "POST /run — LLM authentication error",
+                extra={"run_id": run_id, "error": str(exc)},
+            )
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)
+            ) from exc
         except AgentExecutionError as exc:
             logger.error(
                 "POST /run — execution error",
@@ -278,6 +287,12 @@ async def _stream_pipeline(
             "POST /run/stream — timeout", extra={"run_id": run_id, "error": str(exc)}
         )
         yield f"data: {json.dumps({'type': 'error', 'message': 'The pipeline timed out.'})}\n\n"
+    except AgentAuthenticationError as exc:
+        logger.error(
+            "POST /run/stream — LLM authentication error",
+            extra={"run_id": run_id, "error": str(exc)},
+        )
+        yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
     except (AgentExecutionError, AgentValidationError) as exc:
         logger.error(
             "POST /run/stream — error", extra={"run_id": run_id, "error": str(exc)}
@@ -465,6 +480,14 @@ async def run_research(
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail="Run cost budget exceeded.",
+        ) from exc
+    except AgentAuthenticationError as exc:
+        logger.error(
+            "POST /research — LLM authentication error",
+            extra={"run_id": run_id, "error": str(exc)},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)
         ) from exc
     except AgentExecutionError as exc:
         logger.error(

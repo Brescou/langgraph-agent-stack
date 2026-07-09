@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-07-09
+
+### Fixed
+- **Invalid API key returned HTTP 200 with degraded placeholder content** (launch-audit MAJEUR) — with a wrong or placeholder `ANTHROPIC_API_KEY`, the provider's 401 was swallowed by node-level parse fallbacks and `POST /run` answered 200 with `"Summary unavailable."` / `"structured extraction failed"` and `cost_usd: 0.0`. New `AgentAuthenticationError` (raised from `BaseAgent._invoke_llm_with_retry` and every raw pack `llm.invoke` via `is_auth_llm_error` on HTTP 401/403 or typed SDK auth exceptions) now propagates through agents and all built-in packs to the API, which returns **HTTP 502** with an actionable detail ("Check ANTHROPIC_API_KEY in your .env … or set LLM_PROVIDER=mock"). SSE streams emit the same message as an explicit `error` event. Auth errors are never retried. A `find_auth_cause` net on the pack routes also converts third-party plugin packs' wrapped 401s into the same 502.
+- **Typed pack SSE streams failed on the default sqlite config** — `summariser` and every `StructuredLLMPack` vertical drove a sync `graph.invoke` on the event loop thread from their stream generators; `AsyncSqliteSaver` rejects that ("Synchronous calls … only allowed from a different thread"), so `/packs/{id}/run/stream` emitted a generic error event on a fresh clone (the v0.6.1 B1 fix only covered `/run/stream`). `run_from_input` now runs via `asyncio.to_thread`; regression tests added in `tests/test_sse_integration.py` for `summariser` and `meeting_prep`.
+
+### Changed
+- **README** — new Troubleshooting section (invalid key → 502, mock output, `/metrics` 404 without the observability extra, 402 budget, 422-vs-403 on regulated packs, sqlite scaling); tests badge updated 758+ → 790+; regulated-pack note clarifies that schema validation (`422`) runs before the compliance gate (`403`).
+- **Language hygiene** — translated the remaining French docstrings/comments to English (`examples/custom_pack/pack.py`, `examples/custom_pack/schemas.py`, `agents/researcher.py`, `core/security.py`).
+- **`core/cost.py`** — documented Claude Sonnet 5's introductory pricing ($2/$10 per MTok through 2026-08-31) next to the sticker-price entry.
+- **Dev dependencies** — pinned `pip>=26.1.2` (PYSEC-2026-196).
+
 ## [0.6.1] - 2026-07-08
 
 ### Fixed

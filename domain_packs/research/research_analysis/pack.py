@@ -23,6 +23,7 @@ from typing_extensions import TypedDict
 
 from agents.analyst import AnalysisReport, AnalystAgent
 from agents.base_agent import (
+    AgentAuthenticationError,
     AgentBudgetExceededError,
     AgentExecutionError,
     AgentTimeoutError,
@@ -294,6 +295,8 @@ class ResearchAnalysisPack(BaseDomainPack):
                     "error": None,
                 }  # type: ignore[return-value]
 
+            except AgentAuthenticationError:
+                raise
             except (
                 AgentBudgetExceededError,
                 AgentExecutionError,
@@ -376,6 +379,8 @@ class ResearchAnalysisPack(BaseDomainPack):
                     "error": None,
                 }  # type: ignore[return-value]
 
+            except AgentAuthenticationError:
+                raise
             except (
                 AgentBudgetExceededError,
                 AgentExecutionError,
@@ -453,6 +458,8 @@ class ResearchAnalysisPack(BaseDomainPack):
             final_state: OrchestratorState = self._graph.invoke(
                 initial_state, config=config
             )
+        except AgentAuthenticationError:
+            raise
         except Exception as exc:
             raise AgentExecutionError(
                 f"[ResearchAnalysisPack] Pipeline execution failed: {exc}"

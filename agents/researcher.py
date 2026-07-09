@@ -25,6 +25,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.graph import END, StateGraph
 
 from agents.base_agent import (
+    AgentAuthenticationError,
     AgentExecutionError,
     AgentState,
     AgentValidationError,
@@ -156,7 +157,7 @@ class ResearchAgent(BaseAgent):
             "Provide 3 focused sub-queries that would help gather comprehensive "
             "information. Return ONLY a JSON array of strings."
         )
-        sub_queries: list[str] = [query]  # valeur par défaut en cas d'échec
+        sub_queries: list[str] = [query]  # fallback when expansion fails
         try:
             expansion_msg = self._invoke_llm_with_retry(
                 [
@@ -167,6 +168,8 @@ class ResearchAgent(BaseAgent):
             parsed = json.loads(extract_text_content(expansion_msg.content))
             if isinstance(parsed, list):
                 sub_queries = list(map(str, parsed))
+        except AgentAuthenticationError:
+            raise
         except json.JSONDecodeError:
             logger.warning(
                 "Query expansion returned non-JSON, falling back to original query"
@@ -370,6 +373,8 @@ class ResearchAgent(BaseAgent):
                 confidence = float(parsed.get("confidence", 0.7))
             except json.JSONDecodeError:
                 summary_text = extract_text_content(summary_msg.content)
+        except AgentAuthenticationError:
+            raise
         except Exception:
             logger.warning(
                 "Summarize node parsing failed — using defaults",
@@ -452,6 +457,8 @@ class ResearchAgent(BaseAgent):
             final_state: AgentState = self._graph.invoke(
                 initial_state, config=self._get_config()
             )
+        except AgentAuthenticationError:
+            raise
         except Exception as exc:
             raise AgentExecutionError(
                 f"[{self.name}] Research pipeline failed: {exc}"

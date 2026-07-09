@@ -731,7 +731,7 @@ return max_req - count - 1
             )
             if result is None:
                 return True  # fail-open
-            return int(cast(int | str, result)) >= 0  # -1 = bloqué, >= 0 = autorisé
+            return int(cast(int | str, result)) >= 0  # -1 = blocked, >= 0 = allowed
         except Exception as exc:
             logger.warning(
                 "Redis rate limiter unreachable — failing open (request allowed)",

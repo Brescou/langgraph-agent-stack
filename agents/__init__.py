@@ -2,6 +2,7 @@
 
 from agents.analyst import AnalysisReport, AnalystAgent
 from agents.base_agent import (
+    AgentAuthenticationError,
     AgentConfigurationError,
     AgentError,
     AgentExecutionError,
@@ -14,6 +15,7 @@ from agents.researcher import ResearchAgent, ResearchResult
 __all__ = [
     "AnalysisReport",
     "AnalystAgent",
+    "AgentAuthenticationError",
     "AgentConfigurationError",
     "AgentError",
     "AgentExecutionError",
