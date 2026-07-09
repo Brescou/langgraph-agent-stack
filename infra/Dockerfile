@@ -15,7 +15,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # Copy uv from the official image — no curl|sh, no build-time network fetch.
 # Version pinned here; COPY --from= does not support ARG variable substitution
 # on all BuildKit versions used by GitHub Actions runners.
-COPY --from=ghcr.io/astral-sh/uv:0.11.18 /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.11.28 /uv /usr/local/bin/uv
 
 WORKDIR /build
 
