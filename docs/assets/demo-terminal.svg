@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="640" viewBox="0 0 880 640" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" xml:space="preserve">
+  <rect width="880" height="640" rx="10" fill="#0d1117" stroke="#30363d"/>
+  <rect width="880" height="34" rx="10" fill="#161b22"/>
+  <rect y="24" width="880" height="10" fill="#161b22"/>
+  <circle cx="22" cy="17" r="5.5" fill="#ff5f57"/>
+  <circle cx="42" cy="17" r="5.5" fill="#febc2e"/>
+  <circle cx="62" cy="17" r="5.5" fill="#28c840"/>
+  <text x="440" y="21" text-anchor="middle" fill="#8b949e" font-size="12">langgraph-agent-stack — mock mode (no API key)</text>
+
+  <text x="20" y="62" fill="#e6edf3"><tspan fill="#7ee787">$</tspan> LLM_PROVIDER=mock uv run uvicorn api.main:app  <tspan fill="#8b949e" font-style="italic"># zero-cost deterministic provider</tspan></text>
+  <text x="20" y="82" fill="#8b949e">INFO:     Uvicorn running on http://127.0.0.1:8000</text>
+
+  <text x="20" y="118" fill="#e6edf3"><tspan fill="#7ee787">$</tspan> curl -s localhost:8000/health</text>
+  <text x="20" y="138" fill="#8b949e">{<tspan fill="#79c0ff">"status"</tspan>:<tspan fill="#a5d6ff">"ok"</tspan>, <tspan fill="#79c0ff">"version"</tspan>:<tspan fill="#a5d6ff">"0.6.2"</tspan>, <tspan fill="#79c0ff">"components"</tspan>:{<tspan fill="#79c0ff">"llm"</tspan>:{<tspan fill="#79c0ff">"status"</tspan>:<tspan fill="#a5d6ff">"ok"</tspan>, <tspan fill="#79c0ff">"detail"</tspan>:<tspan fill="#a5d6ff">"mock (initialised)"</tspan>}, …}}</text>
+
+  <text x="20" y="174" fill="#8b949e" font-style="italic"># Stream a multi-agent run over SSE (Research → Analysis)</text>
+  <text x="20" y="194" fill="#e6edf3"><tspan fill="#7ee787">$</tspan> curl -sN -X POST localhost:8000/packs/research_analysis/run/stream \</text>
+  <text x="20" y="214" fill="#e6edf3">    -H <tspan fill="#a5d6ff">'Content-Type: application/json'</tspan> -d <tspan fill="#a5d6ff">'{"query": "State of vector databases in 2026"}'</tspan></text>
+  <text x="20" y="238" fill="#8b949e"><tspan fill="#d2a8ff">data:</tspan> {<tspan fill="#79c0ff">"type"</tspan>: <tspan fill="#a5d6ff">"phase_started"</tspan>,   <tspan fill="#79c0ff">"phase"</tspan>: <tspan fill="#a5d6ff">"research"</tspan>}</text>
+  <text x="20" y="258" fill="#8b949e"><tspan fill="#d2a8ff">data:</tspan> {<tspan fill="#79c0ff">"type"</tspan>: <tspan fill="#a5d6ff">"phase_completed"</tspan>, <tspan fill="#79c0ff">"phase"</tspan>: <tspan fill="#a5d6ff">"research"</tspan>}</text>
+  <text x="20" y="278" fill="#8b949e"><tspan fill="#d2a8ff">data:</tspan> {<tspan fill="#79c0ff">"type"</tspan>: <tspan fill="#a5d6ff">"phase_started"</tspan>,   <tspan fill="#79c0ff">"phase"</tspan>: <tspan fill="#a5d6ff">"analysis"</tspan>}</text>
+  <text x="20" y="298" fill="#8b949e"><tspan fill="#d2a8ff">data:</tspan> {<tspan fill="#79c0ff">"type"</tspan>: <tspan fill="#a5d6ff">"phase_completed"</tspan>, <tspan fill="#79c0ff">"phase"</tspan>: <tspan fill="#a5d6ff">"analysis"</tspan>}</text>
+  <text x="20" y="318" fill="#8b949e"><tspan fill="#d2a8ff">data:</tspan> {<tspan fill="#79c0ff">"type"</tspan>: <tspan fill="#a5d6ff">"pipeline_completed"</tspan>, <tspan fill="#79c0ff">"report"</tspan>: {…, <tspan fill="#79c0ff">"key_insights"</tspan>: […], <tspan fill="#79c0ff">"confidence"</tspan>: <tspan fill="#79c0ff">0.82</tspan>}}</text>
+
+  <text x="20" y="354" fill="#8b949e" font-style="italic"># Typed pack routes — generated from each pack's Pydantic schemas</text>
+  <text x="20" y="374" fill="#e6edf3"><tspan fill="#7ee787">$</tspan> curl -s -X POST localhost:8000/packs/meeting_prep/run \</text>
+  <text x="20" y="394" fill="#e6edf3">    -d <tspan fill="#a5d6ff">'{"company": "Acme Corp", "person": "Jane Doe", "meeting_goal": "discovery call"}'</tspan></text>
+  <text x="20" y="418" fill="#8b949e">{<tspan fill="#79c0ff">"company_overview"</tspan>: <tspan fill="#a5d6ff">"…"</tspan>, <tspan fill="#79c0ff">"talking_points"</tspan>: […], <tspan fill="#79c0ff">"questions_to_ask"</tspan>: […],</text>
+  <text x="20" y="438" fill="#8b949e"> <tspan fill="#79c0ff">"landmines"</tspan>: […], <tspan fill="#79c0ff">"confidence"</tspan>: <tspan fill="#79c0ff">0.85</tspan>}</text>
+
+  <text x="20" y="474" fill="#8b949e" font-style="italic"># Regulated verticals (HR / legal / finance) are gated off by default</text>
+  <text x="20" y="494" fill="#e6edf3"><tspan fill="#7ee787">$</tspan> curl -s -X POST localhost:8000/packs/contract_reviewer/run -d <tspan fill="#a5d6ff">'{"query": "Review this NDA", …}'</tspan></text>
+  <text x="20" y="518" fill="#8b949e"><tspan fill="#f85149">HTTP 403</tspan>  {<tspan fill="#79c0ff">"detail"</tspan>: <tspan fill="#a5d6ff">"Regulated vertical pack 'contract_reviewer' is disabled. Set</tspan></text>
+  <text x="20" y="538" fill="#a5d6ff">           REGULATED_PACKS_ENABLED=true only after completing your compliance programme</text>
+  <text x="20" y="558" fill="#a5d6ff">           (see the pack's COMPLIANCE.md)."}</text>
+
+  <text x="20" y="600" fill="#8b949e" font-style="italic"># Swap in a real provider when ready: set ANTHROPIC_API_KEY, drop LLM_PROVIDER=mock.</text>
+  <text x="20" y="620" fill="#e6edf3"><tspan fill="#7ee787">$</tspan> <tspan fill="#e6edf3">▊</tspan></text>
+</svg>

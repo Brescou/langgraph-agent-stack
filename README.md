@@ -11,6 +11,12 @@
 [![Tests](https://img.shields.io/badge/tests-800%2B%20passing-brightgreen)](tests/)
 [![Coverage](https://img.shields.io/badge/coverage-~86%25-brightgreen)](tests/)
 
+## See it in action
+
+A real session against the built-in **mock provider** — no API key, zero token cost, deterministic output (ideal for exploring the API, tests, and CI):
+
+![Terminal session: mock-mode server startup, health check, SSE-streamed multi-agent run, typed pack route, and regulated-pack gating returning HTTP 403](docs/assets/demo-terminal.svg)
+
 ## What is this?
 
 A deployable starting point for ML / data engineers who want a **real** agent stack—not a notebook demo. The default pipeline is Research → Analysis (`ResearchAgent` + `AnalystAgent`), exposed over FastAPI with SSE streaming, session history, cost tracking, and pack-based routing.
