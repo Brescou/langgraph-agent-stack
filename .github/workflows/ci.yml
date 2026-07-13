@@ -148,7 +148,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.12", "3.13"]
+        python-version: ["3.12", "3.13", "3.14"]
     env:
       # Provide a dummy key so pydantic-settings validation passes for unit tests
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY || 'test-key-not-real' }}
