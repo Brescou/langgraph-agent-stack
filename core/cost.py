@@ -138,6 +138,8 @@ COST_PER_1K: dict[str, ModelPricing] = {
     "llama-3.1-405b-instruct": _pricing(0.003, 0.003),
     "llama-3.1-70b-instruct": _pricing(0.00059, 0.00079),
     "llama-3.1-8b-instruct": _pricing(0.00005, 0.00008),
+    # Mock provider — zero cost so CostTracker / metrics run without spend.
+    "mock-provider": _pricing(0.0, 0.0),
 }
 
 # Longest-prefix-first aliases for dated / variant model IDs.
@@ -223,6 +225,8 @@ _MODEL_PROVIDER_PREFIXES: tuple[tuple[str, str], ...] = (
     ("pixtral", "mistral"),
     ("meta.llama", "meta"),
     ("llama", "meta"),
+    ("mock-provider", "mock"),
+    ("mock", "mock"),
 )
 
 

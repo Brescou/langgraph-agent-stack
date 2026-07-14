@@ -140,7 +140,7 @@ def test_meeting_prep_happy_path_full_output() -> None:
     assert result.questions_to_ask == ["What is your timeline?"]
     assert result.landmines == ["Competitor X incumbent"]
     assert result.confidence == 0.85
-    assert result.cost_usd is None
+    assert result.cost_usd == 0.0
 
 
 def test_rfp_assistant_happy_path_full_output() -> None:

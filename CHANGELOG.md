@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Inconsistent `cost_usd` in mock mode** (#88) — typed pack routes returned `null` while legacy `POST /run` returned `0.0`. `MockProviderChatModel` now emits deterministic `usage_metadata`, `mock-provider` is priced at $0 in the cost table, and `StructuredLLMPack` wires `CostTracker` so every route (including SSE finals) reports `0.0`. Budget `402` is now exercisable in mock via `LLM_COST_TABLE_PATH` override.
+
 ## [0.6.2] - 2026-07-09
 
 ### Fixed

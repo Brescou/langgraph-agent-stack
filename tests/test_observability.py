@@ -397,6 +397,7 @@ class TestProviderFromModelId:
             ("gemini-2.5-flash", "google"),
             ("mistral-large-latest", "mistral"),
             ("llama-3.1-8b-instruct", "meta"),
+            ("mock-provider", "mock"),
             ("some-unknown-model", "unknown"),
             ("", "unknown"),
         ],
