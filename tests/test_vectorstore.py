@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import os
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
+from langchain_core.embeddings import DeterministicFakeEmbedding
 
 
 class TestGetVectorstoreDisabled:
@@ -53,21 +54,19 @@ class TestGetVectorstoreChromaImportError:
     def test_raises_import_error_when_chroma_missing(self):
         """When rag_enabled=True but langchain_chroma is not installed, ImportError is raised."""
         import sys
-        from unittest.mock import patch
 
         from core.config import Settings
         from core.vectorstore import get_vectorstore
 
         settings = Settings(
-            llm_provider="anthropic",
-            anthropic_api_key="sk-ant-test123456789012345",
+            llm_provider="mock",
             memory_backend="sqlite",
             sqlite_path=":memory:",
             environment="development",
             rag_enabled=True,
+            embedding_provider="mock",
         )
 
-        # Remove langchain_chroma from sys.modules so the import inside get_vectorstore fails
         original = sys.modules.pop("langchain_chroma", None)
         try:
             with patch.dict("sys.modules", {"langchain_chroma": None}):
@@ -88,8 +87,7 @@ class TestGetVectorstorePGVectorMissingUrl:
         env_override = {
             "RAG_ENABLED": "true",
             "MEMORY_BACKEND": "postgres",
-            "LLM_PROVIDER": "anthropic",
-            "ANTHROPIC_API_KEY": "sk-ant-test123456789012345",
+            "LLM_PROVIDER": "mock",
             "SQLITE_PATH": ":memory:",
             "ENVIRONMENT": "development",
         }
@@ -104,18 +102,16 @@ class TestGetVectorstorePGVectorMissingUrl:
 
 
 class TestGetVectorstoreChromaSuccess:
-    """Happy path: ChromaDB vector store created successfully with mocked import."""
+    """Happy path: ChromaDB vector store created with an explicit embedding function."""
 
-    def test_returns_chroma_instance(self):
-        from unittest.mock import MagicMock
-
+    def test_returns_chroma_instance_with_explicit_embeddings(self):
         from core.vectorstore import get_vectorstore
 
         env_override = {
             "RAG_ENABLED": "true",
             "MEMORY_BACKEND": "sqlite",
-            "LLM_PROVIDER": "anthropic",
-            "ANTHROPIC_API_KEY": "sk-ant-test123456789012345",
+            "LLM_PROVIDER": "mock",
+            "EMBEDDING_PROVIDER": "mock",
             "SQLITE_PATH": ":memory:",
             "ENVIRONMENT": "development",
         }
@@ -133,34 +129,31 @@ class TestGetVectorstoreChromaSuccess:
                 result = get_vectorstore(settings)
 
         assert result is mock_chroma_instance
-        mock_chroma_module.Chroma.assert_called_once_with(
-            collection_name="langgraph_rag"
-        )
+        mock_chroma_module.Chroma.assert_called_once()
+        kwargs = mock_chroma_module.Chroma.call_args.kwargs
+        assert kwargs["collection_name"] == "langgraph_rag"
+        assert isinstance(kwargs["embedding_function"], DeterministicFakeEmbedding)
 
 
 class TestGetVectorstorePGVectorSuccess:
-    """Happy path: PGVector store created successfully with mocked import."""
+    """Happy path: langchain_postgres.PGVector with explicit embeddings."""
 
     _PG_ENV = {
         "RAG_ENABLED": "true",
         "MEMORY_BACKEND": "postgres",
-        "POSTGRES_URL": "postgresql://user:pass@localhost:5432/db",
-        "LLM_PROVIDER": "anthropic",
-        "ANTHROPIC_API_KEY": "sk-ant-test123456789012345",
+        "POSTGRES_URL": "postgresql+psycopg://user:pass@localhost:5432/db",
+        "LLM_PROVIDER": "mock",
+        "EMBEDDING_PROVIDER": "mock",
         "SQLITE_PATH": ":memory:",
         "ENVIRONMENT": "development",
     }
 
     def test_returns_pgvector_instance(self):
-        from unittest.mock import MagicMock
-
         from core.vectorstore import get_vectorstore
 
         mock_pgvector_instance = MagicMock()
-        mock_pgvector_module = MagicMock()
-        mock_pgvector_module.PGVector.return_value = mock_pgvector_instance
-        mock_community = MagicMock()
-        mock_community.vectorstores = mock_pgvector_module
+        mock_pg_module = MagicMock()
+        mock_pg_module.PGVector.return_value = mock_pgvector_instance
 
         with patch.dict(os.environ, self._PG_ENV, clear=False):
             from core.config import Settings
@@ -169,21 +162,22 @@ class TestGetVectorstorePGVectorSuccess:
 
             with patch.dict(
                 "sys.modules",
-                {
-                    "langchain_community": mock_community,
-                    "langchain_community.vectorstores": mock_pgvector_module,
-                },
+                {"langchain_postgres": mock_pg_module},
             ):
                 result = get_vectorstore(settings)
 
         assert result is mock_pgvector_instance
-        mock_pgvector_module.PGVector.assert_called_once_with(
-            collection_name="langgraph_rag",
-            connection_string="postgresql://user:pass@localhost:5432/db",
+        mock_pg_module.PGVector.assert_called_once()
+        kwargs = mock_pg_module.PGVector.call_args.kwargs
+        assert kwargs["collection_name"] == "langgraph_rag"
+        assert (
+            kwargs["connection"] == "postgresql+psycopg://user:pass@localhost:5432/db"
         )
+        assert isinstance(kwargs["embeddings"], DeterministicFakeEmbedding)
 
     def test_raises_runtime_error_when_postgres_url_empty(self):
         """_get_pgvector raises RuntimeError when postgres_url is None."""
+        from core.embeddings import get_embeddings
         from core.vectorstore import _get_pgvector
 
         with patch.dict(os.environ, self._PG_ENV, clear=False):
@@ -193,10 +187,11 @@ class TestGetVectorstorePGVectorSuccess:
             settings.postgres_url = None  # type: ignore[assignment]
 
         with pytest.raises(RuntimeError, match="POSTGRES_URL"):
-            _get_pgvector(settings)
+            _get_pgvector(settings, get_embeddings(settings))
 
-    def test_raises_import_error_when_langchain_community_missing(self):
-        """_get_pgvector raises ImportError when langchain-community is not installed."""
+    def test_raises_import_error_when_langchain_postgres_missing(self):
+        """_get_pgvector raises ImportError when langchain-postgres is not installed."""
+        from core.embeddings import get_embeddings
         from core.vectorstore import _get_pgvector
 
         with patch.dict(os.environ, self._PG_ENV, clear=False):
@@ -204,12 +199,44 @@ class TestGetVectorstorePGVectorSuccess:
 
             settings = Settings()  # type: ignore[call-arg]
 
-        with patch.dict(
-            "sys.modules",
-            {
-                "langchain_community": None,
-                "langchain_community.vectorstores": None,
-            },
-        ):
-            with pytest.raises(ImportError, match="langchain-community"):
-                _get_pgvector(settings)
+        with patch.dict("sys.modules", {"langchain_postgres": None}):
+            with pytest.raises(ImportError, match="langchain-postgres"):
+                _get_pgvector(settings, get_embeddings(settings))
+
+
+class TestMockEmbeddingsDeterminism:
+    def test_mock_provider_embeddings_are_deterministic(self):
+        from core.config import Settings
+        from core.embeddings import get_embeddings
+
+        settings = Settings(
+            llm_provider="mock",
+            embedding_provider="mock",
+            embedding_dimensions=32,
+            memory_backend="sqlite",
+            sqlite_path=":memory:",
+            environment="development",
+            rag_enabled=True,
+        )
+        emb = get_embeddings(settings)
+        assert emb.embed_query("alpha") == emb.embed_query("alpha")
+        assert emb.embed_query("alpha") != emb.embed_query("beta")
+
+    def test_llm_provider_mock_auto_selects_mock_embeddings(self):
+        from core.config import Settings
+        from core.embeddings import resolve_embedding_provider
+
+        settings = Settings(
+            llm_provider="mock",
+            embedding_provider="auto",
+            memory_backend="sqlite",
+            sqlite_path=":memory:",
+            environment="development",
+        )
+        assert resolve_embedding_provider(settings) == "mock"
+
+    def test_no_todo_comments_remain_in_vectorstore(self):
+        from pathlib import Path
+
+        source = Path("core/vectorstore.py").read_text(encoding="utf-8")
+        assert "TODO" not in source
