@@ -15,6 +15,7 @@ import json
 import sys
 from pathlib import Path
 
+from core.observability import configure_logging
 from evals.models import EvalReport
 from evals.runner import (
     compare_versions,
@@ -76,6 +77,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    configure_logging(level="WARNING")
     register_builtin_packs()
 
     if args.list:

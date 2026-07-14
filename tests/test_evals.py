@@ -260,3 +260,40 @@ def test_judge_skipped_without_judge_llm() -> None:
 def test_scripted_model_supports_bind_tools() -> None:
     model = ScriptedChatModel(responses=["x"])
     assert model.bind_tools([]) is model
+
+
+def test_eval_cli_configures_logging_and_keeps_json_stdout(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    """The CLI configures stderr logging without contaminating JSON stdout."""
+    import evals.__main__ as eval_cli
+
+    configure_logging = MagicMock()
+    monkeypatch.setattr(eval_cli, "configure_logging", configure_logging)
+
+    dataset = tmp_path / "demo.yaml"
+    dataset.write_text("cases: []\n", encoding="utf-8")
+    monkeypatch.setattr(eval_cli, "list_builtin_datasets", lambda: ["demo"])
+    monkeypatch.setattr(eval_cli, "dataset_path_for", lambda _: dataset)
+    monkeypatch.setattr(eval_cli, "load_dataset", lambda _: [])
+
+    report = MagicMock()
+    report.summary.return_value = {
+        "pack_id": "demo",
+        "version": "default",
+        "passed": 0,
+        "total": 0,
+        "pass_rate": 1.0,
+        "mean_latency_seconds": 0.0,
+        "total_cost_usd": 0.0,
+    }
+    report.cases = []
+    report.pass_rate = 1.0
+    monkeypatch.setattr(eval_cli, "run_pack_eval", lambda *args, **kwargs: report)
+
+    assert eval_cli.main(["--pack", "demo", "--json"]) == 0
+    configure_logging.assert_called_once_with(level="WARNING")
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert json.loads(captured.out)[0]["pack_id"] == "demo"
