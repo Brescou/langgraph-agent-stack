@@ -141,7 +141,7 @@ class TestGetVectorstorePGVectorSuccess:
     _PG_ENV = {
         "RAG_ENABLED": "true",
         "MEMORY_BACKEND": "postgres",
-        "POSTGRES_URL": "postgresql://user:pass@localhost:5432/db",
+        "POSTGRES_URL": "postgresql+psycopg://user:pass@localhost:5432/db",
         "LLM_PROVIDER": "mock",
         "EMBEDDING_PROVIDER": "mock",
         "SQLITE_PATH": ":memory:",
@@ -170,7 +170,7 @@ class TestGetVectorstorePGVectorSuccess:
         mock_pg_module.PGVector.assert_called_once()
         kwargs = mock_pg_module.PGVector.call_args.kwargs
         assert kwargs["collection_name"] == "langgraph_rag"
-        assert kwargs["connection"] == "postgresql://user:pass@localhost:5432/db"
+        assert kwargs["connection"] == "postgresql+psycopg://user:pass@localhost:5432/db"
         assert isinstance(kwargs["embeddings"], DeterministicFakeEmbedding)
 
     def test_raises_runtime_error_when_postgres_url_empty(self):
