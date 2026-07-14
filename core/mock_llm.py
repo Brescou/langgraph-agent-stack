@@ -33,6 +33,33 @@ _mock_plain_bullets: ContextVar[int | None] = ContextVar(
 
 _research_local = threading.local()
 
+# Stable model id for CostTracker / pricing table (see core/cost.py).
+MOCK_MODEL_ID = "mock-provider"
+
+
+def _message_text(message: BaseMessage) -> str:
+    """Flatten a chat message's content to a string for token estimation."""
+    content = getattr(message, "content", "")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict) and "text" in block:
+                parts.append(str(block["text"]))
+            else:
+                parts.append(str(block))
+        return "".join(parts)
+    return str(content)
+
+
+def _synthetic_token_count(text: str) -> int:
+    """Deterministic token estimate from character length (≈4 chars/token)."""
+    return max(1, len(text) // 4)
+
+
 # Ordered responses for ResearchAgent (3) + AnalystAgent (3) — see agents/*.py.
 RESEARCH_PIPELINE_RESPONSES: tuple[str, ...] = (
     json.dumps(["sub-query 1", "sub-query 2", "sub-query 3"]),
@@ -170,9 +197,15 @@ def minimal_valid_input(model: type[BaseModel]) -> dict[str, Any]:
 class MockProviderChatModel(BaseChatModel):
     """Deterministic mock chat model with schema-aware and pipeline modes."""
 
+    model_name: str = MOCK_MODEL_ID
+
     @property
     def _llm_type(self) -> str:
-        return "mock-provider"
+        return MOCK_MODEL_ID
+
+    @property
+    def _identifying_params(self) -> Mapping[str, Any]:
+        return {"model_name": self.model_name}
 
     def bind_tools(self, tools: Any, **kwargs: Any) -> MockProviderChatModel:
         return self
@@ -185,8 +218,25 @@ class MockProviderChatModel(BaseChatModel):
         **kwargs: Any,
     ) -> ChatResult:
         content = self._next_content()
+        input_text = "".join(_message_text(message) for message in messages)
+        input_tokens = _synthetic_token_count(input_text)
+        output_tokens = _synthetic_token_count(content)
+        usage_metadata = {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": input_tokens + output_tokens,
+        }
+        message = AIMessage(
+            content=content,
+            usage_metadata=usage_metadata,
+            response_metadata={
+                "model_name": self.model_name,
+                "model_id": self.model_name,
+            },
+        )
         return ChatResult(
-            generations=[ChatGeneration(message=AIMessage(content=content))]
+            generations=[ChatGeneration(message=message)],
+            llm_output={"model_name": self.model_name},
         )
 
     async def _agenerate(

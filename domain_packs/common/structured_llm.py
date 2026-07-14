@@ -18,6 +18,7 @@ from typing import Any, ClassVar
 import anyio.from_thread
 from langchain_core.exceptions import OutputParserException
 from langchain_core.output_parsers import JsonOutputParser
+from langchain_core.runnables import Runnable
 from langgraph.graph import END, StateGraph
 from pydantic import BaseModel
 from typing_extensions import TypedDict
@@ -40,6 +41,7 @@ from connectors.base import (
     record_to_source_ref,
 )
 from core.config import get_settings
+from core.cost import BudgetExceededError, CostTracker, UnknownModelPricingError
 from core.memory import create_checkpointer
 from core.observability import trace_span
 from core.security import InputValidator
@@ -137,7 +139,24 @@ class StructuredLLMPack(BaseDomainPack):
         #: SourceRefs for the connector snippets used on the last reference-text
         #: resolution (audit trail for citations). Reset on each resolution.
         self.last_source_refs: list[SourceRef] = []
+
+        # Same budget resolution as ResearchAnalysisPack / BaseAgent: explicit
+        # argument, then settings default. Always attach a tracker so typed
+        # packs report cost_usd (0.0 when pricing is zero / no spend yet).
+        _settings = get_settings()
+        _effective_budget: float | None = (
+            budget_usd if budget_usd is not None else _settings.pack_default_budget_usd
+        )
+        self._cost_tracker = CostTracker(budget_usd=_effective_budget)
+        if isinstance(self._llm, Runnable):
+            self._llm = self._llm.with_config({"callbacks": [self._cost_tracker]})
+
         self._graph = self._build_graph()
+
+    @property
+    def cost_usd(self) -> float:
+        """Total USD cost for this pack run (shared CostTracker)."""
+        return self._cost_tracker.total_cost_usd
 
     def _build_graph(self) -> Any:
         graph = StateGraph(_StructuredState)
@@ -278,6 +297,10 @@ class StructuredLLMPack(BaseDomainPack):
                 try:
                     with mock_output_schema_context(self.output_schema):
                         response = self._llm.invoke(prompt)
+                except BudgetExceededError as exc:
+                    raise AgentBudgetExceededError(str(exc)) from exc
+                except UnknownModelPricingError as exc:
+                    raise AgentBudgetExceededError(str(exc)) from exc
                 except Exception as exc:
                     if is_auth_llm_error(exc):
                         raise make_auth_error(
@@ -297,6 +320,8 @@ class StructuredLLMPack(BaseDomainPack):
                     llm=self._llm,
                 )
                 output = self._inject_source_citations(output)
+                if "cost_usd" in self.output_schema.model_fields:
+                    output = output.model_copy(update={"cost_usd": self.cost_usd})
                 return {
                     **state,
                     "output": output.model_dump(),
@@ -305,8 +330,9 @@ class StructuredLLMPack(BaseDomainPack):
                 }  # type: ignore[return-value]
             except AgentAuthenticationError:
                 raise
+            except AgentBudgetExceededError:
+                raise
             except (
-                AgentBudgetExceededError,
                 AgentExecutionError,
                 AgentTimeoutError,
                 AgentValidationError,
@@ -334,7 +360,7 @@ class StructuredLLMPack(BaseDomainPack):
         config = {"configurable": {"thread_id": self.run_id}}
         try:
             final = self._graph.invoke(initial, config=config)
-        except AgentAuthenticationError:
+        except (AgentAuthenticationError, AgentBudgetExceededError):
             raise
         except Exception as exc:
             raise AgentExecutionError(

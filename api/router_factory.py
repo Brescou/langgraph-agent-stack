@@ -88,7 +88,10 @@ def _serialize_pack_result(
     if hasattr(output_model, "from_summary_result"):
         return output_model.from_summary_result(result, cost_usd=cost_usd)
     if hasattr(result, "model_dump"):
-        return result.model_dump()
+        data = result.model_dump()
+        if cost_usd is not None:
+            data["cost_usd"] = cost_usd
+        return data
     return result
 
 
