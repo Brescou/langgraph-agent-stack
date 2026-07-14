@@ -224,6 +224,31 @@ class Settings(BaseSettings):
         validation_alias="RAG_ENABLED",
         description="Enable RAG (Retrieval-Augmented Generation) via a vector store.",
     )
+    embedding_provider: Literal[
+        "auto", "openai", "azure", "google", "ollama", "mock"
+    ] = Field(
+        default="auto",
+        validation_alias="EMBEDDING_PROVIDER",
+        description=(
+            "Embeddings backend for RAG. ``auto`` follows LLM_PROVIDER when "
+            "possible; anthropic/bedrock fall back to mock outside production."
+        ),
+    )
+    embedding_model: str | None = Field(
+        default=None,
+        validation_alias="EMBEDDING_MODEL",
+        description=(
+            "Optional embedding model id (provider default if unset). "
+            "Ignored when EMBEDDING_PROVIDER=mock."
+        ),
+    )
+    embedding_dimensions: int = Field(
+        default=384,
+        ge=8,
+        le=4096,
+        validation_alias="EMBEDDING_DIMENSIONS",
+        description="Vector size for mock/deterministic embeddings.",
+    )
     connector_enabled: bool = Field(
         default=False,
         validation_alias="CONNECTOR_ENABLED",
