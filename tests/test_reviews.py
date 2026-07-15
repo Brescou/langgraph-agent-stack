@@ -253,7 +253,7 @@ def _run_talent_screening(test_client: TestClient) -> None:
         pass
 
     with (
-        patch("api.router_factory.get_settings", return_value=_regulated_settings()),
+        patch("api.pack_execution.get_settings", return_value=_regulated_settings()),
         patch.object(TalentScreeningPack, "__init__", _noop_init),
         patch.object(TalentScreeningPack, "run_from_input", return_value=output),
         patch.object(TalentScreeningPack, "close", return_value=None),

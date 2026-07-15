@@ -21,7 +21,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import api.state as state
-from api.router_factory import SESSION_IN_FLIGHT_DETAIL
+from api.pack_execution import SESSION_IN_FLIGHT_DETAIL
 from core.security import InMemorySessionRegistry
 
 # ---------------------------------------------------------------------------
@@ -188,7 +188,7 @@ def test_slow_save_run_does_not_block_request(test_client: TestClient) -> None:
 
     with (
         patch("api.state.shared_memory", slow_memory),
-        patch("api.router_factory.SAVE_RUN_TIMEOUT_SECONDS", 0.05),
+        patch("api.pack_execution.SAVE_RUN_TIMEOUT_SECONDS", 0.05),
     ):
         started = time.monotonic()
         response = test_client.post(
