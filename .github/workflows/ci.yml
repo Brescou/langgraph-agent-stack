@@ -92,12 +92,15 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: ~/.cache/uv
+          # Shared with the pytest --all-extras job: ~/.cache/uv is a
+          # content-addressed package cache (not the project venv), so no
+          # extras discriminator is required to avoid cross-job pollution.
           key: uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('pyproject.toml', 'uv.lock') }}
           restore-keys: |
             uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-
 
-      - name: Install all dependencies (including dev)
-        run: uv sync --frozen
+      - name: Install all dependencies (including extras + dev)
+        run: uv sync --frozen --all-extras
 
       - name: Run pyright
         run: uv run pyright

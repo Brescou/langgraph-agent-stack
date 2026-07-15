@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Literal
 
 from langchain_core.embeddings import Embeddings
+from pydantic import SecretStr
 
 from core.config import Settings
 
@@ -107,7 +108,7 @@ def get_embeddings(settings: Settings) -> Embeddings:
                     "when EMBEDDING_PROVIDER=azure"
                 )
             return AzureOpenAIEmbeddings(
-                api_key=settings.azure_openai_api_key,
+                api_key=SecretStr(settings.azure_openai_api_key),
                 azure_endpoint=settings.azure_openai_endpoint,
                 azure_deployment=settings.azure_openai_deployment,
                 model=model or _DEFAULT_MODELS["azure"],
@@ -125,8 +126,10 @@ def get_embeddings(settings: Settings) -> Embeddings:
                 raise ValueError(
                     "GOOGLE_API_KEY is required when EMBEDDING_PROVIDER=google"
                 )
+            # google_api_key is a real model field (SecretStr); pyright only sees
+            # the pydantic-synthesized **data __init__ and rejects the kwarg.
             return GoogleGenerativeAIEmbeddings(
-                google_api_key=settings.google_api_key,
+                google_api_key=SecretStr(settings.google_api_key),  # type: ignore[call-arg]
                 model=model or _DEFAULT_MODELS["google"],
             )
 

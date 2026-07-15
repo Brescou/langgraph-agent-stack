@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **MCP server** (#92) — optional streamable-HTTP endpoint at `/mcp` (`MCP_SERVER_ENABLED`, `uv sync --extra mcp`) that auto-exposes one MCP tool per registered domain pack. Tools share the typed REST execution path (validation, budgets, compliance gating); regulated packs are omitted from the tool list when gated off.
 
+### CI
+- **Typecheck installs all extras** (#96) — the pyright job now runs `uv sync --frozen --all-extras` (same as pytest) so provider-specific code is checked against real stubs. Fixes Azure/Google embeddings typing in `core/embeddings.py` that the previous extras-free job could not see.
+
 ### Fixed
 - **Inconsistent `cost_usd` in mock mode** (#88) — typed pack routes returned `null` while legacy `POST /run` returned `0.0`. `MockProviderChatModel` now emits deterministic `usage_metadata`, `mock-provider` is priced at $0 in the cost table, and `StructuredLLMPack` wires `CostTracker` so every route (including SSE finals) reports `0.0`. Budget `402` is now exercisable in mock via `LLM_COST_TABLE_PATH` override.
 - **Vector store TODOs** (#90) — every RAG backend now receives an explicit embeddings instance via `core/embeddings.py` (factory parallel to `get_llm`; `EMBEDDING_PROVIDER=mock` is deterministic and keyless). PGVector uses maintained `langchain_postgres.PGVector` (new `postgres` extra dependency) instead of the deprecated community class.
