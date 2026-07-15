@@ -297,3 +297,96 @@ def test_eval_cli_configures_logging_and_keeps_json_stdout(
     captured = capsys.readouterr()
     assert captured.err == ""
     assert json.loads(captured.out)[0]["pack_id"] == "demo"
+
+
+# ---------------------------------------------------------------------------
+# CI threshold gate
+# ---------------------------------------------------------------------------
+
+
+def test_load_thresholds_default_and_overrides(tmp_path) -> None:
+    from evals.thresholds import load_thresholds
+
+    path = tmp_path / "thresholds.yaml"
+    path.write_text(
+        "default_pass_rate: 0.9\npacks:\n  summariser: 1.0\n",
+        encoding="utf-8",
+    )
+    config = load_thresholds(path)
+    assert config.default_pass_rate == 0.9
+    assert config.min_pass_rate("summariser") == 1.0
+    assert config.min_pass_rate("research_analysis") == 0.9
+
+
+def test_evaluate_thresholds_reports_failed_cases() -> None:
+    from evals.models import CaseResult, EvalReport
+    from evals.thresholds import (
+        ThresholdConfig,
+        evaluate_thresholds,
+        format_threshold_failures,
+    )
+
+    report = EvalReport(
+        pack_id="summariser",
+        version="default",
+        cases=[
+            CaseResult(case_id="ok", passed=True),
+            CaseResult(case_id="broken", passed=False),
+        ],
+    )
+    config = ThresholdConfig(default_pass_rate=1.0, packs={})
+    failures = evaluate_thresholds([report], config)
+    assert len(failures) == 1
+    assert failures[0].failed_case_ids == ["broken"]
+    summary = format_threshold_failures(failures)
+    assert "summariser" in summary
+    assert "broken" in summary
+
+
+def test_shipped_thresholds_cover_builtin_datasets() -> None:
+    from evals.runner import list_builtin_datasets
+    from evals.thresholds import DEFAULT_THRESHOLDS_PATH, load_thresholds
+
+    config = load_thresholds(DEFAULT_THRESHOLDS_PATH)
+    for pack_id in list_builtin_datasets():
+        assert config.min_pass_rate(pack_id) == 1.0
+
+
+def test_eval_cli_thresholds_fail_with_stderr_summary(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    """Threshold failures keep JSON on stdout and name packs on stderr."""
+    import evals.__main__ as eval_cli
+    from evals.models import CaseResult, EvalReport
+
+    monkeypatch.setattr(eval_cli, "configure_logging", MagicMock())
+    monkeypatch.setattr(eval_cli, "register_builtin_packs", MagicMock())
+
+    dataset = tmp_path / "demo.yaml"
+    dataset.write_text("cases: []\n", encoding="utf-8")
+    thresholds = tmp_path / "thresholds.yaml"
+    thresholds.write_text("default_pass_rate: 1.0\npacks: {}\n", encoding="utf-8")
+
+    monkeypatch.setattr(eval_cli, "list_builtin_datasets", lambda: ["demo"])
+    monkeypatch.setattr(eval_cli, "dataset_path_for", lambda _: dataset)
+    monkeypatch.setattr(eval_cli, "load_dataset", lambda _: [])
+
+    report = EvalReport(
+        pack_id="demo",
+        version="default",
+        cases=[
+            CaseResult(case_id="a", passed=True),
+            CaseResult(case_id="b", passed=False),
+        ],
+    )
+    monkeypatch.setattr(eval_cli, "run_pack_eval", lambda *args, **kwargs: report)
+
+    assert (
+        eval_cli.main(["--pack", "demo", "--json", "--thresholds", str(thresholds)])
+        == 1
+    )
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)[0]["pack_id"] == "demo"
+    assert "EVAL THRESHOLD FAILURES" in captured.err
+    assert "demo" in captured.err
+    assert "b" in captured.err

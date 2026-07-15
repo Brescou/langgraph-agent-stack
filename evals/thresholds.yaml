@@ -1,0 +1,12 @@
+# Minimum pass_rate (0.0–1.0) for the CI mock-mode eval gate.
+# Packs not listed under `packs` inherit `default_pass_rate`.
+#
+# Mock evals catch structural regressions only (schemas, parsing, graph wiring).
+# They do not measure semantic prompt quality — see evals/README.md.
+
+default_pass_rate: 1.0
+
+packs:
+  research_analysis: 1.0
+  summariser: 1.0
+  talent_screening: 1.0

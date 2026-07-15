@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### CI
 - **Typecheck installs all extras** (#96) — the pyright job now runs `uv sync --frozen --all-extras` (same as pytest) so provider-specific code is checked against real stubs. Fixes Azure/Google embeddings typing in `core/embeddings.py` that the previous extras-free job could not see.
+- **Mock pack evals gate every PR** (#102) — new CI job runs `python -m evals --all --json --thresholds` with `LLM_PROVIDER=mock` against `evals/thresholds.yaml` (default pass_rate 1.0). Catches structural regressions only; documented in `evals/README.md`.
 
 ### Fixed
 - **Inconsistent `cost_usd` in mock mode** (#88) — typed pack routes returned `null` while legacy `POST /run` returned `0.0`. `MockProviderChatModel` now emits deterministic `usage_metadata`, `mock-provider` is priced at $0 in the cost table, and `StructuredLLMPack` wires `CostTracker` so every route (including SSE finals) reports `0.0`. Budget `402` is now exercisable in mock via `LLM_COST_TABLE_PATH` override.

@@ -5,6 +5,7 @@
 #   typecheck    — pyright basic type checking
 #   infra-lint   — helm lint, terraform validate, checkov, kubeconform, kube-linter
 #   test         — pytest with coverage via uv
+#   evals        — mock-mode pack eval gate (structural regressions)
 #   docker-smoke — local image build + /health startup validation (PR + main)
 #   integration  — real backend tests (Postgres/Redis via testcontainers)
 #   publish      — GHCR push + Syft SBOM + Cosign keyless sign (main only; not a build test)
@@ -193,6 +194,44 @@ jobs:
           name: coverage-report-${{ matrix.python-version }}
           path: coverage.xml
           retention-days: 7
+
+# ---------------------------------------------------------------------------
+# Job 4a — Pack evals (mock mode structural gate)
+# ---------------------------------------------------------------------------
+  evals:
+    name: Pack evals (mock)
+    runs-on: ubuntu-latest
+    needs: [lint]
+    env:
+      LLM_PROVIDER: mock
+      SEARCH_PROVIDER: mock
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2 (SHA verified)
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Cache uv dependencies
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('pyproject.toml', 'uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Run mock pack evals against thresholds
+        run: >
+          uv run python -m evals --all --json
+          --thresholds evals/thresholds.yaml
 
 # ---------------------------------------------------------------------------
 # Job 4b — README quickstart smoke (COUPLED TO README.md BY DESIGN)
