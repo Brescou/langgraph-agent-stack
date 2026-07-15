@@ -153,6 +153,57 @@ class TestMcpFlagOnMount:
         assert "/mcp" in paths
 
 
+class TestMcpAuth:
+    """`/mcp` is not auth-exempt — same Bearer gate as REST when API_KEY is set."""
+
+    def test_mcp_requires_bearer_when_api_key_configured(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from core.config import get_settings
+
+        monkeypatch.setenv("LLM_PROVIDER", "mock")
+        monkeypatch.setenv("MCP_SERVER_ENABLED", "true")
+        monkeypatch.setenv("REGULATED_PACKS_ENABLED", "false")
+        monkeypatch.setenv("API_KEY", "mcp-secret-token")
+        get_settings.cache_clear()
+
+        import api.state as api_state
+
+        api_state.shared_llm = None
+        api_state.shared_checkpointer = None
+
+        from api.main import app
+
+        try:
+            with TestClient(app, raise_server_exceptions=False) as client:
+                missing = client.post("/mcp", json={})
+                assert missing.status_code == 401
+                assert "Bearer" in missing.json()["detail"]
+
+                wrong = client.post(
+                    "/mcp",
+                    json={},
+                    headers={"Authorization": "Bearer wrong-token"},
+                )
+                assert wrong.status_code == 401
+
+                # Auth passes; MCP may still reject for Accept headers (406) —
+                # anything other than 401 proves the mount is behind the gate.
+                ok = client.post(
+                    "/mcp",
+                    json={},
+                    headers={
+                        "Authorization": "Bearer mcp-secret-token",
+                        "Accept": "application/json, text/event-stream",
+                    },
+                )
+                assert ok.status_code != 401
+        finally:
+            api_state.shared_llm = None
+            api_state.shared_checkpointer = None
+            get_settings.cache_clear()
+
+
 class TestMcpTools:
     @pytest.mark.asyncio
     async def test_list_tools_matches_non_gated_packs(
