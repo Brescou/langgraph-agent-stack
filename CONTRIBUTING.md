@@ -93,11 +93,18 @@ Both checks run automatically in CI on every push and pull request. Your PR will
 
 ## Type checking
 
-CI runs [pyright](https://github.com/microsoft/pyright) on every push and PR. Run it locally before pushing:
+CI runs [pyright](https://github.com/microsoft/pyright) on every push and PR.
+The typecheck job installs **all extras** so provider-specific imports
+(`langchain_openai`, `langchain_google_genai`, `mcp`, …) are checked against
+real stubs — match that locally:
 
 ```bash
+uv sync --all-extras
 uv run pyright
 ```
+
+A plain `uv sync` without extras will miss those call sites (pyright only
+emits missing-import warnings there).
 
 ## Pre-commit hooks
 
