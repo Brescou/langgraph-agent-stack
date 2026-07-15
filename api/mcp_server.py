@@ -139,8 +139,10 @@ def build_mcp_server() -> Any:
     from mcp.server.transport_security import TransportSecuritySettings
 
     settings = get_settings()
-    # Hosted behind the FastAPI app (Bearer API_KEY + existing middleware).
-    # Disable DNS-rebinding defaults that only allow localhost.
+    # DNS rebinding protection defaults to localhost-only hosts; that breaks
+    # any real deployment Host header. Disable deliberately: this transport is
+    # mounted on the FastAPI app, so Bearer API_KEY (+ existing middleware) is
+    # the auth guardrail — not Host allowlisting.
     mcp_server = FastMCP(
         "langgraph-agent-stack",
         stateless_http=True,
@@ -158,7 +160,11 @@ def build_mcp_server() -> Any:
         description = getattr(pack_cls, "description", None) or pack_id
         fn = _make_tool_callable(pack_id, input_model)
         tool = Tool.from_function(fn, name=pack_id, description=description)
-        # Prefer the pack's Pydantic JSON schema (Field constraints, etc.).
+        # Override listed schema with the pack's Pydantic JSON Schema so Field
+        # constraints (minLength, ge, …) match REST. FastMCP has no public
+        # "register Tool with custom parameters" API in v1, so we write through
+        # _tool_manager._tools (private). Risk is bounded by pyproject pin
+        # mcp>=1.0,<2 — revisit if upgrading past that major.
         tool.parameters = input_model.model_json_schema()
         mcp_server._tool_manager._tools[tool.name] = tool
         logger.info("MCP tool registered", extra={"pack_id": pack_id})
