@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import inspect
 import logging
-from typing import Any
+from typing import Any, cast
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, ValidationError
@@ -109,9 +109,12 @@ def _make_tool_callable(pack_id: str, input_model: type[BaseModel]) -> Any:
 
     _impl.__name__ = pack_id
     _impl.__doc__ = f"Run the {pack_id} domain pack."
-    _impl.__signature__ = inspect.Signature(params, return_annotation=dict)
-    _impl.__annotations__ = {**annotations, "return": dict}
-    return _impl
+    # FastMCP derives the call-time arg model from __signature__; assign via
+    # Any because FunctionType does not declare that attribute for pyright.
+    impl: Any = _impl
+    impl.__signature__ = inspect.Signature(params, return_annotation=dict)
+    impl.__annotations__ = {**annotations, "return": dict}
+    return cast(Any, impl)
 
 
 def _iter_mcp_pack_ids(*, regulated_packs_enabled: bool) -> list[str]:
