@@ -139,6 +139,36 @@ versioning, and canary weights as built-ins. Packaging walkthrough:
 
 Responses include `cost_usd` when cost tracking is active; HTTP **402** on budget exceed. See `/docs` for request/response schemas.
 
+## MCP server
+
+Opt-in streamable-HTTP MCP endpoint that auto-generates **one tool per registered domain pack** (same Pydantic schemas as `POST /packs/{id}/run`). Every tool call goes through the existing kernel (auth, rate limits, budgets → tool error mirroring HTTP 402, regulated-pack gating).
+
+```bash
+uv sync --extra mcp
+# .env
+MCP_SERVER_ENABLED=true
+LLM_PROVIDER=mock   # optional — CI / no API key
+```
+
+Endpoint: `http://localhost:8000/mcp` (mounted only when the flag is on). Regulated packs are omitted from the tool list while `REGULATED_PACKS_ENABLED=false`.
+
+When `API_KEY` is set, pass the same Bearer token the REST API expects — for example in Claude Desktop / a generic MCP client config:
+
+```json
+{
+  "mcpServers": {
+    "langgraph-agent-stack": {
+      "url": "http://localhost:8000/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_API_KEY"
+      }
+    }
+  }
+}
+```
+
+Install the matching client transport for streamable HTTP; stdio is not shipped in this release.
+
 ## LLM providers
 
 Set `LLM_PROVIDER` and install the matching extra. Details and gateway overrides: `.env.example`.

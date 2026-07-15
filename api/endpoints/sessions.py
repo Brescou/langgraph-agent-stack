@@ -38,9 +38,9 @@ async def get_session_history(
     if mem is None:
         return HistoryResponse(session_id=session_id, entries=[], total=0)
 
-    from api.router_factory import _run_in_executor
+    from api.pack_execution import run_in_executor
 
-    runs = await _run_in_executor(mem.list_runs_by_session, session_id)
+    runs = await run_in_executor(mem.list_runs_by_session, session_id)
     entries = [
         HistoryEntry(
             run_id=r["run_id"],

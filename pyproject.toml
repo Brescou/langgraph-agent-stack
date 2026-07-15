@@ -65,6 +65,9 @@ observability = [
     "python-json-logger>=2.0",
     "prometheus-client>=0.20",
 ]
+mcp = [
+    "mcp>=1.0,<2",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = [

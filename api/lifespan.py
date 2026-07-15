@@ -153,6 +153,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     state.shared_memory = create_run_history(settings)
 
+    mcp_server = None
+    if settings.mcp_server_enabled:
+        from api.mcp_server import mount_mcp_server
+
+        mcp_server = mount_mcp_server(app)
+
     logger.info(
         "API server starting up",
         extra={
@@ -162,6 +168,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             "port": settings.api_port,
             "llm_provider": settings.llm_provider,
             "memory_backend": settings.memory_backend.value,
+            "mcp_server_enabled": settings.mcp_server_enabled,
         },
     )
 
@@ -169,7 +176,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if server_shutting_down is not None:
         server_shutting_down.set(0)
 
-    yield  # Application is live here
+    if mcp_server is not None:
+        async with mcp_server.session_manager.run():
+            yield  # Application is live here (MCP session manager active)
+    else:
+        yield  # Application is live here
 
     logger.info("API server shutting down — draining in-flight requests")
     state.shutting_down.set()

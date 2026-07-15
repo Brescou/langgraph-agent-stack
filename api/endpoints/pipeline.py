@@ -31,7 +31,7 @@ from api.dependencies import (
     validate_pack_query,
 )
 from api.models import ResearchRequest, ResearchResponse, RunRequest, RunResponse
-from api.router_factory import SESSION_IN_FLIGHT_DETAIL, _save_run_best_effort
+from api.pack_execution import SESSION_IN_FLIGHT_DETAIL, save_run_best_effort
 from control_plane.enforce import effective_stream_timeout_seconds
 from core.config import Settings, get_settings
 from core.observability import active_pipelines
@@ -184,7 +184,7 @@ async def run_pipeline(
                 detail="An unexpected error occurred.",
             ) from exc
 
-        await _save_run_best_effort(
+        await save_run_best_effort(
             run_id=run_id,
             query=query,
             result=report_payload,
@@ -261,7 +261,7 @@ async def _stream_pipeline(
             },
         )
 
-        await _save_run_best_effort(
+        await save_run_best_effort(
             run_id=run_id,
             query=query,
             result=report.to_dict(),
@@ -508,7 +508,7 @@ async def run_research(
             detail="An unexpected error occurred.",
         ) from exc
 
-    await _save_run_best_effort(
+    await save_run_best_effort(
         run_id=run_id,
         query=query,
         result=result_payload,

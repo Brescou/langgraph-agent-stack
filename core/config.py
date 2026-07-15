@@ -542,6 +542,16 @@ class Settings(BaseSettings):
         ),
     )
 
+    mcp_server_enabled: bool = Field(
+        default=False,
+        validation_alias="MCP_SERVER_ENABLED",
+        description=(
+            "When true, mount a streamable-HTTP MCP server at /mcp that "
+            "exposes one tool per registered domain pack (requires the "
+            "optional mcp extra: uv sync --extra mcp). Off by default."
+        ),
+    )
+
     @property
     def llm_config(self) -> LLMConfig:
         """Build an :class:`~core.llm.LLMConfig` from the current settings."""
