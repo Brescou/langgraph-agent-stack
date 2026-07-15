@@ -6,6 +6,7 @@ Usage::
     python -m evals --pack summariser
     python -m evals --pack summariser --version 1.0 --compare 2.0
     python -m evals --all --json
+    python -m evals --all --json --thresholds evals/thresholds.yaml
 """
 
 from __future__ import annotations
@@ -23,6 +24,12 @@ from evals.runner import (
     list_builtin_datasets,
     load_dataset,
     run_pack_eval,
+)
+from evals.thresholds import (
+    DEFAULT_THRESHOLDS_PATH,
+    evaluate_thresholds,
+    format_threshold_failures,
+    load_thresholds,
 )
 from pack_kernel.builtin_packs import register_builtin_packs
 
@@ -75,6 +82,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--list", action="store_true", help="List built-in datasets and exit."
     )
+    parser.add_argument(
+        "--thresholds",
+        nargs="?",
+        const=str(DEFAULT_THRESHOLDS_PATH),
+        default=None,
+        metavar="PATH",
+        help=(
+            "Enforce minimum pass_rate floors from a YAML file "
+            f"(default path when flag is set with no value: {DEFAULT_THRESHOLDS_PATH}). "
+            "JSON stays on stdout; threshold failures are printed to stderr."
+        ),
+    )
     args = parser.parse_args(argv)
 
     configure_logging(level="WARNING")
@@ -89,8 +108,13 @@ def main(argv: list[str] | None = None) -> int:
     if not pack_ids:
         parser.error("provide --pack <id>, --all, or --list")
 
+    threshold_config = None
+    if args.thresholds is not None:
+        threshold_config = load_thresholds(args.thresholds)
+
     exit_code = 0
     json_out: list[dict] = []
+    reports: list[EvalReport] = []
     for pack_id in pack_ids:
         dataset = Path(args.dataset) if args.dataset else dataset_path_for(pack_id)
         if not dataset.exists():
@@ -115,8 +139,10 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"\n  diff: {json.dumps(comparison.diff(), indent=2)}")
             if comparison.candidate.pass_rate < comparison.baseline.pass_rate:
                 exit_code = 1
+            reports.append(comparison.candidate)
         else:
             report = run_pack_eval(pack_id, cases, version=args.version)
+            reports.append(report)
             if args.json:
                 json_out.append(
                     {
@@ -126,11 +152,18 @@ def main(argv: list[str] | None = None) -> int:
                 )
             else:
                 _print_report(report)
-            if report.pass_rate < 1.0:
+            if threshold_config is None and report.pass_rate < 1.0:
                 exit_code = 1
 
     if args.json:
         print(json.dumps(json_out, indent=2))
+
+    if threshold_config is not None:
+        failures = evaluate_thresholds(reports, threshold_config)
+        if failures:
+            print(format_threshold_failures(failures), file=sys.stderr)
+            exit_code = 1
+
     return exit_code
 
 
