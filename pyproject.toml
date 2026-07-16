@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "langgraph-agent-stack"
-version = "0.6.2"
+version = "0.7.0"
 description = "Deployable multi-agent orchestration stack (LangGraph + FastAPI) with production infra baseline; add your own identity layer for multi-tenant SaaS"
 readme = "README.md"
 requires-python = ">=3.12"
