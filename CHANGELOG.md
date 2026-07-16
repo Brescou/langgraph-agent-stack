@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-16
+
 ### Added
 - **MCP server** (#92) — optional streamable-HTTP endpoint at `/mcp` (`MCP_SERVER_ENABLED`, `uv sync --extra mcp`) that auto-exposes one MCP tool per registered domain pack. Tools share the typed REST execution path (validation, budgets, compliance gating); regulated packs are omitted from the tool list when gated off.
 
