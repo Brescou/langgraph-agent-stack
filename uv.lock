@@ -1451,16 +1451,16 @@ wheels = [
 
 [[package]]
 name = "langchain"
-version = "1.3.13"
+version = "1.3.14"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "langchain-core" },
     { name = "langgraph" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/29/33/fd716d0273c8495482953bd63461bf02f71f3a8f4a2fe6c0a70a0e6ff799/langchain-1.3.13.tar.gz", hash = "sha256:bcf874680f31e9970f0db2264509df5bc2115d9680e9d651d537eb49bf1a7d8a", size = 642868, upload-time = "2026-07-10T23:06:08.555Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/29/68/a6dbad9c22df4087a0f9e79ddd46226c442b30128bfeee538d5889492a73/langchain-1.3.14.tar.gz", hash = "sha256:1b6696c72ba3bbbce54d745e0180742c9f6ece8bbc59ed5a46c3e20b9a435929", size = 645181, upload-time = "2026-07-16T13:28:18.29Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/95/c6/dc676c632f3d20c88789b0726c43ad5e039c25338cc3bb7090fc247d1522/langchain-1.3.13-py3-none-any.whl", hash = "sha256:20a8fe4b1dea7db74356f7d2b5455c4970099b9f7f53c2122ea97f115c907fbd", size = 136911, upload-time = "2026-07-10T23:06:07.012Z" },
+    { url = "https://files.pythonhosted.org/packages/a9/ec/0f942e78a621f8e3162ff1ed24284f469aaf51fb4607ee5831c626f2b2bc/langchain-1.3.14-py3-none-any.whl", hash = "sha256:4d10dbe91005952cddd56d0dc77aa108964da6bae90ab20063653957e901f782", size = 139560, upload-time = "2026-07-16T13:28:16.498Z" },
 ]
 
 [[package]]
@@ -1767,7 +1767,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "idna", specifier = ">=3.15" },
-    { name = "langchain", specifier = ">=1.3.13,<2.0" },
+    { name = "langchain", specifier = ">=1.3.14,<2.0" },
     { name = "langchain-anthropic", marker = "extra == 'all-providers'", specifier = ">=1.4.8,<2.0" },
     { name = "langchain-anthropic", marker = "extra == 'anthropic'", specifier = ">=1.4.8,<2.0" },
     { name = "langchain-aws", marker = "extra == 'all-providers'", specifier = ">=1.6.2,<2.0" },
@@ -1785,7 +1785,7 @@ requires-dist = [
     { name = "langchain-postgres", marker = "extra == 'postgres'", specifier = ">=0.0.14" },
     { name = "langgraph", specifier = ">=1.2.9,<2.0" },
     { name = "langgraph-checkpoint-postgres", marker = "extra == 'postgres'", specifier = ">=3.1.0,<4.0" },
-    { name = "langgraph-checkpoint-redis", marker = "extra == 'redis'", specifier = ">=0.5.0,<1.0" },
+    { name = "langgraph-checkpoint-redis", marker = "extra == 'redis'", specifier = ">=0.5.1,<1.0" },
     { name = "langgraph-checkpoint-sqlite", specifier = ">=3.1.0,<4.0" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.0,<2" },
     { name = "opentelemetry-api", marker = "extra == 'observability'", specifier = ">=1.20" },
@@ -1851,7 +1851,7 @@ wheels = [
 
 [[package]]
 name = "langgraph-checkpoint-redis"
-version = "0.5.0"
+version = "0.5.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "langgraph-checkpoint" },
@@ -1859,9 +1859,9 @@ dependencies = [
     { name = "redis" },
     { name = "redisvl" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a1/11/93cfa9451ff79bdc5ec86b429ef14ff602c3461228c18419b69da96fbfa7/langgraph_checkpoint_redis-0.5.0.tar.gz", hash = "sha256:595ded300fc0a46e81c39cc8bd9ff762f713c1ce6f8126cb13f01d24625c0775", size = 119730, upload-time = "2026-06-25T09:30:02.953Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/52/81/8a578f048e8ae3ff79cdd223b98158c8b23e3efc640281f3986b03bc8779/langgraph_checkpoint_redis-0.5.1.tar.gz", hash = "sha256:ea3696f7b78ec8380949961cd9b9767c373437ec0c6fcc56dfbab3bde4d78ff4", size = 119869, upload-time = "2026-07-14T17:46:45.176Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0d/74/106d0b1570aed42a39a7aa537436896e0ad187ff23864203984d645f621f/langgraph_checkpoint_redis-0.5.0-py3-none-any.whl", hash = "sha256:3d39497bc58f8f4ae07081b4f197f136a41c73a7bf73fc96b0de97c862eda126", size = 131508, upload-time = "2026-06-25T09:30:01.724Z" },
+    { url = "https://files.pythonhosted.org/packages/4f/71/e968397941d24d013a833e894731a3dadd5022e6bf3650b898efddf10a5b/langgraph_checkpoint_redis-0.5.1-py3-none-any.whl", hash = "sha256:9c9b1184fb98991d49ebed6a7b81ff05f2e994ee7d695bfb91410a9a512c178c", size = 131688, upload-time = "2026-07-14T17:46:43.723Z" },
 ]
 
 [[package]]
