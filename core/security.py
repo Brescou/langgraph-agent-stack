@@ -1035,3 +1035,31 @@ def validate_api_key_format(key: str, provider: str = "anthropic") -> bool:
         return False
     pattern = _API_KEY_PATTERNS.get(provider, _GENERIC_KEY_PATTERN)
     return bool(pattern.match(key))
+
+# ---------------------------------------------------------------------------
+# Idempotency
+# ---------------------------------------------------------------------------
+
+@runtime_checkable
+class IdempotencyStore(Protocol):
+    """Protocol for idempotency storage backends."""
+
+    def reserve(self, key: str) -> bool:
+        """Atomically reserve *key* for execution."""
+        ...
+
+    def get(self, key: str) -> Any | None:
+        """Return the stored record for *key*, if present."""
+        ...
+
+    def store_result(
+        self,
+        key: str,
+        response: Any,
+    ) -> None:
+        """Store the completed response for *key*."""
+        ...
+
+    def release(self, key: str) -> None:
+        """Release an in-flight reservation without caching a result."""
+        ...
