@@ -1063,3 +1063,19 @@ class IdempotencyStore(Protocol):
     def release(self, key: str) -> None:
         """Release an in-flight reservation without caching a result."""
         ...
+
+
+class IdempotencyStatus(Enum):
+    """Execution state for an idempotent request."""
+
+    RUNNING = "running"
+    COMPLETED = "completed"
+
+
+@dataclass(slots=True)
+class IdempotencyRecord:
+    """Stored metadata for an idempotent request."""
+
+    body_hash: str
+    status: IdempotencyStatus
+    response: Any | None = None
