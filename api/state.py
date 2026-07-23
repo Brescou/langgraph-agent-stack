@@ -18,6 +18,8 @@ from core.security import (
     InMemorySessionRegistry,
     InputValidator,
     SessionRegistryBackend,
+    IdempotencyStore,
+    InMemoryIdempotencyStore,
 )
 
 try:
@@ -62,6 +64,13 @@ _init_lock: threading.Lock = threading.Lock()
 session_registry: SessionRegistryBackend | None = None
 _session_registry_lock: threading.Lock = threading.Lock()
 
+# ---------------------------------------------------------------------------
+# Idempotency store
+# ---------------------------------------------------------------------------
+
+idempotency_store: IdempotencyStore | None = None
+_idempotency_store_lock: threading.Lock = threading.Lock()
+
 
 def _get_session_registry() -> SessionRegistryBackend:
     """Return the registry, lazily defaulting to in-memory.
@@ -91,6 +100,26 @@ def release_session(session_id: str) -> None:
     """Release the in-flight marker for *session_id* (idempotent)."""
     _get_session_registry().release(session_id)
 
+
+def _get_idempotency_store() -> IdempotencyStore:
+    """Return the store, lazily defaulting to in-memory.
+
+    The lifespan wires the configured backend (memory or Redis); the lazy
+    fallback keeps direct callers (unit tests) working without startup.
+    """
+    global idempotency_store
+
+    if idempotency_store is None:
+        with _idempotency_store_lock:
+            if idempotency_store is None:
+                idempotency_store = InMemoryIdempotencyStore()
+
+    return idempotency_store
+
+
+def get_shared_idempotency_store() -> IdempotencyStore:
+    """Return the shared idempotency store."""
+    return _get_idempotency_store()
 
 # ---------------------------------------------------------------------------
 # Accessor helpers (lazy-retry on None)
