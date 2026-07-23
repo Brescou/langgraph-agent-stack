@@ -1133,3 +1133,35 @@ class InMemoryIdempotencyStore:
         """Release an in-flight reservation without caching a result."""
         with self._lock:
             self._records.pop(key, None)
+
+
+def create_idempotency_store(
+    backend: Literal["memory", "redis"] = "memory",
+    redis_url: str = "",
+    ttl_seconds: int = 86400,
+) -> IdempotencyStore:
+    """Factory: build an idempotency store matching the configured backend.
+
+    Args:
+        backend: ``"memory"`` (default, per-process) or ``"redis"``
+            (shared across replicas).
+        redis_url: Required when ``backend="redis"``.
+        ttl_seconds: Record lifetime in seconds (ignored for the memory backend).
+
+    Returns:
+        A store instance satisfying ``IdempotencyStore``.
+    """
+    if backend == "redis":
+        if not redis_url:
+            logger.warning(
+                "IDEMPOTENCY_BACKEND=redis but REDIS_URL is not set — "
+                "falling back to in-memory idempotency store."
+            )
+            return InMemoryIdempotencyStore()
+
+        return RedisIdempotencyStore(
+            redis_url=redis_url,
+            ttl_seconds=ttl_seconds,
+        )
+
+    return InMemoryIdempotencyStore()
