@@ -61,6 +61,8 @@ from collections.abc import Mapping, Sequence
 from functools import lru_cache
 from typing import Any, Literal, Protocol, cast, runtime_checkable
 from urllib.parse import urlparse
+from dataclasses import dataclass
+from enum import Enum
 
 from starlette.requests import Request
 
@@ -1097,17 +1099,37 @@ class InMemoryIdempotencyStore:
         key: str,
         body_hash: str,
     ) -> bool:
-        ...
+        """Atomically reserve *key* for execution."""
+        with self._lock:
+            if key in self._records:
+                return False
+
+            self._records[key] = IdempotencyRecord(
+                body_hash=body_hash,
+                status=IdempotencyStatus.RUNNING,
+            )
+            return True
 
     def get(self, key: str) -> IdempotencyRecord | None:
-        ...
+        """Return the stored record for *key*, if present."""
+        with self._lock:
+            return self._records.get(key)
 
     def store_result(
         self,
         key: str,
         response: Any,
     ) -> None:
-        ...
+        """Store the completed response for *key*."""
+        with self._lock:
+            record = self._records.get(key)
+            if record is None:
+                raise KeyError(f"Unknown idempotency key: {key}")
+
+            record.status = IdempotencyStatus.COMPLETED
+            record.response = response
 
     def release(self, key: str) -> None:
-        ...
+        """Release an in-flight reservation without caching a result."""
+        with self._lock:
+            self._records.pop(key, None)
