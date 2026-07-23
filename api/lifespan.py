@@ -16,7 +16,7 @@ from core.config import Settings, get_settings
 from core.memory import cleanup_checkpointer_async, create_run_history
 from core.observability import init_tracing, server_shutting_down
 from core.review_store import create_review_store
-from core.security import create_rate_limiter, create_session_registry
+from core.security import create_rate_limiter, create_session_registry, create_idempotency_store
 from pack_kernel.builtin_packs import register_builtin_packs
 from pack_kernel.registry import PackRegistry
 
@@ -72,6 +72,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             backend=settings.session_registry_backend,
             redis_url=settings.redis_url,
             ttl_seconds=settings.session_lock_ttl_seconds,
+        )
+
+    if state.idempotency_store is None:
+        state.idempotency_store = create_idempotency_store(
+            backend=settings.idempotency_backend,
+            redis_url=settings.redis_url,
+            ttl_seconds=settings.idempotency_ttl_seconds,
         )
 
     if state.review_store is None:
