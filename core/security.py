@@ -1044,7 +1044,11 @@ def validate_api_key_format(key: str, provider: str = "anthropic") -> bool:
 class IdempotencyStore(Protocol):
     """Protocol for idempotency storage backends."""
 
-    def reserve(self, key: str) -> bool:
+    def reserve(
+        self,
+        key: str,
+        body_hash: str,
+    ) -> bool:
         """Atomically reserve *key* for execution."""
         ...
 
@@ -1079,3 +1083,31 @@ class IdempotencyRecord:
     body_hash: str
     status: IdempotencyStatus
     response: Any | None = None
+
+
+class InMemoryIdempotencyStore:
+    """Per-process idempotency store (single replica only)."""
+
+    def __init__(self) -> None:
+        self._records: dict[str, IdempotencyRecord] = {}
+        self._lock = threading.Lock()
+
+    def reserve(
+        self,
+        key: str,
+        body_hash: str,
+    ) -> bool:
+        ...
+
+    def get(self, key: str) -> IdempotencyRecord | None:
+        ...
+
+    def store_result(
+        self,
+        key: str,
+        response: Any,
+    ) -> None:
+        ...
+
+    def release(self, key: str) -> None:
+        ...
