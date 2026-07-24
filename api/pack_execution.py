@@ -191,6 +191,7 @@ async def execute_typed_pack_run(
     *,
     affinity_key: str | None = None,
     requested_version: str | None = None,
+    idempotency_key: str | None = None,
 ) -> PackRunResult:
     """Run a registered pack with the same kernel path as ``POST /packs/{id}/run``.
 
