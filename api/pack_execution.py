@@ -252,6 +252,24 @@ async def execute_typed_pack_run(
     validate_pack_body_fields(pack_id, body)
     query = validate_pack_query(pack_id, pack_primary_text(body))
 
+    body_hash = hashlib.sha256(
+        body.model_dump_json().encode("utf-8")
+    ).hexdigest()
+
+    idempotency_store = state.get_shared_idempotency_store()
+
+    if idempotency_key is not None:
+        record = idempotency_store.get(idempotency_key)
+
+        if record is None:
+            reserved = idempotency_store.reserve(
+                idempotency_key,
+                body_hash,
+            )
+
+            if not reserved:
+                ...
+
     settings = get_settings()
     from domain_packs.common.compliance import assert_regulated_pack_runtime_enabled
 
