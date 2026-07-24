@@ -414,6 +414,7 @@ class Settings(BaseSettings):
             "shares the locks across replicas (requires REDIS_URL)."
         ),
     )
+    
     session_lock_ttl_seconds: int = Field(
         default=300,
         ge=10,
@@ -422,6 +423,27 @@ class Settings(BaseSettings):
             "Lifetime of Redis session locks. Must exceed the longest "
             "expected run (STREAM_TIMEOUT_SECONDS plus a margin) so a "
             "crashed replica cannot block a session forever."
+        ),
+    )
+
+    idempotency_backend: Literal["memory", "redis"] = Field(
+        default="memory",
+        validation_alias="IDEMPOTENCY_BACKEND",
+        description=(
+            "Idempotency storage backend. 'memory' (default) is per-process; "
+            "'redis' shares idempotency records across replicas "
+            "(requires REDIS_URL)."
+        ),
+    )
+
+    idempotency_ttl_seconds: int = Field(
+        default=86400,
+        ge=60,
+        validation_alias="IDEMPOTENCY_TTL_SECONDS",
+        description=(
+            "Lifetime of completed idempotency records. Requests replayed "
+            "within this window return the cached result instead of "
+            "executing the pipeline again."
         ),
     )
 

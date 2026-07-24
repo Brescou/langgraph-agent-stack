@@ -61,6 +61,8 @@ from collections.abc import Mapping, Sequence
 from functools import lru_cache
 from typing import Any, Literal, Protocol, cast, runtime_checkable
 from urllib.parse import urlparse
+from dataclasses import dataclass
+from enum import Enum
 
 from starlette.requests import Request
 
@@ -1035,3 +1037,131 @@ def validate_api_key_format(key: str, provider: str = "anthropic") -> bool:
         return False
     pattern = _API_KEY_PATTERNS.get(provider, _GENERIC_KEY_PATTERN)
     return bool(pattern.match(key))
+
+# ---------------------------------------------------------------------------
+# Idempotency
+# ---------------------------------------------------------------------------
+
+@runtime_checkable
+class IdempotencyStore(Protocol):
+    """Protocol for idempotency storage backends."""
+
+    def reserve(
+        self,
+        key: str,
+        body_hash: str,
+    ) -> bool:
+        """Atomically reserve *key* for execution."""
+        ...
+
+    def get(self, key: str) -> Any | None:
+        """Return the stored record for *key*, if present."""
+        ...
+
+    def store_result(
+        self,
+        key: str,
+        response: Any,
+    ) -> None:
+        """Store the completed response for *key*."""
+        ...
+
+    def release(self, key: str) -> None:
+        """Release an in-flight reservation without caching a result."""
+        ...
+
+
+class IdempotencyStatus(Enum):
+    """Execution state for an idempotent request."""
+
+    RUNNING = "running"
+    COMPLETED = "completed"
+
+
+@dataclass(slots=True)
+class IdempotencyRecord:
+    """Stored metadata for an idempotent request."""
+
+    body_hash: str
+    status: IdempotencyStatus
+    response: Any | None = None
+
+
+class InMemoryIdempotencyStore:
+    """Per-process idempotency store (single replica only)."""
+
+    def __init__(self) -> None:
+        self._records: dict[str, IdempotencyRecord] = {}
+        self._lock = threading.Lock()
+
+    def reserve(
+        self,
+        key: str,
+        body_hash: str,
+    ) -> bool:
+        """Atomically reserve *key* for execution."""
+        with self._lock:
+            if key in self._records:
+                return False
+
+            self._records[key] = IdempotencyRecord(
+                body_hash=body_hash,
+                status=IdempotencyStatus.RUNNING,
+            )
+            return True
+
+    def get(self, key: str) -> IdempotencyRecord | None:
+        """Return the stored record for *key*, if present."""
+        with self._lock:
+            return self._records.get(key)
+
+    def store_result(
+        self,
+        key: str,
+        response: Any,
+    ) -> None:
+        """Store the completed response for *key*."""
+        with self._lock:
+            record = self._records.get(key)
+            if record is None:
+                raise KeyError(f"Unknown idempotency key: {key}")
+
+            record.status = IdempotencyStatus.COMPLETED
+            record.response = response
+
+    def release(self, key: str) -> None:
+        """Release an in-flight reservation without caching a result."""
+        with self._lock:
+            self._records.pop(key, None)
+
+
+def create_idempotency_store(
+    backend: Literal["memory", "redis"] = "memory",
+    redis_url: str = "",
+    ttl_seconds: int = 86400,
+) -> IdempotencyStore:
+    """Factory: build an idempotency store matching the configured backend.
+
+    Args:
+        backend: ``"memory"`` (default, per-process) or ``"redis"``
+            (shared across replicas).
+        redis_url: Required when ``backend="redis"``.
+        ttl_seconds: Record lifetime in seconds (ignored for the memory backend).
+
+    Returns:
+        A store instance satisfying ``IdempotencyStore``.
+    """
+    if backend == "redis":
+        if not redis_url:
+            logger.warning(
+                "IDEMPOTENCY_BACKEND=redis but REDIS_URL is not set — "
+                "falling back to in-memory idempotency store."
+            )
+            return InMemoryIdempotencyStore()
+
+        return RedisIdempotencyStore(
+            redis_url=redis_url,
+            ttl_seconds=ttl_seconds,
+        )
+
+    return InMemoryIdempotencyStore()

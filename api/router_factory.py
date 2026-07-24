@@ -83,6 +83,7 @@ def build_pack_router(
             body,
             affinity_key=_rate_limit_key(request),
             requested_version=requested_version,
+            idempotency_key=request.headers.get("Idempotency-Key"),
         )
         response.headers["X-Pack-Version-Used"] = outcome.used_version
         return outcome.serialized
