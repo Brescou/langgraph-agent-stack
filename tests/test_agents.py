@@ -277,7 +277,7 @@ class TestRetryLogic:
 
     def test_invoke_llm_with_retry_on_typed_rate_limit(self) -> None:
         """Typed SDK RateLimitError retries without '429' in the message."""
-        import anthropic
+        anthropic = pytest.importorskip("anthropic")
 
         mock_llm = MagicMock()
         mock_llm.bind_tools.return_value = mock_llm
