@@ -28,6 +28,7 @@ from agents.base_agent import (
     AgentExecutionError,
     AgentTimeoutError,
     AgentValidationError,
+    extract_text_content,
 )
 from agents.researcher import ResearchAgent, ResearchResult
 from connectors.base import (
@@ -297,8 +298,12 @@ class ResearchAnalysisPack(BaseDomainPack):
 
             except AgentAuthenticationError:
                 raise
+            except AgentBudgetExceededError:
+                # Propagate immediately rather than swallowing into state: the
+                # stream generator maps this to an explicit `error` event with
+                # `code="budget_exceeded"` instead of a generic pipeline failure.
+                raise
             except (
-                AgentBudgetExceededError,
                 AgentExecutionError,
                 AgentTimeoutError,
                 AgentValidationError,
@@ -381,8 +386,9 @@ class ResearchAnalysisPack(BaseDomainPack):
 
             except AgentAuthenticationError:
                 raise
+            except AgentBudgetExceededError:
+                raise
             except (
-                AgentBudgetExceededError,
                 AgentExecutionError,
                 AgentTimeoutError,
                 AgentValidationError,
@@ -459,6 +465,8 @@ class ResearchAnalysisPack(BaseDomainPack):
                 initial_state, config=config
             )
         except AgentAuthenticationError:
+            raise
+        except AgentBudgetExceededError:
             raise
         except Exception as exc:
             raise AgentExecutionError(
@@ -549,11 +557,16 @@ class ResearchAnalysisPack(BaseDomainPack):
             elif kind == "on_chat_model_stream":
                 chunk = event.get("data", {}).get("chunk")
                 if chunk and hasattr(chunk, "content") and chunk.content:
-                    yield pack_stream_event(
-                        "token",
-                        content=chunk.content,
-                        node=event.get("metadata", {}).get("langgraph_node", ""),
-                    )
+                    # chunk.content may be a list of content blocks (Anthropic
+                    # tool-use/thinking blocks) rather than a plain string;
+                    # normalise so the SSE `token` event always carries text.
+                    text = extract_text_content(chunk.content)
+                    if text:
+                        yield pack_stream_event(
+                            "token",
+                            content=text,
+                            node=event.get("metadata", {}).get("langgraph_node", ""),
+                        )
 
         if final_report is None:
             raise AgentExecutionError(

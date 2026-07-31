@@ -293,6 +293,12 @@ async def _stream_pipeline(
             extra={"run_id": run_id, "error": str(exc)},
         )
         yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+    except AgentBudgetExceededError as exc:
+        logger.warning(
+            "POST /run/stream — budget exceeded mid-stream",
+            extra={"run_id": run_id, "error": str(exc)},
+        )
+        yield f"data: {json.dumps({'type': 'error', 'code': 'budget_exceeded', 'message': str(exc)})}\n\n"
     except (AgentExecutionError, AgentValidationError) as exc:
         logger.error(
             "POST /run/stream — error", extra={"run_id": run_id, "error": str(exc)}

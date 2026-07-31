@@ -22,6 +22,7 @@ from agents.base_agent import (
     AgentExecutionError,
     AgentTimeoutError,
     AgentValidationError,
+    extract_text_content,
 )
 from agents.researcher import ResearchAgent, ResearchResult
 from core.config import get_settings
@@ -122,8 +123,9 @@ class ResearchOnlyPack(BaseDomainPack):
 
             except AgentAuthenticationError:
                 raise
+            except AgentBudgetExceededError:
+                raise
             except (
-                AgentBudgetExceededError,
                 AgentExecutionError,
                 AgentTimeoutError,
                 AgentValidationError,
@@ -168,6 +170,8 @@ class ResearchOnlyPack(BaseDomainPack):
                 initial_state, config=config
             )
         except AgentAuthenticationError:
+            raise
+        except AgentBudgetExceededError:
             raise
         except Exception as exc:
             raise AgentExecutionError(
@@ -232,6 +236,17 @@ class ResearchOnlyPack(BaseDomainPack):
                         final_result = ResearchResult(**result_dict)
                     except (TypeError, KeyError, ValueError):
                         pass
+
+            elif kind == "on_chat_model_stream":
+                chunk = event.get("data", {}).get("chunk")
+                if chunk and hasattr(chunk, "content") and chunk.content:
+                    text = extract_text_content(chunk.content)
+                    if text:
+                        yield pack_stream_event(
+                            "token",
+                            content=text,
+                            node=event.get("metadata", {}).get("langgraph_node", ""),
+                        )
 
         if final_result is None:
             raise AgentExecutionError(
