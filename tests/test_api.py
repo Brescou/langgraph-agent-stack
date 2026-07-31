@@ -867,6 +867,46 @@ def test_run_stream_timeout_returns_error_event() -> None:
     assert "timed out" in error_events[0]["message"].lower()
 
 
+def test_run_stream_budget_exceeded_returns_error_event_with_code() -> None:
+    """When stream_events raises AgentBudgetExceededError mid-stream, SSE emits
+    an explicit error event with code=budget_exceeded (not a generic failure)."""
+    from core.security import RateLimiter
+
+    permissive = RateLimiter(max_requests=10_000, window_seconds=60.0)
+
+    async def _error_stream(query):
+        yield {"type": "phase_started", "phase": "research"}
+        raise AgentBudgetExceededError("Budget ceiling $1.00 exceeded")
+
+    mock_graph_instance = MagicMock()
+    mock_graph_instance.stream_events = _error_stream
+    mock_graph_cls = MagicMock(return_value=mock_graph_instance)
+
+    with (
+        override_legacy_pack_cls(mock_graph_cls),
+        patch("api.state.rate_limiter", permissive),
+        patch("api.state.get_shared_llm", return_value=MagicMock(spec=True)),
+        patch("api.state.get_shared_checkpointer", return_value=MagicMock()),
+    ):
+        from api.main import app
+
+        with TestClient(app, raise_server_exceptions=False) as client:
+            response = client.post("/run/stream", json={"query": "test query"})
+
+    assert response.status_code == 200
+
+    error_events = []
+    for line in response.text.strip().split("\n"):
+        line = line.strip()
+        if line.startswith("data: "):
+            payload = json.loads(line[6:])
+            if payload.get("type") == "error":
+                error_events.append(payload)
+
+    assert len(error_events) == 1, "Expected exactly one 'error' event"
+    assert error_events[0]["code"] == "budget_exceeded"
+
+
 # ---------------------------------------------------------------------------
 # Shutdown guard — 503 on all endpoints
 # ---------------------------------------------------------------------------

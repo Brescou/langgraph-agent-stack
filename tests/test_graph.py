@@ -13,10 +13,16 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from agents.analyst import AnalysisReport
-from agents.base_agent import AgentExecutionError, AgentValidationError
+from agents.base_agent import (
+    AgentBudgetExceededError,
+    AgentExecutionError,
+    AgentValidationError,
+)
 from agents.researcher import ResearchResult
 from core.graph import MultiAgentGraph
+from domain_packs.research.analysis_only.pack import AnalysisOnlyPack
 from domain_packs.research.research_analysis.pack import ResearchAnalysisPack
+from domain_packs.research.research_only.pack import ResearchOnlyPack
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -355,6 +361,20 @@ class TestMultiAgentGraphStreamEvents:
         assert token_events[0]["node"] == "research_node"
 
     @pytest.mark.asyncio
+    async def test_stream_events_propagates_budget_exceeded(self, graph):
+        """AgentBudgetExceededError raised mid-graph must escape the stream, not be swallowed."""
+
+        async def _raising_astream_events(*_a, **_kw):
+            raise AgentBudgetExceededError("Budget ceiling $1.00 exceeded")
+            yield  # pragma: no cover — makes this an async generator
+
+        graph._graph.astream_events = _raising_astream_events
+
+        with pytest.raises(AgentBudgetExceededError):
+            async for _ in graph.stream_events("test query"):
+                pass
+
+    @pytest.mark.asyncio
     async def test_stream_events_yields_pipeline_completed(self, graph):
         """Final event must be pipeline_completed with the AnalysisReport."""
         report_dict = _analysis_report_dict(confidence=0.92)
@@ -410,6 +430,119 @@ class TestMultiAgentGraphStreamEvents:
 # ---------------------------------------------------------------------------
 # ResearchAnalysisPack — budget propagation
 # ---------------------------------------------------------------------------
+
+
+class TestResearchOnlyPackStreamEvents:
+    """Tests for ``ResearchOnlyPack``'s token streaming and budget propagation."""
+
+    @pytest.fixture()
+    def pack(self) -> ResearchOnlyPack:
+        return ResearchOnlyPack(run_id="test-research-only-stream")
+
+    @pytest.mark.asyncio
+    async def test_stream_events_yields_token_events(self, pack):
+        """on_chat_model_stream events must surface as token events."""
+        mock_chunk = MagicMock()
+        mock_chunk.content = "partial"
+
+        events = [
+            {"event": "on_chain_start", "name": "research_node", "data": {}},
+            {
+                "event": "on_chat_model_stream",
+                "name": "llm",
+                "data": {"chunk": mock_chunk},
+                "metadata": {"langgraph_node": "research_node"},
+            },
+            {
+                "event": "on_chain_end",
+                "name": "research_node",
+                "data": {
+                    "output": {
+                        "research_result": {
+                            "query": "test query",
+                            "findings": ["Finding 1"],
+                            "summary": "summary",
+                            "sources": [],
+                            "confidence": 0.7,
+                            "metadata": {},
+                        }
+                    }
+                },
+            },
+        ]
+        pack._graph.astream_events = lambda *a, **kw: _mock_events(events)
+
+        collected = [evt async for evt in pack.stream_events("test query")]
+
+        token_events = [e for e in collected if e["type"] == "token"]
+        assert len(token_events) == 1
+        assert token_events[0]["content"] == "partial"
+        assert token_events[0]["node"] == "research_node"
+
+    @pytest.mark.asyncio
+    async def test_stream_events_propagates_budget_exceeded(self, pack):
+        """AgentBudgetExceededError raised mid-graph must escape the stream, not be swallowed."""
+
+        async def _raising_astream_events(*_a, **_kw):
+            raise AgentBudgetExceededError("Budget ceiling $1.00 exceeded")
+            yield  # pragma: no cover — makes this an async generator
+
+        pack._graph.astream_events = _raising_astream_events
+
+        with pytest.raises(AgentBudgetExceededError):
+            async for _ in pack.stream_events("test query"):
+                pass
+
+
+class TestAnalysisOnlyPackStreamEvents:
+    """Tests for ``AnalysisOnlyPack``'s token streaming and budget propagation."""
+
+    @pytest.fixture()
+    def pack(self) -> AnalysisOnlyPack:
+        return AnalysisOnlyPack(run_id="test-analysis-only-stream")
+
+    @pytest.mark.asyncio
+    async def test_stream_events_yields_token_events(self, pack, mock_analysis_report):
+        """on_chat_model_stream events must surface as token events."""
+        mock_chunk = MagicMock()
+        mock_chunk.content = "partial"
+
+        events = [
+            {"event": "on_chain_start", "name": "analysis_node", "data": {}},
+            {
+                "event": "on_chat_model_stream",
+                "name": "llm",
+                "data": {"chunk": mock_chunk},
+                "metadata": {"langgraph_node": "analysis_node"},
+            },
+            {
+                "event": "on_chain_end",
+                "name": "analysis_node",
+                "data": {"output": {"analysis_report": mock_analysis_report.to_dict()}},
+            },
+        ]
+        pack._graph.astream_events = lambda *a, **kw: _mock_events(events)
+
+        collected = [evt async for evt in pack.stream_events("test query")]
+
+        token_events = [e for e in collected if e["type"] == "token"]
+        assert len(token_events) == 1
+        assert token_events[0]["content"] == "partial"
+        assert token_events[0]["node"] == "analysis_node"
+
+    @pytest.mark.asyncio
+    async def test_stream_events_propagates_budget_exceeded(self, pack):
+        """AgentBudgetExceededError raised mid-graph must escape the stream, not be swallowed."""
+
+        async def _raising_astream_events(*_a, **_kw):
+            raise AgentBudgetExceededError("Budget ceiling $1.00 exceeded")
+            yield  # pragma: no cover — makes this an async generator
+
+        pack._graph.astream_events = _raising_astream_events
+
+        with pytest.raises(AgentBudgetExceededError):
+            async for _ in pack.stream_events("test query"):
+                pass
 
 
 class TestResearchAnalysisPackBudget:

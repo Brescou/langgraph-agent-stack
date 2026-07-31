@@ -19,6 +19,7 @@ from fastapi.responses import StreamingResponse
 import api.state as state
 from agents.base_agent import (
     AgentAuthenticationError,
+    AgentBudgetExceededError,
     AgentExecutionError,
     AgentTimeoutError,
     AgentValidationError,
@@ -174,6 +175,12 @@ def build_pack_router(
                     extra={"run_id": run_id, "pack_id": pack_id, "error": str(exc)},
                 )
                 yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+            except AgentBudgetExceededError as exc:
+                logger.warning(
+                    "Pack stream — budget exceeded mid-stream",
+                    extra={"run_id": run_id, "pack_id": pack_id, "error": str(exc)},
+                )
+                yield f"data: {json.dumps({'type': 'error', 'code': 'budget_exceeded', 'message': str(exc)})}\n\n"
             except (AgentExecutionError, AgentValidationError) as exc:
                 logger.error(
                     "Pack stream — error",

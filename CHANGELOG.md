@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **MCP server** (#92) — optional streamable-HTTP endpoint at `/mcp` (`MCP_SERVER_ENABLED`, `uv sync --extra mcp`) that auto-exposes one MCP tool per registered domain pack. Tools share the typed REST execution path (validation, budgets, compliance gating); regulated packs are omitted from the tool list when gated off.
+- **Token-level streaming extended to `research_only` and `analysis_only`** (#86) — these packs already drove `astream_events(version="v2")` for phase events but ignored `on_chat_model_stream`; they now emit the same `{"type": "token", "content": ..., "node": ...}` events as `research_analysis`. `StructuredLLMPack` verticals (9 packs: `meeting_prep`, `contract_reviewer`, `financial_memo`, etc.) intentionally keep phase-level-only streams — their output is a single validated JSON object, not free text, so there is no meaningful token boundary to forward.
+
+### Fixed
+- **Budget exceeded mid-stream surfaced as a generic pipeline failure** (#86) — `AgentBudgetExceededError` raised inside a graph node (`research_node`/`analysis_node`) was caught and folded into `state["error"]` like any other execution error, so the SSE stream just ended with a misleading "completed without a report" failure instead of signalling a budget problem. The error now re-raises immediately out of the node (same treatment `AgentAuthenticationError` already got) and propagates through `astream_events()` to the SSE endpoint, which emits an explicit `{"type": "error", "code": "budget_exceeded", "message": ...}` event on both the legacy `/run/stream` and per-pack `/packs/{id}/run/stream` routes.
 
 ### CI
 - **Typecheck installs all extras** (#96) — the pyright job now runs `uv sync --frozen --all-extras` (same as pytest) so provider-specific code is checked against real stubs. Fixes Azure/Google embeddings typing in `core/embeddings.py` that the previous extras-free job could not see.

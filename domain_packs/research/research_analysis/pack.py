@@ -297,8 +297,12 @@ class ResearchAnalysisPack(BaseDomainPack):
 
             except AgentAuthenticationError:
                 raise
+            except AgentBudgetExceededError:
+                # Propagate immediately rather than swallowing into state: the
+                # stream generator maps this to an explicit `error` event with
+                # `code="budget_exceeded"` instead of a generic pipeline failure.
+                raise
             except (
-                AgentBudgetExceededError,
                 AgentExecutionError,
                 AgentTimeoutError,
                 AgentValidationError,
@@ -381,8 +385,9 @@ class ResearchAnalysisPack(BaseDomainPack):
 
             except AgentAuthenticationError:
                 raise
+            except AgentBudgetExceededError:
+                raise
             except (
-                AgentBudgetExceededError,
                 AgentExecutionError,
                 AgentTimeoutError,
                 AgentValidationError,

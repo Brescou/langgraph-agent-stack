@@ -123,8 +123,9 @@ class AnalysisOnlyPack(BaseDomainPack):
                 }  # type: ignore[return-value]
             except AgentAuthenticationError:
                 raise
+            except AgentBudgetExceededError:
+                raise
             except (
-                AgentBudgetExceededError,
                 AgentExecutionError,
                 AgentTimeoutError,
                 AgentValidationError,
@@ -240,6 +241,15 @@ class AnalysisOnlyPack(BaseDomainPack):
                             final_report = AnalysisReport(**rd)
                         except (TypeError, KeyError, ValueError):
                             pass
+
+            elif kind == "on_chat_model_stream":
+                chunk = event.get("data", {}).get("chunk")
+                if chunk and hasattr(chunk, "content") and chunk.content:
+                    yield pack_stream_event(
+                        "token",
+                        content=chunk.content,
+                        node=event.get("metadata", {}).get("langgraph_node", ""),
+                    )
 
         if final_report is None:
             raise AgentExecutionError(
