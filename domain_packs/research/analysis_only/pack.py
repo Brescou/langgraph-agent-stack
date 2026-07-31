@@ -24,6 +24,7 @@ from agents.base_agent import (
     AgentExecutionError,
     AgentTimeoutError,
     AgentValidationError,
+    extract_text_content,
 )
 from agents.researcher import ResearchResult
 from core.config import get_settings
@@ -183,6 +184,8 @@ class AnalysisOnlyPack(BaseDomainPack):
             final = self._graph.invoke(initial, config=config)
         except AgentAuthenticationError:
             raise
+        except AgentBudgetExceededError:
+            raise
         except Exception as exc:
             raise AgentExecutionError(
                 f"[AnalysisOnlyPack] Pipeline execution failed: {exc}"
@@ -245,11 +248,13 @@ class AnalysisOnlyPack(BaseDomainPack):
             elif kind == "on_chat_model_stream":
                 chunk = event.get("data", {}).get("chunk")
                 if chunk and hasattr(chunk, "content") and chunk.content:
-                    yield pack_stream_event(
-                        "token",
-                        content=chunk.content,
-                        node=event.get("metadata", {}).get("langgraph_node", ""),
-                    )
+                    text = extract_text_content(chunk.content)
+                    if text:
+                        yield pack_stream_event(
+                            "token",
+                            content=text,
+                            node=event.get("metadata", {}).get("langgraph_node", ""),
+                        )
 
         if final_report is None:
             raise AgentExecutionError(
