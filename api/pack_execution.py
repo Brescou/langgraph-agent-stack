@@ -10,9 +10,11 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import functools
+import hashlib
 import logging
 import uuid
 from dataclasses import dataclass
+from time import monotonic
 from typing import Any
 
 from fastapi import HTTPException, status
@@ -34,6 +36,11 @@ from api.dependencies import (
     validate_pack_query,
 )
 from core.config import get_settings
+from core.security import (
+    IdempotencyConflictError,
+    IdempotencyStatus,
+    IdempotencyStore,
+)
 from pack_kernel.registry import PackRegistry
 
 logger = logging.getLogger(__name__)
@@ -43,6 +50,10 @@ SAVE_RUN_TIMEOUT_SECONDS = 5.0
 
 #: Detail message returned when a session already has a run in flight.
 SESSION_IN_FLIGHT_DETAIL = "A run is already in progress for this session."
+
+#: Polling interval (seconds) while waiting for an in-flight idempotent
+#: request to complete.
+IDEMPOTENCY_POLL_INTERVAL_SECONDS = 0.1
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,12 +196,46 @@ async def create_review_best_effort(
         )
 
 
+async def wait_for_completed_idempotency_record(
+    store: IdempotencyStore,
+    key: str,
+    timeout_seconds: float,
+) -> PackRunResult | None:
+    """Wait until an in-flight idempotent request completes."""
+
+    deadline = monotonic() + timeout_seconds
+
+    while monotonic() < deadline:
+        record = store.get(key)
+
+        if record is None:
+            return None
+
+        if record.status is IdempotencyStatus.COMPLETED:
+            if not isinstance(record.response, PackRunResult):
+                raise RuntimeError(
+                    "Completed idempotency record has an invalid response."
+                )
+
+            return record.response
+
+        await asyncio.sleep(IDEMPOTENCY_POLL_INTERVAL_SECONDS)
+
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=(
+            "Another request with the same Idempotency-Key is still being processed."
+        ),
+    )
+
+
 async def execute_typed_pack_run(
     pack_id: str,
     body: Any,
     *,
     affinity_key: str | None = None,
     requested_version: str | None = None,
+    idempotency_key: str | None = None,
 ) -> PackRunResult:
     """Run a registered pack with the same kernel path as ``POST /packs/{id}/run``.
 
@@ -251,43 +296,80 @@ async def execute_typed_pack_run(
     validate_pack_body_fields(pack_id, body)
     query = validate_pack_query(pack_id, pack_primary_text(body))
 
+    body_hash = hashlib.sha256(body.model_dump_json().encode("utf-8")).hexdigest()
+
+    idempotency_store = state.get_shared_idempotency_store()
+
     settings = get_settings()
-    from domain_packs.common.compliance import assert_regulated_pack_runtime_enabled
 
-    try:
-        assert_regulated_pack_runtime_enabled(
-            pack_id, regulated_packs_enabled=settings.regulated_packs_enabled
-        )
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)
-        ) from exc
+    if idempotency_key is not None:
+        while True:
+            try:
+                reserved = idempotency_store.reserve(
+                    idempotency_key,
+                    body_hash,
+                )
+            except IdempotencyConflictError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=str(exc),
+                ) from exc
 
-    def _execute() -> tuple[Any, dict[str, Any]]:
-        with pack_cls_to_use(
-            run_id=run_id,
-            llm=state.get_shared_llm(),
-            checkpointer=state.get_shared_checkpointer(),
-            **pack_runtime_kwargs(pack_cls_to_use),
-        ) as pipeline:
-            result = invoke_pack_run(pack_cls_to_use, pipeline, body)
-            cost_usd = getattr(pipeline, "cost_usd", None)
-            result_payload = (
-                result.to_dict()
-                if hasattr(result, "to_dict")
-                else result.model_dump()
-                if hasattr(result, "model_dump")
-                else {}
+            if reserved:
+                break
+
+            result = await wait_for_completed_idempotency_record(
+                idempotency_store,
+                idempotency_key,
+                settings.stream_timeout_seconds,
             )
-            serialized = serialize_pack_result(result, output_model, cost_usd)
-            return serialized, result_payload
 
-    if session_id and not state.try_acquire_session(session_id):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=SESSION_IN_FLIGHT_DETAIL,
-        )
+            if result is not None:
+                return result
+
+    stored = False
+    session_acquired = False
+
     try:
+        from domain_packs.common.compliance import assert_regulated_pack_runtime_enabled
+
+        try:
+            assert_regulated_pack_runtime_enabled(
+                pack_id, regulated_packs_enabled=settings.regulated_packs_enabled
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)
+            ) from exc
+
+        def _execute() -> tuple[Any, dict[str, Any]]:
+            with pack_cls_to_use(
+                run_id=run_id,
+                llm=state.get_shared_llm(),
+                checkpointer=state.get_shared_checkpointer(),
+                **pack_runtime_kwargs(pack_cls_to_use),
+            ) as pipeline:
+                result = invoke_pack_run(pack_cls_to_use, pipeline, body)
+                cost_usd = getattr(pipeline, "cost_usd", None)
+                result_payload = (
+                    result.to_dict()
+                    if hasattr(result, "to_dict")
+                    else result.model_dump()
+                    if hasattr(result, "model_dump")
+                    else {}
+                )
+                serialized = serialize_pack_result(result, output_model, cost_usd)
+                return serialized, result_payload
+
+        if session_id:
+            if not state.try_acquire_session(session_id):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=SESSION_IN_FLIGHT_DETAIL,
+                )
+
+            session_acquired = True
+
         try:
             serialized, result_payload = await run_in_executor(_execute)
         except AgentBudgetExceededError as exc:
@@ -332,11 +414,24 @@ async def execute_typed_pack_run(
             session_id=session_id,
             result_payload=result_payload,
         )
-        return PackRunResult(
+        result = PackRunResult(
             serialized=serialized,
             used_version=used_version,
             run_id=run_id,
         )
+
+        if idempotency_key is not None:
+            idempotency_store.store_result(
+                idempotency_key,
+                result,
+            )
+            stored = True
+
+        return result
+
     finally:
-        if session_id:
+        if idempotency_key is not None and not stored:
+            idempotency_store.release(idempotency_key)
+
+        if session_acquired and session_id is not None:
             state.release_session(session_id)

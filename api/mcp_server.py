@@ -97,6 +97,7 @@ def _make_tool_callable(pack_id: str, input_model: type[BaseModel]) -> Any:
                 body,
                 affinity_key=None,
                 requested_version=None,
+                idempotency_key=None,
             )
         except HTTPException as exc:
             _map_http_exception(exc)
