@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`image-scan` red since 2026-08-04, blocking every PR** — Trivy flagged HIGH findings (`GHSA-6v7p-g79w-8964` in `msgpack` 1.1.2, `CVE-2025-47273` in `setuptools` 70.3.0) that contradicted `uv.lock`, which already pins the fixed `msgpack` 1.2.1 and `setuptools` 82.0.1. Confirmed via direct filesystem inspection of the built image (H2 from the investigation, not H1): the vulnerable copies were the base image's *own* system-Python packaging tools — `python:3.14-slim` ships a system `pip` whose `pip/_vendor/msgpack` is a separate vendored copy, plus a bundled wheel under `ensurepip/_bundled/`, both pip-installed and therefore invisible to `apt-get upgrade`. The application only ever runs from the isolated `/app/.venv` populated from `uv.lock`, which never contained either vulnerable package. `infra/Dockerfile`'s runtime stage now strips the base image's `ensurepip`, system `pip`/`setuptools`/`pkg_resources`, and their `/usr/local/bin` shims — dead weight with no runtime purpose, since the app never invokes the system interpreter's pip. A genuine third finding surfaced during the same scan that the base-image theory does *not* explain — `aiohttp` 3.14.1 (pulled in transitively by `langchain-community`) has a real fixed HIGH CVE (`CVE-2026-69244`) in the actual locked venv; `uv lock --upgrade-package aiohttp` bumped it to 3.14.3 with no other lockfile changes. Verified: `docker build` + `trivy image --exit-code 1 --ignore-unfixed --severity HIGH,CRITICAL` now reports zero findings, and the container still starts and passes its `/health` check.
+
 ## [0.7.0] - 2026-07-16
 
 ### Added

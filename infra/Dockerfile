@@ -64,6 +64,33 @@ RUN apt-get update \
     && apt-get upgrade -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
+# Strip the base image's own pip/setuptools instead of patching them.
+#
+# python:3.14-slim ships pip (and, on some base image builds, setuptools) as
+# pip-installed packages under the system interpreter's site-packages, plus
+# a bundled pip wheel under ensurepip/_bundled/. Those are *not* dpkg-managed,
+# so `apt-get upgrade` above never touches them — and pip vendors its own
+# copy of third-party libraries (e.g. msgpack) inside pip/_vendor/, which can
+# lag behind the fixed version on PyPI even when the base image is otherwise
+# current. This is exactly what tripped image-scan on 2026-08-04: Trivy
+# flagged HIGH/CRITICAL CVEs (GHSA-6v7p-g79w-8964 in vendored msgpack,
+# CVE-2025-47273 in setuptools) that uv.lock already carries fixed versions
+# of — the vulnerable copies were these base-image system packages, not the
+# application's dependencies.
+#
+# The application only ever runs from the isolated venv copied in below
+# (VIRTUAL_ENV=/app/.venv), which uv populated from uv.lock and never touches
+# system site-packages, so removing the base image's own packaging tools is
+# safe and has no runtime effect. If a future base image bump reintroduces a
+# vulnerable pip/setuptools here, re-run/extend this step — don't reach for
+# apt-get, it cannot see this layer.
+RUN find /usr/local/lib/python3.* -maxdepth 1 -type d -name ensurepip -exec rm -rf {} + \
+    && find /usr/local/lib/python3.*/site-packages -maxdepth 1 \
+        \( -iname 'pip' -o -iname 'pip-*.dist-info' -o -iname 'setuptools' \
+           -o -iname 'setuptools-*.dist-info' -o -iname 'pkg_resources' \) \
+        -exec rm -rf {} + \
+    && rm -f /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.*
+
 # Create a non-root user and group
 RUN groupadd --gid 1001 appgroup \
     && useradd --uid 1001 --gid appgroup --shell /sbin/nologin --no-create-home appuser
