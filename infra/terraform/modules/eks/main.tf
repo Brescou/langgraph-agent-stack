@@ -254,6 +254,46 @@ resource "aws_iam_openid_connect_provider" "eks" {
   thumbprint_list = [data.tls_certificate.eks.certificates[0].sha1_fingerprint]
 }
 
+# ---------------------------------------------------------------------------
+# EBS CSI driver — required for PersistentVolumeClaims (chart persistence)
+# ---------------------------------------------------------------------------
+resource "aws_iam_role" "ebs_csi" {
+  name = "${var.cluster_name}-ebs-csi"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = "sts:AssumeRoleWithWebIdentity"
+      Principal = {
+        Federated = aws_iam_openid_connect_provider.eks.arn
+      }
+      Condition = {
+        StringEquals = {
+          "${replace(aws_eks_cluster.main.identity[0].oidc[0].issuer, "https://", "")}:sub" = "system:serviceaccount:kube-system:ebs-csi-controller-sa"
+          "${replace(aws_eks_cluster.main.identity[0].oidc[0].issuer, "https://", "")}:aud" = "sts.amazonaws.com"
+        }
+      }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "ebs_csi" {
+  role       = aws_iam_role.ebs_csi.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+}
+
+resource "aws_eks_addon" "ebs_csi" {
+  cluster_name             = aws_eks_cluster.main.name
+  addon_name               = "aws-ebs-csi-driver"
+  service_account_role_arn = aws_iam_role.ebs_csi.arn
+
+  depends_on = [
+    aws_eks_node_group.main,
+    aws_iam_role_policy_attachment.ebs_csi,
+  ]
+}
+
 # IAM role assumed by the Kubernetes service account via OIDC federation.
 resource "aws_iam_role" "langgraph_irsa" {
   name = "${var.cluster_name}-langgraph-irsa"
@@ -418,5 +458,8 @@ resource "helm_release" "langgraph" {
     var.image_tag != "" ? [{ name = "image.tag", value = var.image_tag }] : [],
   )
 
-  depends_on = [kubernetes_namespace_v1.langgraph]
+  depends_on = [
+    kubernetes_namespace_v1.langgraph,
+    aws_eks_addon.ebs_csi,
+  ]
 }
