@@ -211,6 +211,72 @@ def init_tracing(service_name: str = "langgraph-agent-stack") -> None:
     )
 
 
+def instrument_fastapi_app(app: Any) -> bool:
+    """Instrument ``app`` so every HTTP request produces a root OTel span.
+
+    Without this, ``trace_span()`` calls inside pack nodes (``research_node``,
+    ``analysis_node``, ...) still create spans, but each one arrives at the
+    collector as a disconnected root — there is no request span to nest under,
+    so you cannot tell which HTTP call a node belongs to, what status it
+    returned, or how node time compares to total request latency.
+
+    No-op when ``init_tracing()`` did not actually enable tracing (missing
+    OTel SDK, or ``OTEL_ENABLED`` unset/false) or when the optional
+    ``opentelemetry-instrumentation-fastapi`` package is not installed, so the
+    ``observability`` extra stays fully optional. Probe endpoints
+    (``/health``, ``/ready``, ``/metrics``) are excluded so they do not flood
+    the collector with span noise. Safe to call more than once — the
+    instrumentor tracks instrumented apps itself and skips re-instrumenting.
+
+    Args:
+        app: The FastAPI application instance to instrument.
+
+    Returns:
+        True if instrumentation was applied, False otherwise.
+    """
+    if _tracer is None:
+        return False
+
+    try:
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+    except ImportError:
+        logging.getLogger(__name__).debug(
+            "opentelemetry-instrumentation-fastapi not installed — "
+            "request-level tracing disabled"
+        )
+        return False
+
+    FastAPIInstrumentor().instrument_app(app, excluded_urls="/health,/ready,/metrics")
+    logging.getLogger(__name__).info(
+        "FastAPI request tracing instrumented — pack node spans now nest "
+        "under the request span"
+    )
+    return True
+
+
+def set_span_attributes(attributes: dict[str, Any]) -> None:
+    """Attach attributes (e.g. ``pack_id``, ``run_id``) to the current span.
+
+    Targets whatever span is active in the ambient context — typically the
+    request span created by :func:`instrument_fastapi_app`. No-op when OTel
+    is unavailable or no span is currently recording, so call sites do not
+    need to guard this themselves.
+
+    Args:
+        attributes: Key-value pairs to attach to the current span.
+    """
+    if not _OTEL_AVAILABLE:
+        return
+
+    from opentelemetry import trace
+
+    span = trace.get_current_span()
+    if span is None or not span.is_recording():
+        return
+    for key, value in attributes.items():
+        span.set_attribute(key, value)
+
+
 class _NoOpTracer:
     """Minimal stub so callers can use ``tracer.start_as_current_span``."""
 
