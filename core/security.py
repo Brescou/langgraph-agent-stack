@@ -58,7 +58,10 @@ import time
 import uuid
 from collections import deque
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from enum import Enum
 from functools import lru_cache
+from time import monotonic
 from typing import Any, Literal, Protocol, cast, runtime_checkable
 from urllib.parse import urlparse
 
@@ -1035,3 +1038,125 @@ def validate_api_key_format(key: str, provider: str = "anthropic") -> bool:
         return False
     pattern = _API_KEY_PATTERNS.get(provider, _GENERIC_KEY_PATTERN)
     return bool(pattern.match(key))
+
+
+# ---------------------------------------------------------------------------
+# Idempotency
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class IdempotencyStore(Protocol):
+    """Protocol for idempotency storage backends."""
+
+    def reserve(
+        self,
+        key: str,
+        body_hash: str,
+    ) -> bool:
+        """Atomically reserve *key* for execution."""
+        ...
+
+    def get(self, key: str) -> Any | None:
+        """Return the stored record for *key*, if present."""
+        ...
+
+    def store_result(
+        self,
+        key: str,
+        response: Any,
+    ) -> None:
+        """Store the completed response for *key*."""
+        ...
+
+    def release(self, key: str) -> None:
+        """Release an in-flight reservation without caching a result."""
+        ...
+
+
+class IdempotencyStatus(Enum):
+    """Execution state for an idempotent request."""
+
+    RUNNING = "running"
+    COMPLETED = "completed"
+
+
+class IdempotencyConflictError(Exception):
+    """Raised when an idempotency key is reused with a different request body."""
+
+
+@dataclass(slots=True)
+class IdempotencyRecord:
+    """Stored metadata for an idempotent request."""
+
+    body_hash: str
+    status: IdempotencyStatus
+    expires_at: float
+    response: Any | None = None
+
+
+class InMemoryIdempotencyStore:
+    """Per-process idempotency store (single replica only)."""
+
+    def __init__(self, ttl_seconds: int = 86400) -> None:
+        self._records: dict[str, IdempotencyRecord] = {}
+        self._lock = threading.Lock()
+        self._ttl_seconds = ttl_seconds
+
+    def reserve(self, key: str, body_hash: str) -> bool:
+        """Atomically reserve *key* for execution."""
+        now = monotonic()
+
+        with self._lock:
+            record = self._records.get(key)
+
+            if record is not None:
+                if record.expires_at <= now:
+                    self._records.pop(key)
+                    record = None
+                elif record.body_hash != body_hash:
+                    raise IdempotencyConflictError(
+                        f"Idempotency key '{key}' was reused with a different request body."
+                    )
+                else:
+                    return False
+
+            self._records[key] = IdempotencyRecord(
+                body_hash=body_hash,
+                status=IdempotencyStatus.RUNNING,
+                expires_at=now + self._ttl_seconds,
+            )
+            return True
+
+    def get(self, key: str) -> IdempotencyRecord | None:
+        """Return the stored record for *key*, if present."""
+        with self._lock:
+            return self._records.get(key)
+
+    def store_result(
+        self,
+        key: str,
+        response: Any,
+    ) -> None:
+        """Store the completed response for *key*."""
+        with self._lock:
+            record = self._records.get(key)
+            if record is None:
+                raise KeyError(f"Unknown idempotency key: {key}")
+
+            record.status = IdempotencyStatus.COMPLETED
+            record.response = response
+
+    def release(self, key: str) -> None:
+        """Release an in-flight reservation without caching a result."""
+        with self._lock:
+            self._records.pop(key, None)
+
+
+def create_idempotency_store(
+    backend: Literal["memory"] = "memory",
+    ttl_seconds: int = 86400,
+) -> IdempotencyStore:
+    """Factory: build an in-memory idempotency store."""
+
+    return InMemoryIdempotencyStore(ttl_seconds=ttl_seconds)
