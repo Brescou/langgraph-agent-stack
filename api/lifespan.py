@@ -14,7 +14,11 @@ from fastapi import FastAPI
 import api.state as state
 from core.config import Settings, get_settings
 from core.memory import cleanup_checkpointer_async, create_run_history
-from core.observability import init_tracing, server_shutting_down
+from core.observability import (
+    init_tracing,
+    instrument_fastapi_app,
+    server_shutting_down,
+)
 from core.review_store import create_review_store
 from core.security import (
     create_idempotency_store,
@@ -107,6 +111,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
 
     init_tracing()
+    instrument_fastapi_app(app)
     await _init_llm_and_checkpointer(settings)
 
     try:
