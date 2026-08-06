@@ -85,7 +85,14 @@ def invoke_pack_run(pack_cls: type, pipeline: Any, body: Any) -> Any:
 def serialize_pack_result(
     result: Any, output_model: type, cost_usd: float | None
 ) -> Any:
-    """Serialize a pack result into the pack's output schema / dict."""
+    """Serialize a pack result into the pack's output schema / dict.
+
+    ``cost_usd`` is only injected when the pack's ``output_schema`` actually
+    declares that field. Plugin packs are *required* to use strict schemas
+    (``extra="forbid"``, see ``pack_kernel/plugins.py``), so injecting an
+    undeclared field would make every successful run of a third-party pack
+    fail response validation with HTTP 500.
+    """
     if hasattr(output_model, "from_analysis_report"):
         return output_model.from_analysis_report(result, cost_usd=cost_usd)
     if hasattr(output_model, "from_research_result"):
@@ -94,7 +101,8 @@ def serialize_pack_result(
         return output_model.from_summary_result(result, cost_usd=cost_usd)
     if hasattr(result, "model_dump"):
         data = result.model_dump()
-        if cost_usd is not None:
+        declares_cost = "cost_usd" in getattr(output_model, "model_fields", {})
+        if cost_usd is not None and declares_cost:
             data["cost_usd"] = cost_usd
         return data
     return result
