@@ -177,6 +177,7 @@ docker-compose.local.yml
 *.tfstate.backup
 *.tfvars
 !*.tfvars.example
+!infra/terraform/environments/*.tfvars
 .terraform.lock.hcl
 
 # =============================================================================
