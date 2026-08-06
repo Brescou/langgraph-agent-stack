@@ -57,6 +57,199 @@ class TestInitTracing:
             init_tracing()
 
 
+class TestInstrumentFastapiApp:
+    """Tests for ``instrument_fastapi_app`` (#119)."""
+
+    def test_noop_when_tracing_not_enabled(self) -> None:
+        from core.observability import instrument_fastapi_app
+
+        with patch("core.observability._tracer", None):
+            assert instrument_fastapi_app(MagicMock()) is False
+
+    def test_noop_when_instrumentation_package_missing(self) -> None:
+        from core.observability import instrument_fastapi_app
+
+        with (
+            patch("core.observability._tracer", MagicMock()),
+            patch.dict("sys.modules", {"opentelemetry.instrumentation.fastapi": None}),
+        ):
+            assert instrument_fastapi_app(MagicMock()) is False
+
+    def test_instruments_app_when_tracing_enabled(self) -> None:
+        pytest.importorskip("opentelemetry.instrumentation.fastapi")
+        from fastapi import FastAPI
+
+        from core.observability import instrument_fastapi_app
+
+        app = FastAPI()
+        with patch("core.observability._tracer", MagicMock()):
+            assert instrument_fastapi_app(app) is True
+        assert getattr(app, "_is_instrumented_by_opentelemetry", False) is True
+
+    def test_excludes_probe_endpoints(self) -> None:
+        pytest.importorskip("opentelemetry.instrumentation.fastapi")
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+        from core.observability import instrument_fastapi_app
+
+        with (
+            patch("core.observability._tracer", MagicMock()),
+            patch.object(FastAPIInstrumentor, "instrument_app") as mock_instrument_app,
+        ):
+            instrument_fastapi_app(MagicMock())
+
+        _, kwargs = mock_instrument_app.call_args
+        assert "/health" in kwargs["excluded_urls"]
+        assert "/ready" in kwargs["excluded_urls"]
+        assert "/metrics" in kwargs["excluded_urls"]
+
+    def test_safe_to_call_twice(self) -> None:
+        """The instrumentor tracks instrumented apps itself — no double-instrument error."""
+        pytest.importorskip("opentelemetry.instrumentation.fastapi")
+        from fastapi import FastAPI
+
+        from core.observability import instrument_fastapi_app
+
+        app = FastAPI()
+        with patch("core.observability._tracer", MagicMock()):
+            assert instrument_fastapi_app(app) is True
+            assert instrument_fastapi_app(app) is True
+
+
+class TestSetSpanAttributes:
+    """Tests for ``set_span_attributes`` (#119)."""
+
+    def test_noop_when_otel_unavailable(self) -> None:
+        from core.observability import set_span_attributes
+
+        with patch("core.observability._OTEL_AVAILABLE", False):
+            set_span_attributes({"pack_id": "research_analysis"})  # must not raise
+
+    def test_noop_when_no_recording_span(self) -> None:
+        pytest.importorskip("opentelemetry.sdk.trace")
+        from core.observability import set_span_attributes
+
+        set_span_attributes({"pack_id": "research_analysis"})  # must not raise
+
+    def test_sets_attributes_on_recording_span(self) -> None:
+        pytest.importorskip("opentelemetry.sdk.trace")
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import (
+            SimpleSpanProcessor,
+        )
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+            InMemorySpanExporter,
+        )
+
+        from core.observability import set_span_attributes
+
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        tracer = provider.get_tracer("test")
+
+        with (
+            patch("core.observability._OTEL_AVAILABLE", True),
+            tracer.start_as_current_span("request"),
+        ):
+            set_span_attributes({"pack_id": "research_analysis", "run_id": "run-1"})
+
+        (span,) = exporter.get_finished_spans()
+        assert span.attributes is not None
+        assert span.attributes["pack_id"] == "research_analysis"
+        assert span.attributes["run_id"] == "run-1"
+
+    def test_current_span_unaffected_check_uses_real_trace_module(self) -> None:
+        """Guard against get_current_span() being monkeypatched to a broken stub."""
+        from opentelemetry import trace
+
+        from core.observability import set_span_attributes
+
+        with patch("core.observability._OTEL_AVAILABLE", True):
+            set_span_attributes({"k": "v"})
+        assert trace.get_current_span() is trace.INVALID_SPAN
+
+
+class TestRequestSpanNesting:
+    """End-to-end: an HTTP request produces a root span that pack node
+    spans (``trace_span()``) nest under (#119 acceptance criterion)."""
+
+    def test_node_span_nests_under_request_span(self) -> None:
+        """Exercises the same ``FastAPIInstrumentor().instrument_app()`` call
+        ``instrument_fastapi_app`` makes, with an explicit ``tracer_provider``
+        so the test does not mutate the process-wide global provider (which
+        OTel only allows setting once) — that isolation is the only
+        difference from what ``instrument_fastapi_app`` does in production,
+        where ``init_tracing()`` has already set the global provider."""
+        pytest.importorskip("opentelemetry.instrumentation.fastapi")
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+            InMemorySpanExporter,
+        )
+
+        from core.observability import trace_span
+
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        tracer = provider.get_tracer("test")
+
+        app = FastAPI()
+
+        @app.get("/probe")
+        def probe() -> dict:
+            with trace_span("fake_pack_node", {"run_id": "run-1"}):
+                pass
+            return {"ok": True}
+
+        @app.get("/health")
+        def health() -> dict:
+            return {"status": "ok"}
+
+        FastAPIInstrumentor().instrument_app(
+            app, tracer_provider=provider, excluded_urls="/health,/ready,/metrics"
+        )
+        with (
+            patch("core.observability._tracer", tracer),
+            TestClient(app) as client,
+        ):
+            assert client.get("/probe").status_code == 200
+            assert client.get("/health").status_code == 200
+
+        spans = exporter.get_finished_spans()
+        node_span = next(s for s in spans if s.name == "fake_pack_node")
+        request_spans = [s for s in spans if s.name != "fake_pack_node"]
+        assert request_spans, "FastAPIInstrumentor should have created a request span"
+
+        # Every span belongs to the same trace — the request span is the root.
+        assert all(
+            s.context.trace_id == node_span.context.trace_id for s in request_spans
+        )
+        span_ids = {s.context.span_id for s in request_spans}
+        assert node_span.parent is not None
+        assert node_span.parent.span_id in span_ids
+        # /health is excluded from instrumentation — no span for it at all.
+        assert not any("health" in s.name for s in spans)
+
+
+class TestLifespanWiring:
+    """Confirms startup actually calls ``instrument_fastapi_app`` (#119)."""
+
+    def test_lifespan_instruments_the_app_on_startup(self) -> None:
+        from fastapi.testclient import TestClient
+
+        from api.main import app
+
+        with patch("api.lifespan.instrument_fastapi_app") as mock_instrument:
+            with TestClient(app):
+                pass
+        mock_instrument.assert_called_once_with(app)
+
+
 class TestGetTracer:
     """Tests for ``get_tracer``."""
 

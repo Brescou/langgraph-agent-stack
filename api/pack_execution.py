@@ -36,6 +36,7 @@ from api.dependencies import (
     validate_pack_query,
 )
 from core.config import get_settings
+from core.observability import set_span_attributes
 from core.security import (
     IdempotencyConflictError,
     IdempotencyStatus,
@@ -251,6 +252,7 @@ async def execute_typed_pack_run(
 
     run_id = str(uuid.uuid4())
     session_id = getattr(body, "session_id", None) or None
+    set_span_attributes({"pack_id": pack_id, "run_id": run_id})
 
     if (
         requested_version is None

@@ -42,6 +42,7 @@ from api.pack_execution import (
 )
 from control_plane.enforce import effective_stream_timeout_seconds
 from core.config import get_settings
+from core.observability import set_span_attributes
 from pack_kernel.base_pack import normalize_pack_stream_event
 from pack_kernel.registry import PackRegistry
 
@@ -109,6 +110,7 @@ def build_pack_router(
                 detail="Server is shutting down.",
             )
         run_id = str(uuid.uuid4())
+        set_span_attributes({"pack_id": pack_id, "run_id": run_id})
         requested_version = request.headers.get("X-Pack-Version") or None
         session_id = getattr(body, "session_id", None) or None
         if (

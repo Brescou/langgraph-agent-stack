@@ -34,7 +34,7 @@ from api.models import ResearchRequest, ResearchResponse, RunRequest, RunRespons
 from api.pack_execution import SESSION_IN_FLIGHT_DETAIL, save_run_best_effort
 from control_plane.enforce import effective_stream_timeout_seconds
 from core.config import Settings, get_settings
-from core.observability import active_pipelines
+from core.observability import active_pipelines, set_span_attributes
 
 router = APIRouter(tags=["Pipeline"])
 logger = logging.getLogger(__name__)
@@ -96,6 +96,7 @@ async def run_pipeline(
 
     session_id = body.session_id or str(uuid.uuid4())
     run_id = str(uuid.uuid4())
+    set_span_attributes({"pack_id": settings.default_pack_id, "run_id": run_id})
     logger.info(
         "POST /run — pipeline started",
         extra={
@@ -353,6 +354,7 @@ async def run_stream(
 
     session_id = body.session_id or str(uuid.uuid4())
     run_id = str(uuid.uuid4())
+    set_span_attributes({"pack_id": settings.default_pack_id, "run_id": run_id})
     stream_timeout = effective_stream_timeout_seconds(
         settings.default_pack_id, settings
     )
