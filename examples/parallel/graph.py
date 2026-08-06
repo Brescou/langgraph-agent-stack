@@ -10,13 +10,18 @@ Architecture::
 
     START
       |
-    fan_out_node  (issues one Send per analyst role)
+    fan_out_node  (routing function: issues one Send per analyst role)
      /     |      \\
   tech  market   risk    (all run concurrently)
      \\     |      /
     consolidate_node
       |
      END
+
+``fan_out_node`` is wired as a *conditional edge*, not as a graph node:
+LangGraph only interprets a returned ``list[Send]`` as a fan-out when it
+comes from a routing function. Returning ``Send`` objects from a regular
+node raises ``InvalidUpdateError`` because nodes must return state updates.
 
 Run: uv run python examples/parallel/graph.py
 """
@@ -28,8 +33,8 @@ from typing import Annotated
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
-from langgraph.constants import Send
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import Send
 from typing_extensions import TypedDict
 
 # ---------------------------------------------------------------------------
@@ -75,7 +80,11 @@ class AnalystBranchState(TypedDict):
 
 def fan_out_node(state: ParallelState) -> list[Send]:
     """
-    Node: emit one ``Send`` command per analyst role to trigger parallel execution.
+    Routing function: emit one ``Send`` per analyst role to trigger parallel execution.
+
+    Wired via :meth:`StateGraph.add_conditional_edges`, not ``add_node`` — a
+    regular node must return a state update, so returning ``Send`` objects
+    from one raises ``InvalidUpdateError``.
 
     LangGraph will schedule all three analyst nodes concurrently.  The
     results are merged back into ``ParallelState.analyses`` by the
@@ -199,10 +208,10 @@ def build_parallel_graph(llm: BaseChatModel) -> object:
     """
     Build and compile the parallel multi-analyst pipeline.
 
-    The ``fan_out_node`` uses LangGraph's ``Send`` API to dispatch three
-    independent ``analyst_node`` executions concurrently.  Results are
-    aggregated by the ``operator.add`` reducer before ``consolidate_node``
-    merges them.
+    The ``fan_out_node`` routing function uses LangGraph's ``Send`` API to
+    dispatch three independent ``analyst_node`` executions concurrently.
+    Results are aggregated by the ``operator.add`` reducer before
+    ``consolidate_node`` merges them.
 
     Args:
         llm: A configured LangChain ``BaseChatModel`` instance.
@@ -212,13 +221,13 @@ def build_parallel_graph(llm: BaseChatModel) -> object:
     """
     graph: StateGraph = StateGraph(ParallelState)
 
-    graph.add_node("fan_out", fan_out_node)
     graph.add_node("analyst_node", lambda state: analyst_node(state, llm))
     graph.add_node("consolidate", lambda state: consolidate_node(state, llm))
 
-    # START -> fan_out -> [analyst_node x3 via Send] -> consolidate -> END
-    graph.add_edge(START, "fan_out")
-    graph.add_edge("fan_out", "analyst_node")
+    # START -> [analyst_node x3 via Send] -> consolidate -> END
+    # The fan-out is a conditional edge: LangGraph only honours a returned
+    # list[Send] from a routing function, never from a node body.
+    graph.add_conditional_edges(START, fan_out_node, ["analyst_node"])
     graph.add_edge("analyst_node", "consolidate")
     graph.add_edge("consolidate", END)
 

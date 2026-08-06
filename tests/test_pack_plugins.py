@@ -204,3 +204,52 @@ def test_resolved_pack_plugins_allowlist_parsing() -> None:
     )
     assert settings.resolved_pack_plugins_allowlist == ("good", "other")
     assert settings.pack_plugins_enabled is False  # opt-in default
+
+
+# ---------------------------------------------------------------------------
+# Serialization — strict third-party schemas must survive the response model
+# ---------------------------------------------------------------------------
+
+
+class _StrictOutputNoCost(BaseModel):
+    """A compliant plugin output schema that does not track cost."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    answer: str
+
+
+class _StrictOutputWithCost(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    answer: str
+    cost_usd: float = 0.0
+
+
+def test_serialize_does_not_inject_cost_into_schema_without_the_field() -> None:
+    """Plugin packs must not get an undeclared ``cost_usd`` bolted on.
+
+    Regression guard: ``plugins.py`` *requires* ``extra="forbid"`` on
+    third-party schemas, so unconditionally injecting ``cost_usd`` made every
+    successful run of a compliant plugin pack fail response validation (500).
+    """
+    from api.pack_execution import serialize_pack_result
+
+    data = serialize_pack_result(
+        _StrictOutputNoCost(answer="ok"), _StrictOutputNoCost, 0.0
+    )
+
+    assert data == {"answer": "ok"}
+    # The declared response model must accept it unchanged.
+    assert _StrictOutputNoCost.model_validate(data).answer == "ok"
+
+
+def test_serialize_still_injects_cost_when_schema_declares_it() -> None:
+    """Packs that declare ``cost_usd`` keep receiving the run cost."""
+    from api.pack_execution import serialize_pack_result
+
+    data = serialize_pack_result(
+        _StrictOutputWithCost(answer="ok"), _StrictOutputWithCost, 0.25
+    )
+
+    assert data["cost_usd"] == 0.25
