@@ -69,6 +69,8 @@ curl -X POST http://localhost:8000/packs/meeting_prep/run \
 
 Completed responses are retained for `IDEMPOTENCY_TTL_SECONDS` (default: `86400` seconds). Reusing the same idempotency key with a different request body returns HTTP `409 Conflict`.
 
+The default `IDEMPOTENCY_BACKEND=memory` keeps reservations in one process. Set `IDEMPOTENCY_BACKEND=redis` with `REDIS_URL` for shared reservations and response replay across multiple API replicas.
+
 Interactive API docs: `http://localhost:8000/docs` (disabled when `ENVIRONMENT=production`).
 
 **Cost:** with a real provider, a `research_analysis` run (6 LLM calls) costs roughly **$0.01–0.05** on Claude Sonnet 5 pricing ($0.003 / $0.015 per 1K input/output tokens) — a rough order of magnitude from the pricing table in `core/cost.py`, not a measured benchmark. Set `PACK_DEFAULT_BUDGET_USD=0.50` to cap spend per run; requests over budget return HTTP `402`.

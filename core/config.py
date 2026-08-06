@@ -426,12 +426,13 @@ class Settings(BaseSettings):
         ),
     )
 
-    idempotency_backend: Literal["memory"] = Field(
+    idempotency_backend: Literal["memory", "redis"] = Field(
         default="memory",
         validation_alias="IDEMPOTENCY_BACKEND",
         description=(
-            "Idempotency storage backend. Currently only 'memory' "
-            "(per-process) is supported."
+            "Idempotency storage backend. 'memory' (default) is per-process; "
+            "'redis' shares reservations and responses across replicas "
+            "(requires REDIS_URL)."
         ),
     )
 

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
+import time
 from dataclasses import dataclass
 from unittest.mock import MagicMock, patch
 
@@ -23,7 +24,13 @@ from fastapi import HTTPException
 
 import api.state as state
 from api.pack_execution import execute_typed_pack_run
-from core.security import InMemoryIdempotencyStore
+from core.security import (
+    IdempotencyConflictError,
+    IdempotencyStatus,
+    InMemoryIdempotencyStore,
+    RedisIdempotencyStore,
+    create_idempotency_store,
+)
 
 # ---------------------------------------------------------------------------
 # Fake pack input
@@ -334,6 +341,112 @@ async def test_without_idempotency_key_does_not_store(
 
     assert first != second
     assert calls == 2
+
+
+def test_in_memory_reservation_can_be_reused_after_ttl() -> None:
+    store = InMemoryIdempotencyStore(ttl_seconds=1)
+
+    with patch("core.security.monotonic", side_effect=[100.0, 100.5, 101.1]):
+        assert store.reserve("expired", "body-hash") is True
+        store.store_result("expired", {"answer": "first"})
+        assert store.reserve("expired", "body-hash") is False
+        assert store.reserve("expired", "body-hash") is True
+
+
+class FakeRedis:
+    """Small Redis command/script double for cross-store idempotency tests."""
+
+    def __init__(self) -> None:
+        self.records: dict[str, dict[str, str]] = {}
+        self.expiry: dict[str, float] = {}
+
+    def register_script(self, source: str):
+        if "expires_at" in source:
+            return self._reserve
+        return self._store_result
+
+    def _purge(self, key: str, now: float | None = None) -> None:
+        if key in self.expiry and self.expiry[key] <= (
+            time.time() if now is None else now
+        ):
+            self.records.pop(key, None)
+            self.expiry.pop(key, None)
+
+    def _reserve(self, *, keys: list[str], args: list[object]) -> int:
+        key = keys[0]
+        body_hash = str(args[0])
+        ttl = int(args[1])
+        now = float(args[2])
+        self._purge(key, now)
+        record = self.records.get(key)
+        if record is None:
+            self.records[key] = {
+                "body_hash": body_hash,
+                "status": "running",
+                "expires_at": str(now + ttl),
+            }
+            self.expiry[key] = now + ttl
+            return 1
+        if record["body_hash"] != body_hash:
+            return -1
+        return 0
+
+    def _store_result(self, *, keys: list[str], args: list[object]) -> int:
+        key = keys[0]
+        self._purge(key)
+        if key not in self.records:
+            return 0
+        self.records[key]["status"] = "completed"
+        self.records[key]["response"] = str(args[0])
+        return 1
+
+    def hgetall(self, key: str) -> dict[str, str]:
+        self._purge(key)
+        return dict(self.records.get(key, {}))
+
+    def delete(self, key: str) -> None:
+        self.records.pop(key, None)
+        self.expiry.pop(key, None)
+
+
+def test_redis_store_shares_reservations_and_replay(monkeypatch) -> None:
+    import redis
+
+    fake_redis = FakeRedis()
+    monkeypatch.setattr(redis.Redis, "from_url", lambda *args, **kwargs: fake_redis)
+
+    first = create_idempotency_store(
+        backend="redis",
+        redis_url="redis://localhost:6379/0",
+        ttl_seconds=60,
+    )
+    second = create_idempotency_store(
+        backend="redis",
+        redis_url="redis://localhost:6379/0",
+        ttl_seconds=60,
+    )
+
+    assert isinstance(first, RedisIdempotencyStore)
+    assert isinstance(second, RedisIdempotencyStore)
+    assert first.reserve("shared", "body-hash") is True
+    assert second.reserve("shared", "body-hash") is False
+
+    from api.pack_execution import PackRunResult
+
+    first.store_result(
+        "shared",
+        PackRunResult(serialized={"answer": "ok"}, used_version="1", run_id="run-1"),
+    )
+    record = second.get("shared")
+
+    assert record is not None
+    assert record.status is IdempotencyStatus.COMPLETED
+    assert record.response == PackRunResult(
+        serialized={"answer": "ok"}, used_version="1", run_id="run-1"
+    )
+
+    with pytest.raises(IdempotencyConflictError):
+        second.reserve("shared", "different-body")
 
 
 @pytest.mark.asyncio
