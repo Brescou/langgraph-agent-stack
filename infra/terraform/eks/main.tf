@@ -6,6 +6,11 @@
 #   terraform init
 #   terraform apply -var-file=../environments/eks.dev.tfvars \
 #     -var="anthropic_api_key=$ANTHROPIC_API_KEY"
+#
+# Production:
+#   terraform apply -var-file=../environments/eks.prod.tfvars \
+#     -var="anthropic_api_key=$ANTHROPIC_API_KEY" \
+#     -var="redis_url=$REDIS_URL"
 # ---------------------------------------------------------------------------
 
 module "eks" {

@@ -6,6 +6,10 @@
 #   terraform init
 #   terraform apply -var-file=../environments/gke.dev.tfvars
 #   # Then populate Secret Manager (see module output populate_secrets_commands)
+#
+# Production:
+#   terraform apply -var-file=../environments/gke.prod.tfvars
+#   # Then populate Secret Manager (see module output populate_secrets_commands)
 # ---------------------------------------------------------------------------
 
 module "gke" {
