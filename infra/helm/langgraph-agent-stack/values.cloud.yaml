@@ -1,0 +1,6 @@
+# Cloud overlay — used by Terraform (EKS/GKE/AKS). Not for kind/minikube.
+# Tag omitted on purpose: deployment template falls back to .Chart.AppVersion
+# (immutable once the matching v* image is published). Do not set tag: latest.
+image:
+  repository: ghcr.io/brescou/langgraph-agent-stack
+  pullPolicy: IfNotPresent
