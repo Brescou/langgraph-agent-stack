@@ -26,4 +26,8 @@ module "gke" {
   namespace       = var.namespace
   helm_chart_path = var.helm_chart_path
   llm_provider    = var.llm_provider
+
+  helm_values_files = var.helm_values_files
+  image_repository  = var.image_repository
+  image_tag         = var.image_tag
 }

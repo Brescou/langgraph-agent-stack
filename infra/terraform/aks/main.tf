@@ -34,6 +34,10 @@ module "aks" {
 
   authorized_ip_ranges = var.authorized_ip_ranges
 
+  helm_values_files = var.helm_values_files
+  image_repository  = var.image_repository
+  image_tag         = var.image_tag
+
   tags = {
     environment = var.environment
     project     = "langgraph-agent-stack"

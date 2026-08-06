@@ -177,26 +177,36 @@ resource "kubernetes_secret_v1" "langgraph_secrets" {
 #    Chart version / appVersion from infra/helm/langgraph-agent-stack/Chart.yaml.
 #    Default image: langgraph-agent-stack:latest (from values.yaml).
 # ---------------------------------------------------------------------------
+locals {
+  values_files = length(var.helm_values_files) > 0 ? var.helm_values_files : concat(
+    ["values.cloud.yaml"],
+    var.environment == "prod" ? ["values.prod.yaml"] : [],
+  )
+}
+
 resource "helm_release" "langgraph" {
   name             = "langgraph"
   chart            = var.helm_chart_path
   namespace        = kubernetes_namespace_v1.langgraph.metadata[0].name
   create_namespace = false # Namespace is managed above.
 
-  # Environment-specific values file (values.dev.yaml or values.prod.yaml).
-  values = [file("${var.helm_chart_path}/values.${var.environment}.yaml")]
+  values = [for f in local.values_files : file("${var.helm_chart_path}/${f}")]
 
   # Helm provider 3.x: set is now a list of objects.
-  set = [
-    {
-      name  = "llm.provider"
-      value = var.llm_provider
-    },
-    {
-      name  = "secrets.existingSecret"
-      value = kubernetes_secret_v1.langgraph_secrets.metadata[0].name
-    },
-  ]
+  set = concat(
+    [
+      {
+        name  = "llm.provider"
+        value = var.llm_provider
+      },
+      {
+        name  = "secrets.existingSecret"
+        value = kubernetes_secret_v1.langgraph_secrets.metadata[0].name
+      },
+    ],
+    var.image_repository != "" ? [{ name = "image.repository", value = var.image_repository }] : [],
+    var.image_tag != "" ? [{ name = "image.tag", value = var.image_tag }] : [],
+  )
 
   depends_on = [
     kubernetes_namespace_v1.langgraph,
