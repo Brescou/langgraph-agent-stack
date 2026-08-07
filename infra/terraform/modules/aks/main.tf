@@ -175,7 +175,7 @@ resource "kubernetes_secret_v1" "langgraph_secrets" {
 # ---------------------------------------------------------------------------
 # 9. Helm release — langgraph-agent-stack
 #    Chart version / appVersion from infra/helm/langgraph-agent-stack/Chart.yaml.
-#    Default image: langgraph-agent-stack:latest (from values.yaml).
+#    Cloud path: values.cloud.yaml → ghcr.io/brescou/langgraph-agent-stack:<AppVersion>
 # ---------------------------------------------------------------------------
 locals {
   values_files = length(var.helm_values_files) > 0 ? var.helm_values_files : concat(

@@ -8,6 +8,7 @@ node_instance_type = "t3.medium"
 node_min_size      = 1
 node_max_size      = 3
 node_desired_size  = 2
-# Set image_tag to a long SHA for reproducible deploys, e.g.:
-# image_tag = "sha256:abc123..."
+# Set image_tag to the long git SHA published by CI (type=sha,format=long), e.g.:
+# image_tag = "a310c5bf279f3b60a4421d44004af7f4652e6993"
+# Do NOT use a digest here — the chart renders repository:tag, not repository@sha256:...
 # Secrets: -var="anthropic_api_key=$ANTHROPIC_API_KEY" -var="redis_url=$REDIS_URL"

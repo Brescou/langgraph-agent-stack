@@ -36,7 +36,7 @@ So the default cloud deploy pulls **`ghcr.io/brescou/langgraph-agent-stack:0.5.0
 
 ### Release tag required (operator step)
 
-The immutable `:0.5.0` image exists only after a maintainer cuts and pushes git tag **`v0.5.0`** (CI publishes semver tags on `v*`). **Cut `v0.5.0` before applying the cloud path** if `:0.5.0` is not already on GHCR. Until then, pods will fail with `ImagePullBackOff`.
+The immutable `:0.5.0` image exists only after a maintainer cuts and pushes git tag **`v0.5.0`** (CI publishes semver tags on `v*`). **Immediately after merging the cloud-deploy changes to `main`, cut and push `v0.5.0` before any cloud apply** — the window between merge and tag leaves every cloud deploy in `ImagePullBackOff` because the overlay resolves to `:0.5.0` and that tag is not on GHCR yet.
 
 `latest` is still published on every push to `main`, but the cloud overlay does **not** request it.
 
