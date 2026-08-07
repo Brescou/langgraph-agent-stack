@@ -1249,10 +1249,7 @@ return 1
             status = IdempotencyStatus(status_value)
             response: Any | None = None
             if status is IdempotencyStatus.COMPLETED:
-                from api.pack_execution import PackRunResult
-
-                response_data = json.loads(data["response"])
-                response = PackRunResult(**response_data)
+                response = json.loads(data["response"])
             return IdempotencyRecord(
                 body_hash=data["body_hash"],
                 status=status,

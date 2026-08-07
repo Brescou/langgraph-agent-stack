@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
-import time
 from dataclasses import dataclass
 from unittest.mock import MagicMock, patch
 
@@ -353,66 +352,11 @@ def test_in_memory_reservation_can_be_reused_after_ttl() -> None:
         assert store.reserve("expired", "body-hash") is True
 
 
-class FakeRedis:
-    """Small Redis command/script double for cross-store idempotency tests."""
-
-    def __init__(self) -> None:
-        self.records: dict[str, dict[str, str]] = {}
-        self.expiry: dict[str, float] = {}
-
-    def register_script(self, source: str):
-        if "expires_at" in source:
-            return self._reserve
-        return self._store_result
-
-    def _purge(self, key: str, now: float | None = None) -> None:
-        if key in self.expiry and self.expiry[key] <= (
-            time.time() if now is None else now
-        ):
-            self.records.pop(key, None)
-            self.expiry.pop(key, None)
-
-    def _reserve(self, *, keys: list[str], args: list[object]) -> int:
-        key = keys[0]
-        body_hash = str(args[0])
-        ttl = int(args[1])
-        now = float(args[2])
-        self._purge(key, now)
-        record = self.records.get(key)
-        if record is None:
-            self.records[key] = {
-                "body_hash": body_hash,
-                "status": "running",
-                "expires_at": str(now + ttl),
-            }
-            self.expiry[key] = now + ttl
-            return 1
-        if record["body_hash"] != body_hash:
-            return -1
-        return 0
-
-    def _store_result(self, *, keys: list[str], args: list[object]) -> int:
-        key = keys[0]
-        self._purge(key)
-        if key not in self.records:
-            return 0
-        self.records[key]["status"] = "completed"
-        self.records[key]["response"] = str(args[0])
-        return 1
-
-    def hgetall(self, key: str) -> dict[str, str]:
-        self._purge(key)
-        return dict(self.records.get(key, {}))
-
-    def delete(self, key: str) -> None:
-        self.records.pop(key, None)
-        self.expiry.pop(key, None)
-
-
 def test_redis_store_shares_reservations_and_replay(monkeypatch) -> None:
+    import fakeredis
     import redis
 
-    fake_redis = FakeRedis()
+    fake_redis = fakeredis.FakeRedis(decode_responses=True)
     monkeypatch.setattr(redis.Redis, "from_url", lambda *args, **kwargs: fake_redis)
 
     first = create_idempotency_store(
@@ -441,9 +385,17 @@ def test_redis_store_shares_reservations_and_replay(monkeypatch) -> None:
 
     assert record is not None
     assert record.status is IdempotencyStatus.COMPLETED
-    assert record.response == PackRunResult(
-        serialized={"answer": "ok"}, used_version="1", run_id="run-1"
-    )
+    assert record.response == {
+        "serialized": {"answer": "ok"},
+        "used_version": "1",
+        "run_id": "run-1",
+    }
+
+    assert first.reserve("generic", "generic-body") is True
+    first.store_result("generic", {"answer": "first"})
+    generic_record = second.get("generic")
+    assert generic_record is not None
+    assert generic_record.response == {"answer": "first"}
 
     with pytest.raises(IdempotencyConflictError):
         second.reserve("shared", "different-body")
