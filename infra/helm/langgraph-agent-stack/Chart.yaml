@@ -2,8 +2,8 @@ apiVersion: v2
 name: langgraph-agent-stack
 description: Multi-agent LangGraph system on Kubernetes
 type: application
-version: 0.5.0
-appVersion: "0.5.0"
+version: 0.8.0
+appVersion: "0.8.0"
 keywords:
   - langgraph
   - ai

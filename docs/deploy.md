@@ -29,14 +29,24 @@ The cloud Helm overlay (`infra/helm/langgraph-agent-stack/values.cloud.yaml`) se
 image:
   repository: ghcr.io/brescou/langgraph-agent-stack
   pullPolicy: IfNotPresent
-  # tag omitted → Chart AppVersion (currently 0.5.0)
+  # tag omitted → Chart AppVersion (currently 0.8.0)
 ```
 
-So the default cloud deploy pulls **`ghcr.io/brescou/langgraph-agent-stack:0.5.0`** — the chart's `appVersion`, not `:latest`.
+So the default cloud deploy pulls **`ghcr.io/brescou/langgraph-agent-stack:0.8.0`** — the chart's `appVersion`, not `:latest`.
 
 ### Release tag required (operator step)
 
-The immutable `:0.5.0` image exists only after a maintainer cuts and pushes git tag **`v0.5.0`** (CI publishes semver tags on `v*`). **Immediately after merging the cloud-deploy changes to `main`, cut and push `v0.5.0` before any cloud apply** — the window between merge and tag leaves every cloud deploy in `ImagePullBackOff` because the overlay resolves to `:0.5.0` and that tag is not on GHCR yet.
+The cloud overlay resolves to the chart's `appVersion`, currently **`:0.8.0`**. That image is published only when git tag **`v0.8.0`** is pushed, which happens as part of the normal release process (CI publishes semver tags on `v*`).
+
+**Until `v0.8.0` is released, the cloud path has no image to pull** and every apply ends in `ImagePullBackOff`. Two ways forward before then:
+
+- Pin an image that exists, using the long git SHA published on every `main` push:
+  ```bash
+  terraform apply ... -var="image_tag=<long-git-sha>"
+  ```
+- Or wait for the `v0.8.0` release, after which the defaults work with no override.
+
+Note that semver publishing is itself new: tags cut before it existed (`v0.7.0` and earlier) never produced a `:X.Y.Z` image on GHCR, so they cannot be used here.
 
 `latest` is still published on every push to `main`, but the cloud overlay does **not** request it.
 
@@ -94,7 +104,7 @@ aws eks update-kubeconfig --name langgraph-cluster --region us-east-1
 kubectl -n langgraph-agents get pods,pvc
 # expect: pod Running, PVC Bound
 kubectl -n langgraph-agents get deploy -o wide
-# image should show ghcr.io/brescou/langgraph-agent-stack:0.5.0 (or your image_tag override)
+# image should show ghcr.io/brescou/langgraph-agent-stack:0.8.0 (or your image_tag override)
 ```
 
 Optional smoke test (port-forward):

@@ -621,13 +621,13 @@ CI publishes three tag shapes:
 |-----|------|-----|
 | `:latest` | Push to `main` | Dev smoke only — do not pin prod |
 | `:sha` (long git SHA) | Every publish | Immutable prod pin via Terraform `image_tag` |
-| `:X.Y.Z` (e.g. `:0.5.0`) | Git tag `v*` (e.g. `v0.5.0`) | Cloud overlay default via Chart `appVersion` |
+| `:X.Y.Z` (e.g. `:0.8.0`) | Git tag `v*` (e.g. `v0.8.0`) | Cloud overlay default via Chart `appVersion` |
 
 ```bash
 # Authenticate to GHCR (read packages scope)
 echo "$GITHUB_TOKEN" | docker login ghcr.io -u USERNAME --password-stdin
 
-docker pull ghcr.io/<owner>/langgraph-agent-stack:0.5.0   # release tag
+docker pull ghcr.io/<owner>/langgraph-agent-stack:0.8.0   # release tag
 docker pull ghcr.io/<owner>/langgraph-agent-stack:latest  # main only
 ```
 
@@ -663,7 +663,7 @@ Or download the `container-sbom-spdx` artifact from the GitHub Actions run.
 ### Operator checklist
 
 - Pin deployments to **digest** (`image@sha256:…`) or a long `:sha` tag rather than floating `:latest`.
-- Cloud Terraform path defaults to Chart `appVersion` (`:0.5.0` after `v0.5.0` is cut) — see [Deploy runbook](deploy.md).
+- Cloud Terraform path defaults to Chart `appVersion` (`:0.8.0` after `v0.8.0` is cut) — see [Deploy runbook](deploy.md).
 - Re-verify signatures in your deploy pipeline before rolling out.
 - Feed SPDX SBOMs into your organisation's dependency/VEX tooling if required
   (e.g. compliance, SBOM inventory).
