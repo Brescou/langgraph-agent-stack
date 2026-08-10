@@ -28,6 +28,7 @@ from agents.base_agent import (
 )
 from agents.researcher import ResearchResult
 from core.config import get_settings
+from core.cost import CostTracker
 from core.memory import create_checkpointer
 from core.observability import trace_span
 from domain_packs.research.analysis_only.schemas import (
@@ -69,12 +70,26 @@ class AnalysisOnlyPack(BaseDomainPack):
         llm: Any | None = None,
         checkpointer: Any | None = None,
         budget_usd: float | None = None,
+        pack_id: str | None = None,
+        pack_version: str | None = None,
     ) -> None:
         super().__init__(
             run_id=run_id, llm=llm, checkpointer=checkpointer, budget_usd=budget_usd
         )
         self.run_id = run_id or str(uuid.uuid4())
         self._checkpointer = checkpointer or create_checkpointer(get_settings())
+        _effective_budget: float | None = (
+            budget_usd
+            if budget_usd is not None
+            else get_settings().pack_default_budget_usd
+        )
+        resolved_pack_id = pack_id or getattr(self, "pack_id", None) or "unknown"
+        resolved_version = pack_version or "unknown"
+        self._cost_tracker = CostTracker(
+            budget_usd=_effective_budget,
+            pack_id=resolved_pack_id,
+            version=resolved_version,
+        )
         self._analyst_agent: AnalystAgent | None = None
         self._graph = self._build_graph()
 
@@ -110,7 +125,7 @@ class AnalysisOnlyPack(BaseDomainPack):
                         thread_id=f"{self.run_id}-analysis",
                         llm=self._llm,
                         checkpointer=self._checkpointer,
-                        budget_usd=self._budget_usd,
+                        cost_tracker=self._cost_tracker,
                     )
                 analyst_agent = self._analyst_agent
                 if analyst_agent is None:
@@ -140,9 +155,7 @@ class AnalysisOnlyPack(BaseDomainPack):
 
     @property
     def cost_usd(self) -> float:
-        if self._analyst_agent is not None:
-            return self._analyst_agent.cost_usd
-        return 0.0
+        return self._cost_tracker.total_cost_usd
 
     @staticmethod
     def _input_to_research(inp: AnalysisOnlyInput) -> ResearchResult:

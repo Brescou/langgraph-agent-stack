@@ -210,6 +210,8 @@ class BaseAgent(abc.ABC):
         checkpointer: Any | None = None,
         budget_usd: float | None = None,
         cost_tracker: CostTracker | None = None,
+        pack_id: str | None = None,
+        pack_version: str | None = None,
     ) -> None:
         self.name: str = name
         self.thread_id: str = thread_id or str(uuid.uuid4())
@@ -244,7 +246,11 @@ class BaseAgent(abc.ABC):
                 else _settings.pack_default_budget_usd
             )
             if _effective_budget is not None:
-                self._cost_tracker = CostTracker(budget_usd=_effective_budget)
+                self._cost_tracker = CostTracker(
+                    budget_usd=_effective_budget,
+                    pack_id=pack_id or "unknown",
+                    version=pack_version or "unknown",
+                )
 
         if self._cost_tracker is not None:
             # with_config returns a new Runnable wrapper; it does not mutate the

@@ -151,7 +151,11 @@ def build_pack_router(
                 run_id=run_id,
                 llm=state.get_shared_llm(),
                 checkpointer=state.get_shared_checkpointer(),
-                **pack_runtime_kwargs(pack_cls_to_use),
+                **pack_runtime_kwargs(
+                    pack_cls_to_use,
+                    pack_id=pack_id,
+                    pack_version=used_version,
+                ),
             )
             try:
                 last_event: dict[str, Any] | None = None

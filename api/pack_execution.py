@@ -366,7 +366,11 @@ async def execute_typed_pack_run(
                 run_id=run_id,
                 llm=state.get_shared_llm(),
                 checkpointer=state.get_shared_checkpointer(),
-                **pack_runtime_kwargs(pack_cls_to_use),
+                **pack_runtime_kwargs(
+                    pack_cls_to_use,
+                    pack_id=pack_id,
+                    pack_version=used_version,
+                ),
             ) as pipeline:
                 result = invoke_pack_run(pack_cls_to_use, pipeline, body)
                 cost_usd = getattr(pipeline, "cost_usd", None)

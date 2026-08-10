@@ -112,6 +112,7 @@ async def run_pipeline(
             run_id=run_id,
             llm=state.shared_llm,
             checkpointer=state.shared_checkpointer,
+            # TODO(task-3): pass pack_id=settings.default_pack_id and resolved pack_version
             **pack_runtime_kwargs(pack_cls),
         ) as pipeline:
             report = pipeline.run(query)
@@ -224,6 +225,7 @@ async def _stream_pipeline(
             run_id=run_id,
             llm=state.get_shared_llm(),
             checkpointer=state.get_shared_checkpointer(),
+            # TODO(task-3): pass pack_id=settings.default_pack_id and resolved pack_version
             **pack_runtime_kwargs(pack_cls),
         )
         report = None

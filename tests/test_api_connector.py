@@ -40,3 +40,15 @@ def test_pack_runtime_kwargs_skips_research_only() -> None:
 def test_pack_runtime_kwargs_empty_when_connector_disabled() -> None:
     api_state.shared_connector = None
     assert pack_runtime_kwargs(ResearchAnalysisPack) == {}
+
+
+def test_pack_runtime_kwargs_forwards_pack_identity() -> None:
+    kwargs = pack_runtime_kwargs(
+        ResearchAnalysisPack,
+        pack_id="research_analysis",
+        pack_version="2.0",
+    )
+    assert kwargs == {
+        "pack_id": "research_analysis",
+        "pack_version": "2.0",
+    }

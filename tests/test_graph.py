@@ -546,6 +546,26 @@ class TestAnalysisOnlyPackStreamEvents:
 
 
 class TestResearchAnalysisPackBudget:
+    def test_research_analysis_pack_always_has_cost_tracker(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Pack must always attach a labelled CostTracker, even without budget."""
+        monkeypatch.setenv("PACK_DEFAULT_BUDGET_USD", "")
+        from core.config import get_settings
+
+        get_settings.cache_clear()
+        pack = ResearchAnalysisPack(
+            pack_id="research_analysis",
+            pack_version="1.0",
+        )
+        try:
+            assert pack._cost_tracker is not None
+            assert pack._cost_tracker.pack_id == "research_analysis"
+            assert pack._cost_tracker.version == "1.0"
+            assert pack._cost_tracker.budget_usd is None
+        finally:
+            pack.close()
+
     def test_pack_propagates_budget_to_agents(self) -> None:
         """budget_usd passed to ResearchAnalysisPack must be stored on the instance."""
         pack = ResearchAnalysisPack(budget_usd=1.0)

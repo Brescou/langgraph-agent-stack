@@ -134,17 +134,27 @@ def get_legacy_pack_cls(
         return state.active_pack_cls or ResearchAnalysisPack
 
 
-def pack_runtime_kwargs(pack_cls: type) -> dict[str, Any]:
-    """Extra constructor kwargs: policy budget and optional connector."""
+def pack_runtime_kwargs(
+    pack_cls: type,
+    *,
+    pack_id: str | None = None,
+    pack_version: str | None = None,
+) -> dict[str, Any]:
+    """Extra constructor kwargs: policy budget, optional connector, pack identity."""
     kwargs: dict[str, Any] = {}
-    pack_id = getattr(pack_cls, "pack_id", None)
-    if pack_id:
-        budget = effective_budget_usd(pack_id, get_settings())
+    params = inspect.signature(pack_cls.__init__).parameters
+    resolved_pack_id = pack_id or getattr(pack_cls, "pack_id", None)
+    if resolved_pack_id:
+        budget = effective_budget_usd(resolved_pack_id, get_settings())
         if budget is not None:
             kwargs["budget_usd"] = budget
+    if pack_id is not None and "pack_id" in params:
+        kwargs["pack_id"] = pack_id
+    if pack_version is not None and "pack_version" in params:
+        kwargs["pack_version"] = pack_version
     if (
         state.shared_connector is not None
-        and "connector" in inspect.signature(pack_cls.__init__).parameters
+        and "connector" in params
     ):
         kwargs["connector"] = state.shared_connector
     return kwargs
