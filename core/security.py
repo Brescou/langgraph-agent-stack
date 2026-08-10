@@ -1163,6 +1163,10 @@ class RedisIdempotencyStore:
     this keeps the Redis value safe to inspect and avoids executable
     deserialization during reads.
 
+    ``expires_at`` is an informational wall-clock timestamp for Redis records;
+    Redis ``EXPIRE`` is authoritative for expiration. This differs from the
+    in-memory store, which uses ``monotonic()`` for its local expiry checks.
+
     Args:
         redis_url: Redis connection string.
         ttl_seconds: Lifetime of a reservation and its completed response.
@@ -1239,7 +1243,11 @@ return 1
         return result_int == 1
 
     def get(self, key: str) -> IdempotencyRecord | None:
-        """Return the stored record for *key*, if it has not expired."""
+        """Return the record if Redis still holds the key.
+
+        Redis enforces expiry through ``EXPIRE``; this method does not evaluate
+        the informational ``expires_at`` field itself.
+        """
         data = self._redis.hgetall(self._key(key))
         if not data:
             return None
