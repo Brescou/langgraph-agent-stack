@@ -603,13 +603,12 @@ class TestProviderFromModelId:
 
 @pytest.mark.skipif(not _prometheus_available, reason="prometheus-client not installed")
 class TestLlmCostMetric:
-    """``llm_cost_usd_total{provider}`` increments on ``CostTracker.on_llm_end``."""
+    """Cost counters increment on ``CostTracker.on_llm_end`` with pack labels."""
 
-    def test_on_llm_end_increments_provider_counter(self) -> None:
+    @staticmethod
+    def _haiku_llm_result() -> "LLMResult":
         from langchain_core.messages import AIMessage
         from langchain_core.outputs import ChatGeneration, LLMResult
-
-        from core.cost import CostTracker
 
         msg = AIMessage(content="test")
         msg.usage_metadata = {
@@ -617,17 +616,61 @@ class TestLlmCostMetric:
             "output_tokens": 1000,
             "total_tokens": 2000,
         }
-        result = LLMResult(
+        return LLMResult(
             generations=[[ChatGeneration(message=msg)]],
             llm_output={"model_name": "claude-3-5-haiku-20241022"},
         )
 
-        labels = {"provider": "anthropic"}
+    @staticmethod
+    def _haiku_expected_cost() -> float:
+        # claude-3-5-haiku: $0.0008/1k input + $0.004/1k output
+        return 0.0008 + 0.004
+
+    def test_on_llm_end_increments_provider_counter_with_default_pack_labels(
+        self,
+    ) -> None:
+        from core.cost import CostTracker
+
+        result = self._haiku_llm_result()
+        expected = self._haiku_expected_cost()
+        labels = {
+            "provider": "anthropic",
+            "pack_id": "unknown",
+            "version": "unknown",
+        }
         before = _sample("llm_cost_usd_total", labels)
         CostTracker().on_llm_end(result)
-        # claude-3-5-haiku: $0.0008/1k input + $0.004/1k output
-        expected = 0.0008 + 0.004
         assert _sample("llm_cost_usd_total", labels) == pytest.approx(before + expected)
+
+    def test_on_llm_end_increments_provider_counter_with_pack_labels(self) -> None:
+        from core.cost import CostTracker
+
+        result = self._haiku_llm_result()
+        expected = self._haiku_expected_cost()
+        labels = {
+            "provider": "anthropic",
+            "pack_id": "research_analysis",
+            "version": "1.0",
+        }
+        before = _sample("llm_cost_usd_total", labels)
+        CostTracker(pack_id="research_analysis", version="1.0").on_llm_end(result)
+        assert _sample("llm_cost_usd_total", labels) == pytest.approx(before + expected)
+
+    def test_on_llm_end_increments_pack_run_cost_with_pack_labels(self) -> None:
+        from core.cost import CostTracker
+
+        result = self._haiku_llm_result()
+        expected = self._haiku_expected_cost()
+        labels = {
+            "model": "claude-3-5-haiku-20241022",
+            "pack_id": "research_analysis",
+            "version": "2.0",
+        }
+        before = _sample("pack_run_cost_usd_total", labels)
+        CostTracker(pack_id="research_analysis", version="2.0").on_llm_end(result)
+        assert _sample("pack_run_cost_usd_total", labels) == pytest.approx(
+            before + expected
+        )
 
 
 @pytest.mark.skipif(not _prometheus_available, reason="prometheus-client not installed")

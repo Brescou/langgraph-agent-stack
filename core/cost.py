@@ -196,15 +196,15 @@ try:
 
     pack_run_cost_usd_total = Counter(
         "pack_run_cost_usd_total",
-        "Cumulative LLM cost in USD per model",
-        ["model"],
+        "Cumulative LLM cost in USD per pack version and model",
+        ["pack_id", "version", "model"],
     )
     # ``provider`` keeps cardinality lower than per-model labels: a handful of
     # vendors versus dozens of dated model IDs.
     llm_cost_usd_total = Counter(
         "llm_cost_usd_total",
-        "Cumulative LLM cost in USD per provider",
-        ["provider"],
+        "Cumulative LLM cost in USD per pack version and provider",
+        ["pack_id", "version", "provider"],
     )
     _PROMETHEUS_AVAILABLE = True
 except ImportError:
@@ -501,10 +501,18 @@ class CostTracker(BaseCallbackHandler):
     concurrently (e.g. inside a ``ThreadPoolExecutor``).
     """
 
-    def __init__(self, budget_usd: float | None = None) -> None:
+    def __init__(
+        self,
+        budget_usd: float | None = None,
+        *,
+        pack_id: str = "unknown",
+        version: str = "unknown",
+    ) -> None:
         super().__init__()
         self.raise_error = True
         self.budget_usd: float | None = budget_usd
+        self.pack_id = pack_id or "unknown"
+        self.version = version or "unknown"
         self.total_cost_usd: float = 0.0
         self.input_tokens: int = 0
         self.output_tokens: int = 0
@@ -712,12 +720,16 @@ class CostTracker(BaseCallbackHandler):
             total_cost_usd = self.total_cost_usd
 
         if _PROMETHEUS_AVAILABLE and pack_run_cost_usd_total is not None:
-            pack_run_cost_usd_total.labels(model=usage.model_id or "unknown").inc(
-                call_cost
-            )
+            pack_run_cost_usd_total.labels(
+                pack_id=self.pack_id,
+                version=self.version,
+                model=usage.model_id or "unknown",
+            ).inc(call_cost)
         if _PROMETHEUS_AVAILABLE and llm_cost_usd_total is not None:
             llm_cost_usd_total.labels(
-                provider=provider_from_model_id(usage.model_id)
+                pack_id=self.pack_id,
+                version=self.version,
+                provider=provider_from_model_id(usage.model_id),
             ).inc(call_cost)
 
         _log.debug(
