@@ -2,9 +2,9 @@
 # scripts/infra-devsecops.sh — Infra DevSecOps checks (CI + local parity)
 #
 # Runs:
-#   - helm lint + render (default + prod overlays)
-#   - kubeconform on rendered manifests (core + CRD schemas)
-#   - kube-linter on rendered manifests
+#   - helm lint + render (default, dev, cloud, prod, cloud+prod overlays)
+#   - kubeconform on each rendered manifest (prod/cloud+prod include CRD schemas)
+#   - kube-linter on each rendered manifest
 #   - checkov on Terraform modules
 #   - checkov on Helm chart + rendered prod Kubernetes manifests
 #
@@ -54,27 +54,39 @@ export PATH="${BIN_DIR}:${PATH}"
 echo "[infra-devsecops] Helm lint"
 helm lint "${HELM_CHART}"
 
-echo "[infra-devsecops] Render manifests (default + prod)"
+echo "[infra-devsecops] Render manifests (default, dev, cloud, prod, cloud+prod)"
 helm template test-release "${HELM_CHART}" > "${RENDER_DIR}/default.yaml"
 helm template test-release "${HELM_CHART}" \
+  -f "${HELM_CHART}/values.dev.yaml" > "${RENDER_DIR}/dev.yaml"
+helm template test-release "${HELM_CHART}" \
+  -f "${HELM_CHART}/values.cloud.yaml" > "${RENDER_DIR}/cloud.yaml"
+helm template test-release "${HELM_CHART}" \
   -f "${HELM_CHART}/values.prod.yaml" > "${RENDER_DIR}/prod.yaml"
+helm template test-release "${HELM_CHART}" \
+  -f "${HELM_CHART}/values.cloud.yaml" \
+  -f "${HELM_CHART}/values.prod.yaml" > "${RENDER_DIR}/cloud-prod.yaml"
 
-echo "[infra-devsecops] kubeconform (default)"
-kubeconform -summary \
-  -kubernetes-version "${K8S_VERSION}" \
-  -schema-location default \
-  "${RENDER_DIR}/default.yaml"
+for overlay in default dev cloud; do
+  echo "[infra-devsecops] kubeconform (${overlay})"
+  kubeconform -summary \
+    -kubernetes-version "${K8S_VERSION}" \
+    -schema-location default \
+    "${RENDER_DIR}/${overlay}.yaml"
+done
 
-echo "[infra-devsecops] kubeconform (prod + CRD schemas)"
-kubeconform -summary \
-  -kubernetes-version "${K8S_VERSION}" \
-  -schema-location default \
-  -schema-location "${CRD_SCHEMA_LOCATION}" \
-  "${RENDER_DIR}/prod.yaml"
+for overlay in prod cloud-prod; do
+  echo "[infra-devsecops] kubeconform (${overlay} + CRD schemas)"
+  kubeconform -summary \
+    -kubernetes-version "${K8S_VERSION}" \
+    -schema-location default \
+    -schema-location "${CRD_SCHEMA_LOCATION}" \
+    "${RENDER_DIR}/${overlay}.yaml"
+done
 
-echo "[infra-devsecops] kube-linter (default + prod)"
-kube-linter lint "${RENDER_DIR}/default.yaml"
-kube-linter lint "${RENDER_DIR}/prod.yaml"
+for overlay in default dev cloud prod cloud-prod; do
+  echo "[infra-devsecops] kube-linter (${overlay})"
+  kube-linter lint "${RENDER_DIR}/${overlay}.yaml"
+done
 
 echo "[infra-devsecops] checkov — Terraform (${CHECKOV_CONFIG})"
 ${CHECKOV_CMD} -d "${ROOT}/infra/terraform" --framework terraform --config-file "${CHECKOV_CONFIG}"

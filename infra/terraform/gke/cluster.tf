@@ -32,8 +32,4 @@ resource "google_container_cluster" "main" {
   }
 
   deletion_protection = var.environment == "prod" ? true : false
-
-  lifecycle {
-    prevent_destroy = var.environment == "prod"
-  }
 }

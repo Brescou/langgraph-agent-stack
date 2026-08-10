@@ -23,6 +23,13 @@ resource "kubernetes_namespace_v1" "langgraph" {
 # ---------------------------------------------------------------------------
 # Helm release — langgraph-agent-stack
 # ---------------------------------------------------------------------------
+locals {
+  values_files = length(var.helm_values_files) > 0 ? var.helm_values_files : concat(
+    ["values.cloud.yaml"],
+    var.environment == "prod" ? ["values.prod.yaml"] : [],
+  )
+}
+
 resource "helm_release" "langgraph" {
   provider = helm
 
@@ -31,26 +38,30 @@ resource "helm_release" "langgraph" {
   namespace        = kubernetes_namespace_v1.langgraph.metadata[0].name
   create_namespace = false
 
-  values = [file("${var.helm_chart_path}/values.${var.environment}.yaml")]
+  values = [for f in local.values_files : file("${var.helm_chart_path}/${f}")]
 
-  set = [
-    {
-      name  = "llm.provider"
-      value = var.llm_provider
-    },
-    {
-      name  = "secrets.existingSecret"
-      value = local.k8s_secret_name
-    },
-    {
-      name  = "serviceAccount.create"
-      value = "false"
-    },
-    {
-      name  = "serviceAccount.name"
-      value = local.k8s_service_account_name
-    },
-  ]
+  set = concat(
+    [
+      {
+        name  = "llm.provider"
+        value = var.llm_provider
+      },
+      {
+        name  = "secrets.existingSecret"
+        value = local.k8s_secret_name
+      },
+      {
+        name  = "serviceAccount.create"
+        value = "false"
+      },
+      {
+        name  = "serviceAccount.name"
+        value = local.k8s_service_account_name
+      },
+    ],
+    var.image_repository != "" ? [{ name = "image.repository", value = var.image_repository }] : [],
+    var.image_tag != "" ? [{ name = "image.tag", value = var.image_tag }] : [],
+  )
 
   depends_on = [
     kubernetes_namespace_v1.langgraph,

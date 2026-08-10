@@ -93,3 +93,21 @@ variable "authorized_ip_ranges" {
   type        = list(string)
   default     = []
 }
+
+variable "helm_values_files" {
+  description = "Overrides the default Helm overlay list entirely. Empty = derive from environment."
+  type        = list(string)
+  default     = []
+}
+
+variable "image_repository" {
+  description = "Optional override for image.repository (empty = use values.cloud.yaml)."
+  type        = string
+  default     = ""
+}
+
+variable "image_tag" {
+  description = "Optional override for image.tag (empty = Chart.AppVersion via omitted tag)."
+  type        = string
+  default     = ""
+}

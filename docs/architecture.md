@@ -2,6 +2,8 @@
 
 ## Overview
 
+Cloud deploy (Terraform → Helm → Running pod on EKS/GKE/AKS): see **[docs/deploy.md](deploy.md)**.
+
 The platform kernel is a thin abstraction layer that sits above the existing LangGraph agent infrastructure. Its purpose is to make multi-agent pipelines deployable as self-contained units called **domain packs**, each with a stable identity, a uniform runtime interface, and explicit registry membership.
 
 Before the platform kernel, the Research + Analysis pipeline was implemented directly in `core/graph.py` as `MultiAgentGraph`. Adding a second pipeline would have required duplicating that pattern with no standard contract between implementations. The platform kernel defines that contract once so that future domain packs can be built, registered, and swapped without touching the API layer.
