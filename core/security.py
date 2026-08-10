@@ -50,6 +50,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import ipaddress
+import json
 import logging
 import re
 import socket
@@ -65,6 +66,7 @@ from time import monotonic
 from typing import Any, Literal, Protocol, cast, runtime_checkable
 from urllib.parse import urlparse
 
+from fastapi.encoders import jsonable_encoder
 from starlette.requests import Request
 
 logger = logging.getLogger(__name__)
@@ -1153,10 +1155,146 @@ class InMemoryIdempotencyStore:
             self._records.pop(key, None)
 
 
+class RedisIdempotencyStore:
+    """Distributed idempotency store backed by Redis.
+
+    Reservations and result transitions use Lua scripts so independent API
+    processes share the same atomic key state. Responses are stored as JSON;
+    this keeps the Redis value safe to inspect and avoids executable
+    deserialization during reads.
+
+    ``expires_at`` is an informational wall-clock timestamp for Redis records;
+    Redis ``EXPIRE`` is authoritative for expiration. This differs from the
+    in-memory store, which uses ``monotonic()`` for its local expiry checks.
+
+    Args:
+        redis_url: Redis connection string.
+        ttl_seconds: Lifetime of a reservation and its completed response.
+    """
+
+    _RESERVE_SCRIPT = """
+local key = KEYS[1]
+local body_hash = ARGV[1]
+local ttl = tonumber(ARGV[2])
+local now = tonumber(ARGV[3])
+local current_hash = redis.call('HGET', key, 'body_hash')
+
+if not current_hash then
+    redis.call('HSET', key,
+        'body_hash', body_hash,
+        'status', 'running',
+        'expires_at', now + ttl)
+    redis.call('EXPIRE', key, ttl)
+    return 1
+end
+
+if current_hash ~= body_hash then
+    return -1
+end
+return 0
+"""
+
+    _STORE_RESULT_SCRIPT = """
+local key = KEYS[1]
+if redis.call('EXISTS', key) == 0 then
+    return 0
+end
+redis.call('HSET', key, 'status', 'completed', 'response', ARGV[1])
+return 1
+"""
+
+    def __init__(self, redis_url: str, ttl_seconds: int = 86400) -> None:
+        try:
+            import redis as redis_lib
+
+            self._redis: Any = redis_lib.Redis.from_url(
+                redis_url, decode_responses=True
+            )
+            self._reserve_script = self._redis.register_script(self._RESERVE_SCRIPT)
+            self._store_result_script = self._redis.register_script(
+                self._STORE_RESULT_SCRIPT
+            )
+        except ImportError as exc:
+            raise ImportError(
+                "redis package required for IDEMPOTENCY_BACKEND=redis. "
+                "Install with: uv sync --extra redis"
+            ) from exc
+
+        if ttl_seconds <= 0:
+            raise ValueError(f"ttl_seconds must be > 0, got {ttl_seconds!r}")
+        self._ttl_seconds = ttl_seconds
+        self._prefix = "idempotency:"
+
+    def _key(self, key: str) -> str:
+        """Return the Redis key for an application idempotency key."""
+        return f"{self._prefix}{key}"
+
+    def reserve(self, key: str, body_hash: str) -> bool:
+        """Atomically reserve *key* for execution across all replicas."""
+        result = self._reserve_script(
+            keys=[self._key(key)],
+            args=[body_hash, self._ttl_seconds, time.time()],
+        )
+        result_int = int(cast(int | str, result))
+        if result_int == -1:
+            raise IdempotencyConflictError(
+                f"Idempotency key '{key}' was reused with a different request body."
+            )
+        return result_int == 1
+
+    def get(self, key: str) -> IdempotencyRecord | None:
+        """Return the record if Redis still holds the key.
+
+        Redis enforces expiry through ``EXPIRE``; this method does not evaluate
+        the informational ``expires_at`` field itself.
+        """
+        data = self._redis.hgetall(self._key(key))
+        if not data:
+            return None
+
+        try:
+            status_value = data["status"]
+            status = IdempotencyStatus(status_value)
+            response: Any | None = None
+            if status is IdempotencyStatus.COMPLETED:
+                response = json.loads(data["response"])
+            return IdempotencyRecord(
+                body_hash=data["body_hash"],
+                status=status,
+                expires_at=float(data["expires_at"]),
+                response=response,
+            )
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise RuntimeError("Redis idempotency record is malformed.") from exc
+
+    def store_result(self, key: str, response: Any) -> None:
+        """Store a completed response while preserving the reservation TTL."""
+        payload = json.dumps(jsonable_encoder(response), separators=(",", ":"))
+        stored = self._store_result_script(
+            keys=[self._key(key)],
+            args=[payload],
+        )
+        if int(cast(int | str, stored)) == 0:
+            raise KeyError(f"Unknown idempotency key: {key}")
+
+    def release(self, key: str) -> None:
+        """Release an in-flight reservation without caching a result."""
+        self._redis.delete(self._key(key))
+
+
 def create_idempotency_store(
-    backend: Literal["memory"] = "memory",
+    backend: Literal["memory", "redis"] = "memory",
+    redis_url: str = "",
     ttl_seconds: int = 86400,
 ) -> IdempotencyStore:
-    """Factory: build an in-memory idempotency store."""
+    """Factory: build a per-process or Redis-backed idempotency store."""
 
+    if backend == "redis":
+        if not redis_url:
+            logger.warning(
+                "IDEMPOTENCY_BACKEND=redis but REDIS_URL is not set — "
+                "falling back to in-memory idempotency store."
+            )
+            return InMemoryIdempotencyStore(ttl_seconds=ttl_seconds)
+        return RedisIdempotencyStore(redis_url=redis_url, ttl_seconds=ttl_seconds)
     return InMemoryIdempotencyStore(ttl_seconds=ttl_seconds)

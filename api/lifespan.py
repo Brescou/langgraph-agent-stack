@@ -85,6 +85,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if state.idempotency_store is None:
         state.idempotency_store = create_idempotency_store(
             backend=settings.idempotency_backend,
+            redis_url=settings.redis_url,
             ttl_seconds=settings.idempotency_ttl_seconds,
         )
 
