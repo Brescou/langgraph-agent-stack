@@ -23,7 +23,13 @@ from fastapi import HTTPException
 
 import api.state as state
 from api.pack_execution import execute_typed_pack_run
-from core.security import InMemoryIdempotencyStore
+from core.security import (
+    IdempotencyConflictError,
+    IdempotencyStatus,
+    InMemoryIdempotencyStore,
+    RedisIdempotencyStore,
+    create_idempotency_store,
+)
 
 # ---------------------------------------------------------------------------
 # Fake pack input
@@ -334,6 +340,65 @@ async def test_without_idempotency_key_does_not_store(
 
     assert first != second
     assert calls == 2
+
+
+def test_in_memory_reservation_can_be_reused_after_ttl() -> None:
+    store = InMemoryIdempotencyStore(ttl_seconds=1)
+
+    with patch("core.security.monotonic", side_effect=[100.0, 100.5, 101.1]):
+        assert store.reserve("expired", "body-hash") is True
+        store.store_result("expired", {"answer": "first"})
+        assert store.reserve("expired", "body-hash") is False
+        assert store.reserve("expired", "body-hash") is True
+
+
+def test_redis_store_shares_reservations_and_replay(monkeypatch) -> None:
+    import fakeredis
+    import redis
+
+    fake_redis = fakeredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr(redis.Redis, "from_url", lambda *args, **kwargs: fake_redis)
+
+    first = create_idempotency_store(
+        backend="redis",
+        redis_url="redis://localhost:6379/0",
+        ttl_seconds=60,
+    )
+    second = create_idempotency_store(
+        backend="redis",
+        redis_url="redis://localhost:6379/0",
+        ttl_seconds=60,
+    )
+
+    assert isinstance(first, RedisIdempotencyStore)
+    assert isinstance(second, RedisIdempotencyStore)
+    assert first.reserve("shared", "body-hash") is True
+    assert second.reserve("shared", "body-hash") is False
+
+    from api.pack_execution import PackRunResult
+
+    first.store_result(
+        "shared",
+        PackRunResult(serialized={"answer": "ok"}, used_version="1", run_id="run-1"),
+    )
+    record = second.get("shared")
+
+    assert record is not None
+    assert record.status is IdempotencyStatus.COMPLETED
+    assert record.response == {
+        "serialized": {"answer": "ok"},
+        "used_version": "1",
+        "run_id": "run-1",
+    }
+
+    assert first.reserve("generic", "generic-body") is True
+    first.store_result("generic", {"answer": "first"})
+    generic_record = second.get("generic")
+    assert generic_record is not None
+    assert generic_record.response == {"answer": "first"}
+
+    with pytest.raises(IdempotencyConflictError):
+        second.reserve("shared", "different-body")
 
 
 @pytest.mark.asyncio

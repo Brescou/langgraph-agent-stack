@@ -13,6 +13,7 @@ import functools
 import hashlib
 import logging
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from time import monotonic
 from typing import Any
@@ -221,12 +222,20 @@ async def wait_for_completed_idempotency_record(
             return None
 
         if record.status is IdempotencyStatus.COMPLETED:
-            if not isinstance(record.response, PackRunResult):
-                raise RuntimeError(
-                    "Completed idempotency record has an invalid response."
-                )
+            if isinstance(record.response, PackRunResult):
+                return record.response
 
-            return record.response
+            if isinstance(record.response, Mapping):
+                try:
+                    return PackRunResult(
+                        serialized=record.response["serialized"],
+                        used_version=record.response["used_version"],
+                        run_id=record.response["run_id"],
+                    )
+                except (KeyError, TypeError):
+                    pass
+
+            raise RuntimeError("Completed idempotency record has an invalid response.")
 
         await asyncio.sleep(IDEMPOTENCY_POLL_INTERVAL_SECONDS)
 
