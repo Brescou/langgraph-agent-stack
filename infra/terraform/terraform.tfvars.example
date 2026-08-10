@@ -1,8 +1,14 @@
 # ---------------------------------------------------------------------------
 # Example variable values for each cloud provider
 #
-# Copy the relevant section to a terraform.tfvars file in the matching
-# entry-point directory (gke/, eks/, or aks/) and fill in real values.
+# Prefer the ready-made environment files in environments/:
+#
+#   environments/eks.dev.tfvars     environments/eks.prod.tfvars
+#   environments/gke.dev.tfvars     environments/gke.prod.tfvars
+#   environments/azure.dev.tfvars   environments/azure.prod.tfvars
+#
+# Copy a section below only if you need a custom terraform.tfvars in the
+# matching entry-point directory (gke/, eks/, or aks/).
 # ---------------------------------------------------------------------------
 
 # ═══════════════════════════════════════════════════════════════════════════

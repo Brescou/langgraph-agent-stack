@@ -6,6 +6,11 @@
 #   terraform init
 #   terraform apply -var-file=../environments/eks.dev.tfvars \
 #     -var="anthropic_api_key=$ANTHROPIC_API_KEY"
+#
+# Production:
+#   terraform apply -var-file=../environments/eks.prod.tfvars \
+#     -var="anthropic_api_key=$ANTHROPIC_API_KEY" \
+#     -var="redis_url=$REDIS_URL"
 # ---------------------------------------------------------------------------
 
 module "eks" {
@@ -27,4 +32,8 @@ module "eks" {
   node_desired_size   = var.node_desired_size
   vpc_cidr            = var.vpc_cidr
   public_access_cidrs = var.public_access_cidrs
+
+  helm_values_files = var.helm_values_files
+  image_repository  = var.image_repository
+  image_tag         = var.image_tag
 }

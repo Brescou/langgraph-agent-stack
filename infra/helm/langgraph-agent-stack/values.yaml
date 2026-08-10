@@ -4,6 +4,7 @@ image:
   repository: langgraph-agent-stack
   tag: ""
   pullPolicy: IfNotPresent
+  pullSecrets: []
 
 service:
   type: ClusterIP

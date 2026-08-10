@@ -41,6 +41,11 @@ spec:
       automountServiceAccountToken: false
       serviceAccountName: {{ include "langgraph-agent-stack.serviceAccountName" . }}
 
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
       {{- if .Values.topologySpreadConstraints.enabled }}
       topologySpreadConstraints:
         {{- range .Values.topologySpreadConstraints.constraints }}

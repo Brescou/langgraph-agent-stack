@@ -69,6 +69,8 @@ curl -X POST http://localhost:8000/packs/meeting_prep/run \
 
 Completed responses are retained for `IDEMPOTENCY_TTL_SECONDS` (default: `86400` seconds). Reusing the same idempotency key with a different request body returns HTTP `409 Conflict`.
 
+The default `IDEMPOTENCY_BACKEND=memory` keeps reservations in one process. Set `IDEMPOTENCY_BACKEND=redis` with `REDIS_URL` for shared reservations and response replay across multiple API replicas.
+
 Interactive API docs: `http://localhost:8000/docs` (disabled when `ENVIRONMENT=production`).
 
 **Cost:** with a real provider, a `research_analysis` run (6 LLM calls) costs roughly **$0.01–0.05** on Claude Sonnet 5 pricing ($0.003 / $0.015 per 1K input/output tokens) — a rough order of magnitude from the pricing table in `core/cost.py`, not a measured benchmark. Set `PACK_DEFAULT_BUDGET_USD=0.50` to cap spend per run; requests over budget return HTTP `402`.
@@ -215,7 +217,7 @@ Production: set `secrets.existingSecret` (External Secrets Operator), `config.en
 
 > **Scaling note.** `MEMORY_BACKEND=sqlite` (default) is for development and single-replica deployments only — it's a local file, so state is not shared across pods. For production, multi-replica deployments, switch to `MEMORY_BACKEND=redis` or `MEMORY_BACKEND=postgres` so checkpointing and session history are consistent across replicas.
 
-**Terraform** — entry points under `infra/terraform/{gke,eks,aks}/` (no shared root module). Configure a remote backend before production apply. GKE module expects [External Secrets Operator](docs/security.md#3-secret-management) installed before `ClusterSecretStore` resources.
+**Terraform** — entry points under `infra/terraform/{gke,eks,aks}/` (no shared root module). Configure a remote backend before production apply. GKE module expects [External Secrets Operator](docs/security.md#3-secret-management) installed before `ClusterSecretStore` resources. Full cloud apply/verify/destroy walkthrough: **[Deploy runbook](docs/deploy.md)**.
 
 **Infra CI locally:** `make infra-check` (template Checkov profile). Before production hardening: `make infra-check-prod` ([checklist](docs/security.md#before-going-to-production-checkov)).
 
@@ -288,6 +290,7 @@ langgraph-agent-stack/
 
 | Doc | Contents |
 |-----|----------|
+| [docs/deploy.md](docs/deploy.md) | Cloud deploy runbook (EKS/GKE/AKS apply, verify, destroy) |
 | [docs/security.md](docs/security.md) | Auth, secrets, K8s hardening, CI scans, supply chain, Checkov prod gate |
 | [domain_packs/README.md](domain_packs/README.md) | Pack catalogue and authoring |
 | [connectors/README.md](connectors/README.md) | Connector contract and wiring |
