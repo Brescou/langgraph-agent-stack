@@ -232,6 +232,8 @@ class TestPipelineE2E:
         """
         llm = MagicMock(spec=BaseChatModel)
         llm.bind_tools.return_value = llm
+        # Packs attach CostTracker via with_config; keep invoke on this mock.
+        llm.with_config.return_value = llm
 
         expand_response = json.dumps(["What is quantum computing?"])
         validate_response = json.dumps(

@@ -292,6 +292,20 @@ def _build_llm_responses() -> list[AIMessage]:
     ]
 
 
+def _build_mock_llm() -> MagicMock:
+    """Mock LLM whose ``with_config`` returns itself (CostTracker attach path).
+
+    Packs always wrap the LLM via ``llm.with_config({"callbacks": [...]})``.
+    A bare ``MagicMock`` would replace ``invoke`` with a child mock and drop
+    the canned ``side_effect`` responses.
+    """
+    mock_llm = MagicMock()
+    mock_llm.with_config.return_value = mock_llm
+    mock_llm.bind_tools.return_value = mock_llm
+    mock_llm.invoke.side_effect = _build_llm_responses()
+    return mock_llm
+
+
 class TestGraphWithSqliteSaver:
     """Full pipeline E2E: real SqliteSaver, mocked LLM, real graph execution."""
 
@@ -304,8 +318,7 @@ class TestGraphWithSqliteSaver:
 
         db_path = str(tmp_path / "e2e_checkpoint.db")
 
-        mock_llm = MagicMock()
-        mock_llm.invoke.side_effect = _build_llm_responses()
+        mock_llm = _build_mock_llm()
 
         with (
             SqliteSaver.from_conn_string(db_path) as saver,
@@ -359,8 +372,7 @@ class TestGraphWithPostgresSaver:
             with PostgresSaver.from_conn_string(dsn) as saver:
                 saver.setup()
 
-                mock_llm = MagicMock()
-                mock_llm.invoke.side_effect = _build_llm_responses()
+                mock_llm = _build_mock_llm()
 
                 with (
                     patch("agents.base_agent.get_llm", return_value=mock_llm),
@@ -415,8 +427,7 @@ class TestGraphWithRedisSaver:
             redis_url = f"redis://{host}:{port}/0"
 
             with RedisSaver.from_conn_string(redis_url) as saver:
-                mock_llm = MagicMock()
-                mock_llm.invoke.side_effect = _build_llm_responses()
+                mock_llm = _build_mock_llm()
 
                 with (
                     patch("agents.base_agent.get_llm", return_value=mock_llm),
