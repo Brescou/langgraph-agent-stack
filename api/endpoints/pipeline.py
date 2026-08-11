@@ -8,6 +8,7 @@ import functools
 import hashlib
 import json
 import logging
+import time
 import uuid
 from collections.abc import AsyncGenerator
 from typing import Annotated, Any
@@ -31,10 +32,19 @@ from api.dependencies import (
     validate_pack_query,
 )
 from api.models import ResearchRequest, ResearchResponse, RunRequest, RunResponse
-from api.pack_execution import SESSION_IN_FLIGHT_DETAIL, save_run_best_effort
+from api.pack_execution import (
+    SESSION_IN_FLIGHT_DETAIL,
+    resolve_pack_version,
+    save_run_best_effort,
+)
 from control_plane.enforce import effective_stream_timeout_seconds
 from core.config import Settings, get_settings
-from core.observability import active_pipelines, set_span_attributes
+from core.observability import (
+    active_pipelines,
+    outcome_from_http_status,
+    record_pack_run,
+    set_span_attributes,
+)
 
 router = APIRouter(tags=["Pipeline"])
 logger = logging.getLogger(__name__)
@@ -70,143 +80,161 @@ async def run_pipeline(
     pack_cls: Annotated[type[Any], Depends(get_legacy_pack_cls)],
 ) -> RunResponse:
     """Execute the complete multi-agent pipeline for a given query."""
-    if state.shutting_down.is_set():
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Server is shutting down.",
-        )
+    pack_id = settings.default_pack_id
+    used_version = resolve_pack_version(pack_id, pack_cls)
+    started = time.perf_counter()
+    outcome = "server_error"
 
     try:
-        query = validate_pack_query(settings.default_pack_id, body.query)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
-        ) from exc
-
-    if not query:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Query must not be empty."
-        )
-
-    if state.get_shared_llm() is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="LLM provider is not configured. Check server logs.",
-        )
-
-    session_id = body.session_id or str(uuid.uuid4())
-    run_id = str(uuid.uuid4())
-    set_span_attributes({"pack_id": settings.default_pack_id, "run_id": run_id})
-    logger.info(
-        "POST /run — pipeline started",
-        extra={
-            "run_id": run_id,
-            "session_id": session_id,
-            "query_sha256": hashlib.sha256(query.encode()).hexdigest()[:16],
-            "query_length": len(query),
-        },
-    )
-
-    def _execute() -> tuple[RunResponse, dict[str, Any]]:
-        with pack_cls(
-            run_id=run_id,
-            llm=state.shared_llm,
-            checkpointer=state.shared_checkpointer,
-            # TODO(task-3): pass pack_id=settings.default_pack_id and resolved pack_version
-            **pack_runtime_kwargs(pack_cls),
-        ) as pipeline:
-            report = pipeline.run(query)
-            cost_usd = getattr(pipeline, "cost_usd", None)
-            report_payload = report.to_dict() if hasattr(report, "to_dict") else {}
-            return (
-                RunResponse.from_analysis_report(
-                    report, session_id=session_id, cost_usd=cost_usd
-                ),
-                report_payload,
+        if state.shutting_down.is_set():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Server is shutting down.",
             )
 
-    if body.session_id and not state.try_acquire_session(session_id):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=SESSION_IN_FLIGHT_DETAIL,
-        )
-    try:
         try:
-            response, report_payload = await _run_in_executor(_execute)
-        except AgentValidationError as exc:
-            logger.warning(
-                "POST /run — validation error",
-                extra={"run_id": run_id, "error": str(exc)},
-            )
+            query = validate_pack_query(pack_id, body.query)
+        except ValueError as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
             ) from exc
-        except AgentTimeoutError as exc:
-            logger.error(
-                "POST /run — pipeline timeout",
-                extra={"run_id": run_id, "error": str(exc)},
-            )
-            raise HTTPException(
-                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-                detail="The agent pipeline exceeded its step budget. Try a simpler query.",
-            ) from exc
-        except AgentBudgetExceededError as exc:
-            logger.warning(
-                "POST /run — budget exceeded",
-                extra={"run_id": run_id, "error": str(exc)},
-            )
-            raise HTTPException(
-                status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                detail="Run cost budget exceeded.",
-            ) from exc
-        except AgentAuthenticationError as exc:
-            logger.error(
-                "POST /run — LLM authentication error",
-                extra={"run_id": run_id, "error": str(exc)},
-            )
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)
-            ) from exc
-        except AgentExecutionError as exc:
-            logger.error(
-                "POST /run — execution error",
-                extra={"run_id": run_id, "error": str(exc)},
-            )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="The agent pipeline encountered an internal error.",
-            ) from exc
-        except Exception as exc:
-            logger.exception(
-                "POST /run — unexpected error",
-                extra={"run_id": run_id, "error": str(exc)},
-            )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="An unexpected error occurred.",
-            ) from exc
 
-        await save_run_best_effort(
-            run_id=run_id,
-            query=query,
-            result=report_payload,
-            metadata={"session_id": session_id, "agent": "MultiAgentGraph"},
-            session_id=session_id,
+        if not query:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Query must not be empty."
+            )
+
+        if state.get_shared_llm() is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="LLM provider is not configured. Check server logs.",
+            )
+
+        session_id = body.session_id or str(uuid.uuid4())
+        run_id = str(uuid.uuid4())
+        set_span_attributes({"pack_id": pack_id, "run_id": run_id})
+        logger.info(
+            "POST /run — pipeline started",
+            extra={
+                "run_id": run_id,
+                "session_id": session_id,
+                "query_sha256": hashlib.sha256(query.encode()).hexdigest()[:16],
+                "query_length": len(query),
+            },
         )
-    finally:
-        if body.session_id:
-            state.release_session(session_id)
 
-    logger.info(
-        "POST /run — pipeline completed",
-        extra={
-            "run_id": run_id,
-            "session_id": session_id,
-            "confidence": response.confidence,
-            "insights_count": len(response.key_insights),
-        },
-    )
-    return response
+        def _execute() -> tuple[RunResponse, dict[str, Any]]:
+            with pack_cls(
+                run_id=run_id,
+                llm=state.shared_llm,
+                checkpointer=state.shared_checkpointer,
+                **pack_runtime_kwargs(
+                    pack_cls,
+                    pack_id=pack_id,
+                    pack_version=used_version,
+                ),
+            ) as pipeline:
+                report = pipeline.run(query)
+                cost_usd = getattr(pipeline, "cost_usd", None)
+                report_payload = report.to_dict() if hasattr(report, "to_dict") else {}
+                return (
+                    RunResponse.from_analysis_report(
+                        report, session_id=session_id, cost_usd=cost_usd
+                    ),
+                    report_payload,
+                )
+
+        if body.session_id and not state.try_acquire_session(session_id):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=SESSION_IN_FLIGHT_DETAIL,
+            )
+        try:
+            try:
+                response, report_payload = await _run_in_executor(_execute)
+            except AgentValidationError as exc:
+                logger.warning(
+                    "POST /run — validation error",
+                    extra={"run_id": run_id, "error": str(exc)},
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+                ) from exc
+            except AgentTimeoutError as exc:
+                logger.error(
+                    "POST /run — pipeline timeout",
+                    extra={"run_id": run_id, "error": str(exc)},
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                    detail="The agent pipeline exceeded its step budget. Try a simpler query.",
+                ) from exc
+            except AgentBudgetExceededError as exc:
+                logger.warning(
+                    "POST /run — budget exceeded",
+                    extra={"run_id": run_id, "error": str(exc)},
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                    detail="Run cost budget exceeded.",
+                ) from exc
+            except AgentAuthenticationError as exc:
+                logger.error(
+                    "POST /run — LLM authentication error",
+                    extra={"run_id": run_id, "error": str(exc)},
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)
+                ) from exc
+            except AgentExecutionError as exc:
+                logger.error(
+                    "POST /run — execution error",
+                    extra={"run_id": run_id, "error": str(exc)},
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="The agent pipeline encountered an internal error.",
+                ) from exc
+            except Exception as exc:
+                logger.exception(
+                    "POST /run — unexpected error",
+                    extra={"run_id": run_id, "error": str(exc)},
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="An unexpected error occurred.",
+                ) from exc
+
+            await save_run_best_effort(
+                run_id=run_id,
+                query=query,
+                result=report_payload,
+                metadata={"session_id": session_id, "agent": "MultiAgentGraph"},
+                session_id=session_id,
+            )
+        finally:
+            if body.session_id:
+                state.release_session(session_id)
+
+        logger.info(
+            "POST /run — pipeline completed",
+            extra={
+                "run_id": run_id,
+                "session_id": session_id,
+                "confidence": response.confidence,
+                "insights_count": len(response.key_insights),
+            },
+        )
+        outcome = "success"
+        return response
+    except HTTPException as exc:
+        outcome = outcome_from_http_status(exc.status_code)
+        raise
+    except Exception:
+        outcome = "server_error"
+        raise
+    finally:
+        record_pack_run(pack_id, used_version, outcome, time.perf_counter() - started)
 
 
 async def _stream_pipeline(
@@ -214,6 +242,10 @@ async def _stream_pipeline(
     session_id: str,
     run_id: str,
     pack_cls: type[Any],
+    *,
+    pack_id: str,
+    pack_version: str,
+    stream_outcome: list[str],
 ) -> AsyncGenerator[str, None]:
     """Async generator that streams the pipeline execution as SSE events."""
     if active_pipelines is not None:
@@ -225,8 +257,11 @@ async def _stream_pipeline(
             run_id=run_id,
             llm=state.get_shared_llm(),
             checkpointer=state.get_shared_checkpointer(),
-            # TODO(task-3): pass pack_id=settings.default_pack_id and resolved pack_version
-            **pack_runtime_kwargs(pack_cls),
+            **pack_runtime_kwargs(
+                pack_cls,
+                pack_id=pack_id,
+                pack_version=pack_version,
+            ),
         )
         report = None
 
@@ -252,6 +287,7 @@ async def _stream_pipeline(
                 )
 
         if report is None:
+            stream_outcome[0] = "server_error"
             yield f"data: {json.dumps({'type': 'error', 'message': 'Pipeline completed without a report.'})}\n\n"
             return
 
@@ -286,28 +322,33 @@ async def _stream_pipeline(
         yield f"data: {json.dumps(done_payload)}\n\n"
 
     except AgentTimeoutError as exc:
+        stream_outcome[0] = "server_error"
         logger.error(
             "POST /run/stream — timeout", extra={"run_id": run_id, "error": str(exc)}
         )
         yield f"data: {json.dumps({'type': 'error', 'message': 'The pipeline timed out.'})}\n\n"
     except AgentAuthenticationError as exc:
+        stream_outcome[0] = "server_error"
         logger.error(
             "POST /run/stream — LLM authentication error",
             extra={"run_id": run_id, "error": str(exc)},
         )
         yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
     except AgentBudgetExceededError as exc:
+        stream_outcome[0] = "budget_exceeded"
         logger.warning(
             "POST /run/stream — budget exceeded mid-stream",
             extra={"run_id": run_id, "error": str(exc)},
         )
         yield f"data: {json.dumps({'type': 'error', 'code': 'budget_exceeded', 'message': str(exc)})}\n\n"
     except (AgentExecutionError, AgentValidationError) as exc:
+        stream_outcome[0] = "server_error"
         logger.error(
             "POST /run/stream — error", extra={"run_id": run_id, "error": str(exc)}
         )
         yield f"data: {json.dumps({'type': 'error', 'message': 'The pipeline encountered an error.'})}\n\n"
     except Exception as exc:
+        stream_outcome[0] = "server_error"
         logger.exception(
             "POST /run/stream — unexpected error",
             extra={"run_id": run_id, "error": str(exc)},
@@ -330,75 +371,101 @@ async def run_stream(
     pack_cls: Annotated[type[Any], Depends(get_legacy_pack_cls)],
 ) -> StreamingResponse:
     """Execute the complete multi-agent pipeline and stream progress as SSE."""
-    if state.shutting_down.is_set():
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Server is shutting down.",
-        )
+    pack_id = settings.default_pack_id
+    used_version = resolve_pack_version(pack_id, pack_cls)
+    started = time.perf_counter()
+    recorded = False
+    stream_outcome: list[str] = ["success"]
+
+    def _record(outcome: str) -> None:
+        nonlocal recorded
+        if recorded:
+            return
+        record_pack_run(pack_id, used_version, outcome, time.perf_counter() - started)
+        recorded = True
 
     try:
-        query = validate_pack_query(settings.default_pack_id, body.query)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
-        ) from exc
+        if state.shutting_down.is_set():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Server is shutting down.",
+            )
 
-    if not query:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Query must not be empty."
-        )
-
-    if state.get_shared_llm() is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="LLM provider is not configured. Check server logs.",
-        )
-
-    session_id = body.session_id or str(uuid.uuid4())
-    run_id = str(uuid.uuid4())
-    set_span_attributes({"pack_id": settings.default_pack_id, "run_id": run_id})
-    stream_timeout = effective_stream_timeout_seconds(
-        settings.default_pack_id, settings
-    )
-
-    logger.info(
-        "POST /run/stream — pipeline started",
-        extra={
-            "run_id": run_id,
-            "session_id": session_id,
-            "query_sha256": hashlib.sha256(query.encode()).hexdigest()[:16],
-            "query_length": len(query),
-        },
-    )
-
-    if body.session_id and not state.try_acquire_session(session_id):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=SESSION_IN_FLIGHT_DETAIL,
-        )
-
-    async def _guarded_stream() -> AsyncGenerator[str, None]:
         try:
-            async with asyncio.timeout(stream_timeout):
-                async for event in _stream_pipeline(
-                    query, session_id, run_id, pack_cls
-                ):
-                    yield event
-        except TimeoutError:
-            yield f"data: {json.dumps({'type': 'error', 'message': f'Stream timed out after {stream_timeout}s'})}\n\n"
-        finally:
-            if body.session_id:
-                state.release_session(session_id)
+            query = validate_pack_query(pack_id, body.query)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
 
-    return StreamingResponse(
-        _guarded_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-            "Connection": "keep-alive",
-        },
-    )
+        if not query:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Query must not be empty."
+            )
+
+        if state.get_shared_llm() is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="LLM provider is not configured. Check server logs.",
+            )
+
+        session_id = body.session_id or str(uuid.uuid4())
+        run_id = str(uuid.uuid4())
+        set_span_attributes({"pack_id": pack_id, "run_id": run_id})
+        stream_timeout = effective_stream_timeout_seconds(pack_id, settings)
+
+        logger.info(
+            "POST /run/stream — pipeline started",
+            extra={
+                "run_id": run_id,
+                "session_id": session_id,
+                "query_sha256": hashlib.sha256(query.encode()).hexdigest()[:16],
+                "query_length": len(query),
+            },
+        )
+
+        if body.session_id and not state.try_acquire_session(session_id):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=SESSION_IN_FLIGHT_DETAIL,
+            )
+
+        async def _guarded_stream() -> AsyncGenerator[str, None]:
+            try:
+                async with asyncio.timeout(stream_timeout):
+                    async for event in _stream_pipeline(
+                        query,
+                        session_id,
+                        run_id,
+                        pack_cls,
+                        pack_id=pack_id,
+                        pack_version=used_version,
+                        stream_outcome=stream_outcome,
+                    ):
+                        yield event
+            except TimeoutError:
+                stream_outcome[0] = "server_error"
+                yield f"data: {json.dumps({'type': 'error', 'message': f'Stream timed out after {stream_timeout}s'})}\n\n"
+            finally:
+                _record(stream_outcome[0])
+                if body.session_id:
+                    state.release_session(session_id)
+
+        return StreamingResponse(
+            _guarded_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive",
+            },
+        )
+    except HTTPException as exc:
+        _record(outcome_from_http_status(exc.status_code))
+        raise
+    except Exception:
+        _record("server_error")
+        raise
 
 
 @router.post(

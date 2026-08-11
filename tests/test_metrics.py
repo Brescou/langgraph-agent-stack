@@ -79,6 +79,102 @@ def test_http_metrics_use_route_template_not_concrete_path(
     assert session_id not in body
 
 
+@pytest.mark.skipif(
+    not _prometheus_available,
+    reason="prometheus-client not installed",
+)
+def test_pack_run_emits_pack_metrics(
+    test_client: TestClient,
+    mock_analysis_report: MagicMock,
+) -> None:
+    """POST /packs/research_analysis/run increments pack_runs_total with labels."""
+    from unittest.mock import patch
+
+    from domain_packs.research.research_analysis.pack import ResearchAnalysisPack
+
+    def _noop_init(self, **kwargs):  # type: ignore[override]
+        pass
+
+    with (
+        patch.object(ResearchAnalysisPack, "__init__", _noop_init),
+        patch.object(ResearchAnalysisPack, "run", return_value=mock_analysis_report),
+        patch.object(ResearchAnalysisPack, "close", return_value=None),
+    ):
+        response = test_client.post(
+            "/packs/research_analysis/run",
+            json={"query": "What is a microservice?"},
+        )
+
+    assert response.status_code == 200
+    used_version = response.headers.get("x-pack-version-used", "unknown")
+    metrics = test_client.get("/metrics")
+    assert metrics.status_code == 200
+    body = metrics.text
+    assert (
+        f'pack_runs_total{{outcome="success",pack_id="research_analysis",version="{used_version}"}}'
+        in body
+        or f'pack_runs_total{{pack_id="research_analysis",version="{used_version}",outcome="success"}}'
+        in body
+    )
+
+
+@pytest.mark.skipif(
+    not _prometheus_available,
+    reason="prometheus-client not installed",
+)
+def test_pack_run_metrics_two_versions(
+    test_client: TestClient,
+    mock_analysis_report: MagicMock,
+) -> None:
+    """Canary: two X-Pack-Version values produce distinct pack_runs_total series."""
+    from unittest.mock import patch
+
+    from domain_packs.research.research_analysis.pack import ResearchAnalysisPack
+    from pack_kernel.registry import PackRegistry
+
+    def _noop_init(self, **kwargs):  # type: ignore[override]
+        pass
+
+    class _V2Pack(ResearchAnalysisPack):
+        pack_id = "research_analysis"
+        version = "2.0"
+        name = ResearchAnalysisPack.name
+        description = ResearchAnalysisPack.description
+
+    PackRegistry.register(_V2Pack)
+    try:
+        with (
+            patch.object(ResearchAnalysisPack, "__init__", _noop_init),
+            patch.object(_V2Pack, "__init__", _noop_init),
+            patch.object(ResearchAnalysisPack, "run", return_value=mock_analysis_report),
+            patch.object(_V2Pack, "run", return_value=mock_analysis_report),
+            patch.object(ResearchAnalysisPack, "close", return_value=None),
+            patch.object(_V2Pack, "close", return_value=None),
+        ):
+            r1 = test_client.post(
+                "/packs/research_analysis/run",
+                json={"query": "version one"},
+                headers={"X-Pack-Version": "1.0"},
+            )
+            r2 = test_client.post(
+                "/packs/research_analysis/run",
+                json={"query": "version two"},
+                headers={"X-Pack-Version": "2.0"},
+            )
+
+        assert r1.status_code == 200
+        assert r2.status_code == 200
+        metrics = test_client.get("/metrics").text
+        assert 'version="1.0"' in metrics
+        assert 'version="2.0"' in metrics
+        assert 'pack_id="research_analysis"' in metrics
+    finally:
+        versions = PackRegistry._get_versions("research_analysis")
+        PackRegistry._registry["research_analysis"] = [
+            pv for pv in versions if pv.version != "2.0"
+        ]
+
+
 # ---------------------------------------------------------------------------
 # X-Request-ID propagation
 # ---------------------------------------------------------------------------

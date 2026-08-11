@@ -674,6 +674,31 @@ class TestLlmCostMetric:
 
 
 @pytest.mark.skipif(not _prometheus_available, reason="prometheus-client not installed")
+class TestPackRunMetrics:
+    """``pack_runs_total`` / ``pack_run_duration_seconds`` helpers."""
+
+    def test_outcome_from_http_status(self) -> None:
+        from core.observability import outcome_from_http_status
+
+        assert outcome_from_http_status(200) == "success"
+        assert outcome_from_http_status(402) == "budget_exceeded"
+        assert outcome_from_http_status(404) == "client_error"
+        assert outcome_from_http_status(500) == "server_error"
+
+    def test_record_pack_run_increments_counter(self) -> None:
+        from core.observability import record_pack_run
+
+        labels = {
+            "pack_id": "research_analysis",
+            "version": "1.0",
+            "outcome": "success",
+        }
+        before = _sample("pack_runs_total", labels)
+        record_pack_run("research_analysis", "1.0", "success", 0.05)
+        assert _sample("pack_runs_total", labels) == before + 1
+
+
+@pytest.mark.skipif(not _prometheus_available, reason="prometheus-client not installed")
 class TestPrometheusHistogramBuckets:
     """HTTP/LLM histogram buckets cover long-running agent workloads."""
 
