@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+if TYPE_CHECKING:
+    from langchain_core.outputs import LLMResult
 
 
 class TestConfigureLogging:
@@ -606,7 +610,7 @@ class TestLlmCostMetric:
     """Cost counters increment on ``CostTracker.on_llm_end`` with pack labels."""
 
     @staticmethod
-    def _haiku_llm_result() -> "LLMResult":
+    def _haiku_llm_result() -> LLMResult:
         from langchain_core.messages import AIMessage
         from langchain_core.outputs import ChatGeneration, LLMResult
 

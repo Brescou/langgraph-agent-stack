@@ -101,7 +101,8 @@ async def run_pipeline(
 
         if not query:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="Query must not be empty."
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Query must not be empty.",
             )
 
         if state.get_shared_llm() is None:
@@ -400,7 +401,8 @@ async def run_stream(
 
         if not query:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="Query must not be empty."
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Query must not be empty.",
             )
 
         if state.get_shared_llm() is None:

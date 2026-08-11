@@ -146,7 +146,9 @@ def test_pack_run_metrics_two_versions(
         with (
             patch.object(ResearchAnalysisPack, "__init__", _noop_init),
             patch.object(_V2Pack, "__init__", _noop_init),
-            patch.object(ResearchAnalysisPack, "run", return_value=mock_analysis_report),
+            patch.object(
+                ResearchAnalysisPack, "run", return_value=mock_analysis_report
+            ),
             patch.object(_V2Pack, "run", return_value=mock_analysis_report),
             patch.object(ResearchAnalysisPack, "close", return_value=None),
             patch.object(_V2Pack, "close", return_value=None),

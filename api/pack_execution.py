@@ -370,7 +370,9 @@ async def execute_typed_pack_run(
         session_acquired = False
 
         try:
-            from domain_packs.common.compliance import assert_regulated_pack_runtime_enabled
+            from domain_packs.common.compliance import (
+                assert_regulated_pack_runtime_enabled,
+            )
 
             try:
                 assert_regulated_pack_runtime_enabled(

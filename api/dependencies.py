@@ -152,10 +152,7 @@ def pack_runtime_kwargs(
         kwargs["pack_id"] = pack_id
     if pack_version is not None and "pack_version" in params:
         kwargs["pack_version"] = pack_version
-    if (
-        state.shared_connector is not None
-        and "connector" in params
-    ):
+    if state.shared_connector is not None and "connector" in params:
         kwargs["connector"] = state.shared_connector
     return kwargs
 
