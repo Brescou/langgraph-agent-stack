@@ -26,6 +26,7 @@ from agents.base_agent import (
 )
 from agents.researcher import ResearchAgent, ResearchResult
 from core.config import get_settings
+from core.cost import CostTracker
 from core.memory import create_checkpointer
 from core.observability import trace_span
 from domain_packs.research.research_only.schemas import (
@@ -65,12 +66,26 @@ class ResearchOnlyPack(BaseDomainPack):
         llm: Any | None = None,
         checkpointer: Any | None = None,
         budget_usd: float | None = None,
+        pack_id: str | None = None,
+        pack_version: str | None = None,
     ) -> None:
         super().__init__(
             run_id=run_id, llm=llm, checkpointer=checkpointer, budget_usd=budget_usd
         )
         self.run_id = run_id or str(uuid.uuid4())
         self._checkpointer = checkpointer or create_checkpointer(get_settings())
+        _effective_budget: float | None = (
+            budget_usd
+            if budget_usd is not None
+            else get_settings().pack_default_budget_usd
+        )
+        resolved_pack_id = pack_id or getattr(self, "pack_id", None) or "unknown"
+        resolved_version = pack_version or "unknown"
+        self._cost_tracker = CostTracker(
+            budget_usd=_effective_budget,
+            pack_id=resolved_pack_id,
+            version=resolved_version,
+        )
         self._research_agent: ResearchAgent | None = None
         self._graph = self._build_graph()
 
@@ -108,7 +123,7 @@ class ResearchOnlyPack(BaseDomainPack):
                         thread_id=f"{self.run_id}-research",
                         llm=self._llm,
                         checkpointer=self._checkpointer,
-                        budget_usd=self._budget_usd,
+                        cost_tracker=self._cost_tracker,
                     )
                 research_agent = self._research_agent
                 if research_agent is None:
@@ -143,9 +158,7 @@ class ResearchOnlyPack(BaseDomainPack):
 
     @property
     def cost_usd(self) -> float:
-        if self._research_agent is not None:
-            return self._research_agent.cost_usd
-        return 0.0
+        return self._cost_tracker.total_cost_usd
 
     def run(self, query: str) -> ResearchResult:
         if not query or not query.strip():

@@ -344,6 +344,8 @@ requests_rejected_during_shutdown: Any | None = None
 llm_retry_attempts_total: Any | None = None
 agent_node_duration_seconds: Any | None = None
 output_guard_findings_total: Any | None = None
+pack_runs_total: Any | None = None
+pack_run_duration_seconds: Any | None = None
 _PROMETHEUS_AVAILABLE = False
 
 # HTTP latency spans sub-second health checks through long SSE streams (STREAM_TIMEOUT_SECONDS).
@@ -445,6 +447,18 @@ try:
         "rejected by the fail-closed policy",
         ["pack_id", "action"],
     )
+    # Pack-run wall duration reuses HTTP buckets (sub-second through SSE timeout).
+    pack_runs_total = Counter(
+        "pack_runs_total",
+        "Pack runs by pack, version, and outcome",
+        ["pack_id", "version", "outcome"],
+    )
+    pack_run_duration_seconds = Histogram(
+        "pack_run_duration_seconds",
+        "Pack run wall duration in seconds",
+        ["pack_id", "version", "outcome"],
+        buckets=list(_HTTP_DURATION_BUCKETS),
+    )
 
     def create_metrics_app() -> Any:
         """Return ASGI app for /metrics endpoint."""
@@ -457,6 +471,35 @@ except ImportError:
     def create_metrics_app() -> Any:
         """No-op when prometheus-client is not installed."""
         return None
+
+
+def outcome_from_http_status(status_code: int) -> str:
+    """Map an HTTP status code to a low-cardinality pack-run outcome label."""
+    if 200 <= status_code < 300:
+        return "success"
+    if status_code == 402:
+        return "budget_exceeded"
+    if 400 <= status_code < 500:
+        return "client_error"
+    return "server_error"
+
+
+def record_pack_run(
+    pack_id: str,
+    version: str,
+    outcome: str,
+    duration_seconds: float,
+) -> None:
+    """Increment pack-run counters and observe wall duration (no-op without Prometheus)."""
+    if pack_runs_total is None or pack_run_duration_seconds is None:
+        return
+    labels = {
+        "pack_id": pack_id or "unknown",
+        "version": version or "unknown",
+        "outcome": outcome,
+    }
+    pack_runs_total.labels(**labels).inc()
+    pack_run_duration_seconds.labels(**labels).observe(duration_seconds)
 
 
 # ---------------------------------------------------------------------------

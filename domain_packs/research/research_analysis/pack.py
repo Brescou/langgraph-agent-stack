@@ -113,6 +113,8 @@ class ResearchAnalysisPack(BaseDomainPack):
         checkpointer: Any | None = None,
         budget_usd: float | None = None,
         connector: BaseConnector | None = None,
+        pack_id: str | None = None,
+        pack_version: str | None = None,
     ) -> None:
         """Initialise the Research + Analysis pipeline.
 
@@ -138,17 +140,19 @@ class ResearchAnalysisPack(BaseDomainPack):
         # ONE tracker for the whole run, shared by every agent, so budget_usd
         # caps the cumulative spend of the pipeline (not per-agent).  The same
         # budget resolution as BaseAgent applies: explicit argument first,
-        # then the settings-level default.  When neither is set, no tracker is
-        # created and agents keep their legacy untracked behaviour.
+        # then the settings-level default.  A tracker is always attached so
+        # cost metrics emit even when no budget ceiling is configured.
         _effective_budget: float | None = (
             budget_usd
             if budget_usd is not None
             else get_settings().pack_default_budget_usd
         )
-        self._cost_tracker: CostTracker | None = (
-            CostTracker(budget_usd=_effective_budget)
-            if _effective_budget is not None
-            else None
+        resolved_pack_id = pack_id or getattr(self, "pack_id", None) or "unknown"
+        resolved_version = pack_version or "unknown"
+        self._cost_tracker = CostTracker(
+            budget_usd=_effective_budget,
+            pack_id=resolved_pack_id,
+            version=resolved_version,
         )
         self._research_agent: ResearchAgent | None = None
         self._analyst_agent: AnalystAgent | None = None
@@ -411,9 +415,7 @@ class ResearchAnalysisPack(BaseDomainPack):
     @property
     def cost_usd(self) -> float:
         """Total USD cost for this run across all agents (shared tracker)."""
-        if self._cost_tracker is not None:
-            return self._cost_tracker.total_cost_usd
-        return 0.0
+        return self._cost_tracker.total_cost_usd
 
     # ------------------------------------------------------------------
     # Conditional routing

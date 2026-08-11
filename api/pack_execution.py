@@ -12,6 +12,7 @@ import contextvars
 import functools
 import hashlib
 import logging
+import time
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -37,7 +38,11 @@ from api.dependencies import (
     validate_pack_query,
 )
 from core.config import get_settings
-from core.observability import set_span_attributes
+from core.observability import (
+    outcome_from_http_status,
+    record_pack_run,
+    set_span_attributes,
+)
 from core.security import (
     IdempotencyConflictError,
     IdempotencyStatus,
@@ -75,6 +80,21 @@ def pack_has_structured_input(pack_cls: type) -> bool:
 def pack_has_structured_stream(pack_cls: type) -> bool:
     """Return True when the pack defines ``stream_events_from_input``."""
     return "stream_events_from_input" in pack_cls.__dict__
+
+
+def resolve_pack_version(pack_id: str, pack_cls: type) -> str:
+    """Return the registry version string for a resolved pack class."""
+    try:
+        return next(
+            (
+                pv.version
+                for pv in PackRegistry._get_versions(pack_id)
+                if pv.pack_cls is pack_cls
+            ),
+            "unknown",
+        )
+    except KeyError:
+        return "unknown"
 
 
 def invoke_pack_run(pack_cls: type, pipeline: Any, body: Any) -> Any:
@@ -261,196 +281,212 @@ async def execute_typed_pack_run(
         HTTPException: Mapped status codes (402 budget, 403 compliance, 409
             session conflict, 422 validation, 5xx agent failures, …).
     """
-    if state.shutting_down.is_set():
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Server is shutting down.",
-        )
-
-    run_id = str(uuid.uuid4())
-    session_id = getattr(body, "session_id", None) or None
-    set_span_attributes({"pack_id": pack_id, "run_id": run_id})
-
-    if (
-        requested_version is None
-        and state.shared_memory is not None
-        and session_id
-        and hasattr(state.shared_memory, "get_pack_version_for_session")
-    ):
-        requested_version = state.shared_memory.get_pack_version_for_session(
-            session_id, pack_id
-        )
+    started = time.perf_counter()
+    outcome = "server_error"
+    used_version = "unknown"
 
     try:
-        pack_cls_to_use = PackRegistry.get(
-            pack_id,
-            version=requested_version,
-            affinity_key=affinity_key,
-        )
-    except KeyError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
-        ) from exc
-
-    used_version = next(
-        (
-            pv.version
-            for pv in PackRegistry._get_versions(pack_id)
-            if pv.pack_cls is pack_cls_to_use
-        ),
-        "unknown",
-    )
-
-    # Prefer the real registry class schema (not a MagicMock from tests that
-    # patch PackRegistry.get). Match by identity when possible.
-    output_model = next(
-        (
-            pv.pack_cls.output_schema
-            for pv in PackRegistry._get_versions(pack_id)
-            if pv.pack_cls is pack_cls_to_use
-        ),
-        PackRegistry._get_versions(pack_id)[0].pack_cls.output_schema,
-    )
-
-    validate_pack_body_fields(pack_id, body)
-    query = validate_pack_query(pack_id, pack_primary_text(body))
-
-    body_hash = hashlib.sha256(body.model_dump_json().encode("utf-8")).hexdigest()
-
-    idempotency_store = state.get_shared_idempotency_store()
-
-    settings = get_settings()
-
-    if idempotency_key is not None:
-        while True:
-            try:
-                reserved = idempotency_store.reserve(
-                    idempotency_key,
-                    body_hash,
-                )
-            except IdempotencyConflictError as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=str(exc),
-                ) from exc
-
-            if reserved:
-                break
-
-            result = await wait_for_completed_idempotency_record(
-                idempotency_store,
-                idempotency_key,
-                settings.stream_timeout_seconds,
+        if state.shutting_down.is_set():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Server is shutting down.",
             )
 
-            if result is not None:
-                return result
+        run_id = str(uuid.uuid4())
+        session_id = getattr(body, "session_id", None) or None
+        set_span_attributes({"pack_id": pack_id, "run_id": run_id})
 
-    stored = False
-    session_acquired = False
-
-    try:
-        from domain_packs.common.compliance import assert_regulated_pack_runtime_enabled
-
-        try:
-            assert_regulated_pack_runtime_enabled(
-                pack_id, regulated_packs_enabled=settings.regulated_packs_enabled
+        if (
+            requested_version is None
+            and state.shared_memory is not None
+            and session_id
+            and hasattr(state.shared_memory, "get_pack_version_for_session")
+        ):
+            requested_version = state.shared_memory.get_pack_version_for_session(
+                session_id, pack_id
             )
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)
-            ) from exc
-
-        def _execute() -> tuple[Any, dict[str, Any]]:
-            with pack_cls_to_use(
-                run_id=run_id,
-                llm=state.get_shared_llm(),
-                checkpointer=state.get_shared_checkpointer(),
-                **pack_runtime_kwargs(pack_cls_to_use),
-            ) as pipeline:
-                result = invoke_pack_run(pack_cls_to_use, pipeline, body)
-                cost_usd = getattr(pipeline, "cost_usd", None)
-                result_payload = (
-                    result.to_dict()
-                    if hasattr(result, "to_dict")
-                    else result.model_dump()
-                    if hasattr(result, "model_dump")
-                    else {}
-                )
-                serialized = serialize_pack_result(result, output_model, cost_usd)
-                return serialized, result_payload
-
-        if session_id:
-            if not state.try_acquire_session(session_id):
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=SESSION_IN_FLIGHT_DETAIL,
-                )
-
-            session_acquired = True
 
         try:
-            serialized, result_payload = await run_in_executor(_execute)
-        except AgentBudgetExceededError as exc:
+            pack_cls_to_use = PackRegistry.get(
+                pack_id,
+                version=requested_version,
+                affinity_key=affinity_key,
+            )
+        except KeyError as exc:
             raise HTTPException(
-                status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=str(exc)
-            ) from exc
-        except AgentTimeoutError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=str(exc)
-            ) from exc
-        except AgentAuthenticationError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)
-            ) from exc
-        except (AgentExecutionError, AgentValidationError) as exc:
-            auth_cause = find_auth_cause(exc)
-            if auth_cause is not None:
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail=str(
-                        make_auth_error(pack_id, settings.llm_provider, auth_cause)
-                    ),
-                ) from exc
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+                status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
             ) from exc
 
-        await save_run_best_effort(
-            run_id=run_id,
-            query=query,
-            result=result_payload,
-            metadata={
-                "pack_id": pack_id,
-                "pack_version": used_version,
-                **({"session_id": session_id} if session_id else {}),
-            },
-            session_id=session_id,
+        used_version = resolve_pack_version(pack_id, pack_cls_to_use)
+
+        # Prefer the real registry class schema (not a MagicMock from tests that
+        # patch PackRegistry.get). Match by identity when possible.
+        output_model = next(
+            (
+                pv.pack_cls.output_schema
+                for pv in PackRegistry._get_versions(pack_id)
+                if pv.pack_cls is pack_cls_to_use
+            ),
+            PackRegistry._get_versions(pack_id)[0].pack_cls.output_schema,
         )
-        await create_review_best_effort(
-            run_id=run_id,
-            pack_id=pack_id,
-            session_id=session_id,
-            result_payload=result_payload,
-        )
-        result = PackRunResult(
-            serialized=serialized,
-            used_version=used_version,
-            run_id=run_id,
-        )
+
+        validate_pack_body_fields(pack_id, body)
+        query = validate_pack_query(pack_id, pack_primary_text(body))
+
+        body_hash = hashlib.sha256(body.model_dump_json().encode("utf-8")).hexdigest()
+
+        idempotency_store = state.get_shared_idempotency_store()
+
+        settings = get_settings()
 
         if idempotency_key is not None:
-            idempotency_store.store_result(
-                idempotency_key,
-                result,
+            while True:
+                try:
+                    reserved = idempotency_store.reserve(
+                        idempotency_key,
+                        body_hash,
+                    )
+                except IdempotencyConflictError as exc:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=str(exc),
+                    ) from exc
+
+                if reserved:
+                    break
+
+                result = await wait_for_completed_idempotency_record(
+                    idempotency_store,
+                    idempotency_key,
+                    settings.stream_timeout_seconds,
+                )
+
+                if result is not None:
+                    used_version = result.used_version
+                    outcome = "success"
+                    return result
+
+        stored = False
+        session_acquired = False
+
+        try:
+            from domain_packs.common.compliance import (
+                assert_regulated_pack_runtime_enabled,
             )
-            stored = True
 
-        return result
+            try:
+                assert_regulated_pack_runtime_enabled(
+                    pack_id, regulated_packs_enabled=settings.regulated_packs_enabled
+                )
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)
+                ) from exc
 
+            def _execute() -> tuple[Any, dict[str, Any]]:
+                with pack_cls_to_use(
+                    run_id=run_id,
+                    llm=state.get_shared_llm(),
+                    checkpointer=state.get_shared_checkpointer(),
+                    **pack_runtime_kwargs(
+                        pack_cls_to_use,
+                        pack_id=pack_id,
+                        pack_version=used_version,
+                    ),
+                ) as pipeline:
+                    result = invoke_pack_run(pack_cls_to_use, pipeline, body)
+                    cost_usd = getattr(pipeline, "cost_usd", None)
+                    result_payload = (
+                        result.to_dict()
+                        if hasattr(result, "to_dict")
+                        else result.model_dump()
+                        if hasattr(result, "model_dump")
+                        else {}
+                    )
+                    serialized = serialize_pack_result(result, output_model, cost_usd)
+                    return serialized, result_payload
+
+            if session_id:
+                if not state.try_acquire_session(session_id):
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=SESSION_IN_FLIGHT_DETAIL,
+                    )
+
+                session_acquired = True
+
+            try:
+                serialized, result_payload = await run_in_executor(_execute)
+            except AgentBudgetExceededError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=str(exc)
+                ) from exc
+            except AgentTimeoutError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=str(exc)
+                ) from exc
+            except AgentAuthenticationError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)
+                ) from exc
+            except (AgentExecutionError, AgentValidationError) as exc:
+                auth_cause = find_auth_cause(exc)
+                if auth_cause is not None:
+                    raise HTTPException(
+                        status_code=status.HTTP_502_BAD_GATEWAY,
+                        detail=str(
+                            make_auth_error(pack_id, settings.llm_provider, auth_cause)
+                        ),
+                    ) from exc
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+                ) from exc
+
+            await save_run_best_effort(
+                run_id=run_id,
+                query=query,
+                result=result_payload,
+                metadata={
+                    "pack_id": pack_id,
+                    "pack_version": used_version,
+                    **({"session_id": session_id} if session_id else {}),
+                },
+                session_id=session_id,
+            )
+            await create_review_best_effort(
+                run_id=run_id,
+                pack_id=pack_id,
+                session_id=session_id,
+                result_payload=result_payload,
+            )
+            result = PackRunResult(
+                serialized=serialized,
+                used_version=used_version,
+                run_id=run_id,
+            )
+
+            if idempotency_key is not None:
+                idempotency_store.store_result(
+                    idempotency_key,
+                    result,
+                )
+                stored = True
+
+            outcome = "success"
+            return result
+
+        finally:
+            if idempotency_key is not None and not stored:
+                idempotency_store.release(idempotency_key)
+
+            if session_acquired and session_id is not None:
+                state.release_session(session_id)
+
+    except HTTPException as exc:
+        outcome = outcome_from_http_status(exc.status_code)
+        raise
+    except Exception:
+        outcome = "server_error"
+        raise
     finally:
-        if idempotency_key is not None and not stored:
-            idempotency_store.release(idempotency_key)
-
-        if session_acquired and session_id is not None:
-            state.release_session(session_id)
+        record_pack_run(pack_id, used_version, outcome, time.perf_counter() - started)

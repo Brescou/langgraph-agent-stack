@@ -129,6 +129,8 @@ class StructuredLLMPack(BaseDomainPack):
         checkpointer: Any | None = None,
         budget_usd: float | None = None,
         connector: BaseConnector | None = None,
+        pack_id: str | None = None,
+        pack_version: str | None = None,
     ) -> None:
         super().__init__(
             run_id=run_id, llm=llm, checkpointer=checkpointer, budget_usd=budget_usd
@@ -147,7 +149,13 @@ class StructuredLLMPack(BaseDomainPack):
         _effective_budget: float | None = (
             budget_usd if budget_usd is not None else _settings.pack_default_budget_usd
         )
-        self._cost_tracker = CostTracker(budget_usd=_effective_budget)
+        resolved_pack_id = pack_id or getattr(self, "pack_id", None) or "unknown"
+        resolved_version = pack_version or "unknown"
+        self._cost_tracker = CostTracker(
+            budget_usd=_effective_budget,
+            pack_id=resolved_pack_id,
+            version=resolved_version,
+        )
         if isinstance(self._llm, Runnable):
             self._llm = self._llm.with_config({"callbacks": [self._cost_tracker]})
 
