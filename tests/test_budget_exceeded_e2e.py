@@ -13,49 +13,8 @@ though the mocked unit tests above would still pass.
 from __future__ import annotations
 
 import json
-from collections.abc import Generator
-from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
-
-from core.mock_llm import MOCK_MODEL_ID
-
-
-@pytest.fixture()
-def tiny_budget_mock_client(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> Generator[TestClient, None, None]:
-    """Real app, mock LLM provider, nonzero mock pricing, near-zero budget."""
-    from core.config import get_settings
-    from core.cost import _reset_effective_table
-
-    cost_file = tmp_path / "mock_cost.json"
-    # High enough that a single mock call exceeds the budget below.
-    cost_file.write_text(json.dumps({MOCK_MODEL_ID: [10.0, 10.0]}), encoding="utf-8")
-
-    monkeypatch.setenv("LLM_PROVIDER", "mock")
-    monkeypatch.delenv("API_KEY", raising=False)
-    monkeypatch.setenv("REGULATED_PACKS_ENABLED", "false")
-    monkeypatch.setenv("PACK_DEFAULT_BUDGET_USD", "0.001")
-    monkeypatch.setenv("LLM_COST_TABLE_PATH", str(cost_file))
-    get_settings.cache_clear()
-    _reset_effective_table()
-
-    import api.state as api_state
-
-    api_state.shared_llm = None
-    api_state.shared_checkpointer = None
-
-    from api.main import app
-
-    with TestClient(app) as client:
-        yield client
-
-    api_state.shared_llm = None
-    api_state.shared_checkpointer = None
-    get_settings.cache_clear()
-    _reset_effective_table()
 
 
 class TestSyncBudgetExceededRealGraph:

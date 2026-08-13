@@ -144,3 +144,9 @@ def test_by_without_labels_not_treated_as_metrics() -> None:
     assert "http_requests_total" in {
         name for name, _ in extract_promql_refs(status_expr)
     }
+
+
+def test_tiny_budget_mock_client_is_shared_fixture() -> None:
+    import tests.conftest as shared
+
+    assert hasattr(shared, "tiny_budget_mock_client")
