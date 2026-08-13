@@ -243,3 +243,80 @@ class TestMockEmbeddingsDeterminism:
 
         source = Path("core/vectorstore.py").read_text(encoding="utf-8")
         assert "TODO" not in source
+
+
+class _CollectionIdColumn:
+    """Stand-in for SQLAlchemy ``EmbeddingStore.collection_id`` equality."""
+
+    def __eq__(self, other: object) -> object:
+        return ("collection_id_eq", other)
+
+
+class _FakeEmbeddingStore:
+    collection_id = _CollectionIdColumn()
+
+
+class _SessionContext:
+    """Context manager returned by ``session_maker()``."""
+
+    def __init__(self, session: object) -> None:
+        self._session = session
+
+    def __enter__(self) -> object:
+        return self._session
+
+    def __exit__(self, *args: object) -> bool:
+        return False
+
+
+class _FakePGVectorInner:
+    """Plain PGVector-shaped object: no ``_collection``, no ``get``."""
+
+    EmbeddingStore = _FakeEmbeddingStore
+
+    def __init__(self, session: object, collection: object | None) -> None:
+        self._session = session
+        self._pg_collection = collection
+
+    def session_maker(self) -> _SessionContext:
+        return _SessionContext(self._session)
+
+    def get_collection(self, session: object) -> object | None:
+        return self._pg_collection
+
+
+class TestProtocolVectorStoreDocumentCount:
+    def test_document_count_uses_pgvector_session_when_no_collection_attr(self):
+        from core.vectorstore import _ProtocolVectorStore
+
+        session = MagicMock()
+        session.query.return_value.filter.return_value.count.return_value = 7
+        collection = type("Collection", (), {"uuid": "col-1"})()
+        inner = _FakePGVectorInner(session=session, collection=collection)
+        store = _ProtocolVectorStore(inner)
+
+        assert store.document_count() == 7
+        session.query.assert_called_once_with(inner.EmbeddingStore)
+        session.query.return_value.filter.assert_called_once_with(
+            inner.EmbeddingStore.collection_id == collection.uuid
+        )
+
+    def test_document_count_returns_zero_when_pgvector_collection_missing(self):
+        from core.vectorstore import _ProtocolVectorStore
+
+        session = MagicMock()
+        inner = _FakePGVectorInner(session=session, collection=None)
+        store = _ProtocolVectorStore(inner)
+
+        assert store.document_count() == 0
+        session.query.assert_not_called()
+
+    def test_document_count_uses_chroma_collection_count_when_present(self):
+        from core.vectorstore import _ProtocolVectorStore
+
+        inner = type("ChromaLike", (), {})()
+        inner._collection = MagicMock()
+        inner._collection.count.return_value = 3
+        store = _ProtocolVectorStore(inner)
+
+        assert store.document_count() == 3

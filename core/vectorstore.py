@@ -160,6 +160,23 @@ class _ProtocolVectorStore:
             data = getter(include=[])
             if isinstance(data, dict) and "ids" in data:
                 return len(data["ids"])
+        session_maker = getattr(self._inner, "session_maker", None)
+        get_collection = getattr(self._inner, "get_collection", None)
+        embedding_store = getattr(self._inner, "EmbeddingStore", None)
+        if (
+            callable(session_maker)
+            and callable(get_collection)
+            and embedding_store is not None
+        ):
+            with session_maker() as session:
+                pg_collection = get_collection(session)
+                if pg_collection is None:
+                    return 0
+                return int(
+                    session.query(embedding_store)
+                    .filter(embedding_store.collection_id == pg_collection.uuid)
+                    .count()
+                )
         raise RuntimeError("document_count() is unsupported for this backend")
 
 
