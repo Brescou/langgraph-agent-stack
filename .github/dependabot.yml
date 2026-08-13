@@ -5,6 +5,7 @@
 #   - uv / pyproject.toml + uv.lock (grouped PRs)
 #   - GitHub Actions workflows (.github/workflows/)
 #   - Docker base images (infra/Dockerfile)
+#   - Docker Compose images (redis, prometheus, grafana in infra/)
 
 version: 2
 updates:
@@ -60,5 +61,19 @@ updates:
     open-pull-requests-limit: 3
     groups:
       docker-base-images:
+        patterns:
+          - "*"
+
+  # ── Docker Compose (redis, prometheus, grafana) ──────────────────────────
+  - package-ecosystem: docker-compose
+    directory: /infra
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: UTC
+    open-pull-requests-limit: 3
+    groups:
+      compose-images:
         patterns:
           - "*"
