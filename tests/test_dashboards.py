@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
-import json  # noqa: F401 — scaffolding for later tasks
+import json
 import re
 from pathlib import Path
-from typing import Any  # noqa: F401 — scaffolding for later tasks
+from typing import Any
 
 import prometheus_client  # noqa: F401 — fail loudly if extra missing
-from prometheus_client import REGISTRY  # noqa: F401 — scaffolding for later tasks
+from fastapi.testclient import TestClient
+from prometheus_client import REGISTRY
+
+from agents.models import ResearchResult
 
 IMPLIED_LABELS = frozenset({"le", "quantile"})
 _DASHBOARDS_DIR = Path("infra/grafana/dashboards")
@@ -68,6 +71,8 @@ def extract_promql_refs(expr: str) -> list[tuple[str, frozenset[str]]]:
     for match in _METRIC_SELECTOR.finditer(expr):
         metric = match.group(1)
         if metric in _PROMQL_KEYWORDS:
+            continue
+        if metric.startswith("$") or metric.startswith("__"):
             continue
         selector = match.group(2)
         if metric in clause_labels and selector is None:
@@ -150,3 +155,133 @@ def test_tiny_budget_mock_client_is_shared_fixture() -> None:
     import tests.conftest as shared
 
     assert hasattr(shared, "tiny_budget_mock_client")
+
+
+def _iter_exprs(node: Any) -> list[str]:
+    exprs: list[str] = []
+    if isinstance(node, dict):
+        expr = node.get("expr")
+        if isinstance(expr, str) and expr.strip():
+            exprs.append(expr)
+        for value in node.values():
+            exprs.extend(_iter_exprs(value))
+    elif isinstance(node, list):
+        for item in node:
+            exprs.extend(_iter_exprs(item))
+    return exprs
+
+
+def _dashboard_paths() -> list[Path]:
+    return sorted(_DASHBOARDS_DIR.glob("*.json"))
+
+
+def test_dashboards_dir_contains_exactly_three_json_files() -> None:
+    names = {path.name for path in _dashboard_paths()}
+    assert names == {
+        "cost.json",
+        "traffic-latency.json",
+        "packs-versions.json",
+    }
+
+
+def test_each_dashboard_uses_datasource_variable() -> None:
+    for path in _dashboard_paths():
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        variables = payload["templating"]["list"]
+        assert any(
+            item.get("name") == "datasource"
+            and item.get("type") == "datasource"
+            and item.get("query") == "prometheus"
+            for item in variables
+        ), path
+        blob = json.dumps(payload)
+        assert "${DS_PROMETHEUS}" not in blob
+        assert "__inputs" not in payload
+
+
+def test_metrics_endpoint_mounted(test_client: TestClient) -> None:
+    response = test_client.get("/metrics")
+    assert response.status_code == 200
+
+
+def _outcome_budget_exceeded_total() -> float:
+    total = 0.0
+    for metric in REGISTRY.collect():
+        # prometheus_client 0.24 strips the _total suffix from the family name.
+        if metric.name not in {"pack_runs_total", "pack_runs"}:
+            continue
+        for sample in metric.samples:
+            if (
+                sample.name == "pack_runs_total"
+                and sample.labels.get("outcome") == "budget_exceeded"
+            ):
+                total += float(sample.value)
+    return total
+
+
+def test_dashboard_promql_matches_registry(
+    test_client: TestClient,
+    tiny_budget_mock_client: TestClient,
+    mock_research_result: ResearchResult,
+) -> None:
+    from unittest.mock import patch
+
+    from langgraph.checkpoint.memory import MemorySaver
+
+    from core.config import get_settings
+    from core.llm import get_llm
+    from domain_packs.research.research_only.pack import ResearchOnlyPack
+
+    before = _outcome_budget_exceeded_total()
+
+    def _noop_init(self, **kwargs):  # type: ignore[no-untyped-def]
+        pass
+
+    # test_client patches get_shared_checkpointer to MagicMock; LangGraph
+    # rejects that. Mock the pack only for the 200 seed so the overlapping
+    # tiny-budget fixture cannot 402 this request.
+    with (
+        patch.object(ResearchOnlyPack, "__init__", _noop_init),
+        patch.object(ResearchOnlyPack, "run", return_value=mock_research_result),
+        patch.object(ResearchOnlyPack, "close", return_value=None),
+    ):
+        success = test_client.post(
+            "/packs/research_only/run", json={"query": "dashboard seed"}
+        )
+    assert success.status_code == 200, success.text
+
+    # Nested patches win over test_client's MagicMock LLM/checkpointer.
+    with (
+        patch(
+            "api.state.get_shared_llm", return_value=get_llm(get_settings().llm_config)
+        ),
+        patch("api.state.get_shared_checkpointer", return_value=MemorySaver()),
+    ):
+        budget = tiny_budget_mock_client.post(
+            "/packs/research_only/run", json={"query": "dashboard 402"}
+        )
+    assert budget.status_code == 402, budget.text
+    after = _outcome_budget_exceeded_total()
+    assert after > before
+
+    collectors = REGISTRY._names_to_collectors  # noqa: SLF001
+    for path in _dashboard_paths():
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        for expr in _iter_exprs(payload):
+            for metric_name, labels in extract_promql_refs(expr):
+                assert metric_name in collectors, (path, expr, metric_name)
+                declared = set(collectors[metric_name]._labelnames)  # noqa: SLF001
+                extra = set(labels) - IMPLIED_LABELS - declared
+                assert not extra, (path, metric_name, extra, declared)
+
+
+def test_http_histogram_never_groups_by_status_code() -> None:
+    path = _DASHBOARDS_DIR / "traffic-latency.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    for expr in _iter_exprs(payload):
+        if "http_request_duration_seconds" not in expr:
+            continue
+        refs = extract_promql_refs(expr)
+        for name, labels in refs:
+            if name.startswith("http_request_duration_seconds"):
+                assert "status_code" not in labels, expr
