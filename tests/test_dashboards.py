@@ -285,3 +285,17 @@ def test_http_histogram_never_groups_by_status_code() -> None:
         for name, labels in refs:
             if name.startswith("http_request_duration_seconds"):
                 assert "status_code" not in labels, expr
+
+
+def test_compose_observability_services_use_langgraph_net() -> None:
+    text = Path("infra/docker-compose.yml").read_text(encoding="utf-8")
+    assert "OBS_EXTRAS: observability" in text
+    assert "profiles:" in text
+    assert "prometheus" in text
+    assert "grafana" in text
+
+
+def test_grafana_provider_is_not_under_dashboards_dir() -> None:
+    stray = list(Path("infra/grafana/dashboards").glob("*.yml"))
+    assert stray == []
+    assert Path("infra/grafana/provisioning/dashboards/provider.yml").is_file()

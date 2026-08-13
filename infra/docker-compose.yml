@@ -19,6 +19,8 @@ services:
     build:
       context: ..
       dockerfile: infra/Dockerfile
+      args:
+        OBS_EXTRAS: observability
     image: langgraph-agent-stack:local
     container_name: langgraph-app
     restart: unless-stopped
@@ -80,6 +82,40 @@ services:
       timeout: 5s
       retries: 5
       start_period: 5s
+    networks:
+      - langgraph-net
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: langgraph-prometheus
+    profiles: [observability]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - langgraph-net
+
+  grafana:
+    image: grafana/grafana:11.6.0
+    container_name: langgraph-grafana
+    profiles: [observability]
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
     networks:
       - langgraph-net
 
