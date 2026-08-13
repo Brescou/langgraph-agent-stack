@@ -132,6 +132,7 @@ class TestGetVectorstoreChromaSuccess:
         mock_chroma_module.Chroma.assert_called_once()
         kwargs = mock_chroma_module.Chroma.call_args.kwargs
         assert kwargs["collection_name"] == "langgraph_rag"
+        assert kwargs["persist_directory"] == str(settings.rag_persist_dir)
         assert isinstance(kwargs["embedding_function"], DeterministicFakeEmbedding)
 
 

@@ -1,7 +1,8 @@
 """
 core/vectorstore.py — Pluggable vector store abstraction for RAG.
 
-Dev backend  : ChromaDB in-memory (no external service required).
+Dev backend  : ChromaDB on disk under ``RAG_PERSIST_DIR`` (default
+               ``.rag/chroma``); data survives process exit.
 Prod backend : pgvector via ``langchain_postgres.PGVector``
                (requires MEMORY_BACKEND=postgres).
 
@@ -22,7 +23,7 @@ Backend selection
 +===============================+======================================+
 | ``rag_enabled=False``         | RuntimeError raised                  |
 +-------------------------------+--------------------------------------+
-| ``rag_enabled=True``          | ChromaDB in-memory (default)         |
+| ``rag_enabled=True``          | ChromaDB persistent (default)        |
 +-------------------------------+--------------------------------------+
 | ``rag_enabled=True`` +        | PGVector (langchain-postgres)        |
 | ``memory_backend=postgres``   |                                      |
@@ -84,9 +85,10 @@ def get_vectorstore(settings: Settings) -> VectorStoreProtocol:
 
     * ``rag_enabled=False`` → raises ``RuntimeError`` immediately; callers
       must check the flag before calling this function.
-    * ``rag_enabled=True`` + default/sqlite → ChromaDB in-memory collection
-      named ``langgraph_rag``.  Requires the ``langchain-chroma`` and
-      ``chromadb`` packages (installed via ``uv sync --extra rag``).
+    * ``rag_enabled=True`` + default/sqlite → ChromaDB persistent collection
+      named ``langgraph_rag`` under ``settings.rag_persist_dir``.  Requires
+      the ``langchain-chroma`` and ``chromadb`` packages (installed via
+      ``uv sync --extra rag``).
     * ``rag_enabled=True`` + ``memory_backend=postgres`` → PGVector backed by
       ``settings.postgres_url``.  Requires ``langchain-postgres``
       (installed via ``uv sync --extra postgres``).
@@ -118,7 +120,7 @@ def get_vectorstore(settings: Settings) -> VectorStoreProtocol:
     if use_postgres:
         return _get_pgvector(settings, embeddings)
 
-    return _get_chromadb(embeddings)
+    return _get_chromadb(settings, embeddings)
 
 
 # ---------------------------------------------------------------------------
@@ -126,15 +128,16 @@ def get_vectorstore(settings: Settings) -> VectorStoreProtocol:
 # ---------------------------------------------------------------------------
 
 
-def _get_chromadb(embeddings: Embeddings) -> VectorStoreProtocol:
+def _get_chromadb(settings: Settings, embeddings: Embeddings) -> VectorStoreProtocol:
     """
-    Return a ChromaDB in-memory vector store with an explicit embedding model.
+    Return a ChromaDB persistent vector store with an explicit embedding model.
 
-    Uses the ``langchain-chroma`` integration and the default in-process
-    ephemeral client.  Data is lost when the process exits — suitable for
-    development and testing.
+    Uses the ``langchain-chroma`` integration and a on-disk client under
+    ``settings.rag_persist_dir``.  Data survives process exit — suitable for
+    development and single-process deployments.
 
     Args:
+        settings: Application settings; ``rag_persist_dir`` is created if missing.
         embeddings: Explicit embeddings instance (never rely on Chroma defaults).
 
     Returns:
@@ -146,9 +149,12 @@ def _get_chromadb(embeddings: Embeddings) -> VectorStoreProtocol:
     try:
         from langchain_chroma import Chroma  # type: ignore[import]
 
+        persist_dir = settings.rag_persist_dir
+        persist_dir.mkdir(parents=True, exist_ok=True)
         return Chroma(  # type: ignore[return-value]
             collection_name="langgraph_rag",
             embedding_function=embeddings,
+            persist_directory=str(persist_dir),
         )
 
     except ImportError as exc:

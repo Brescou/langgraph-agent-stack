@@ -224,6 +224,26 @@ class Settings(BaseSettings):
         validation_alias="RAG_ENABLED",
         description="Enable RAG (Retrieval-Augmented Generation) via a vector store.",
     )
+    rag_persist_dir: Path = Field(
+        default=Path(".rag/chroma"),
+        validation_alias="RAG_PERSIST_DIR",
+        description=(
+            "Directory for the Chroma persistent client when RAG_ENABLED=true "
+            "and MEMORY_BACKEND is not postgres. Ignored for PGVector."
+        ),
+    )
+    rag_chunk_size: int = Field(
+        default=1000,
+        ge=1,
+        validation_alias="RAG_CHUNK_SIZE",
+        description="Default ingest chunk size in characters.",
+    )
+    rag_chunk_overlap: int = Field(
+        default=200,
+        ge=0,
+        validation_alias="RAG_CHUNK_OVERLAP",
+        description="Default ingest chunk overlap in characters.",
+    )
     embedding_provider: Literal[
         "auto", "openai", "azure", "google", "ollama", "mock"
     ] = Field(

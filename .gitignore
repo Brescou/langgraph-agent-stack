@@ -110,6 +110,9 @@ venv.bak/
 # Application data directory (SQLite files, uploaded assets, etc.)
 data/
 
+# Chroma persistent client (RAG_PERSIST_DIR default)
+.rag/
+
 # =============================================================================
 # Editor and IDE
 # =============================================================================
