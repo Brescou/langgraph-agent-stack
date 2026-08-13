@@ -32,7 +32,8 @@ Backend selection
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from contextlib import AbstractContextManager
+from typing import Any, Protocol, cast, runtime_checkable
 
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
@@ -168,13 +169,14 @@ class _ProtocolVectorStore:
             and callable(get_collection)
             and embedding_store is not None
         ):
-            with session_maker() as session:
+            with cast(AbstractContextManager[Any], session_maker()) as session:
                 pg_collection = get_collection(session)
                 if pg_collection is None:
                     return 0
+                collection_uuid = getattr(pg_collection, "uuid")
                 return int(
                     session.query(embedding_store)
-                    .filter(embedding_store.collection_id == pg_collection.uuid)
+                    .filter(embedding_store.collection_id == collection_uuid)
                     .count()
                 )
         raise RuntimeError("document_count() is unsupported for this backend")
