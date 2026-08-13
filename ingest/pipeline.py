@@ -38,12 +38,8 @@ def ingest_path(
         raise FileNotFoundError(target)
 
     size = chunk_size if chunk_size is not None else settings.rag_chunk_size
-    overlap = (
-        chunk_overlap if chunk_overlap is not None else settings.rag_chunk_overlap
-    )
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=size, chunk_overlap=overlap
-    )
+    overlap = chunk_overlap if chunk_overlap is not None else settings.rag_chunk_overlap
+    splitter = RecursiveCharacterTextSplitter(chunk_size=size, chunk_overlap=overlap)
     files, skipped = _collect_files(target)
     documents: list[Document] = []
     ids: list[str] = []
