@@ -50,15 +50,27 @@ class VectorStoreProtocol(Protocol):
     treat them interchangeably through this protocol.
     """
 
-    def add_documents(self, documents: list[Document]) -> list[str]:
+    def add_documents(
+        self, documents: list[Document], ids: list[str] | None = None
+    ) -> list[str]:
         """
         Index a list of LangChain ``Document`` objects.
 
         Args:
             documents: Documents to embed and store.
+            ids: Optional stable IDs for upsert semantics.
 
         Returns:
             A list of string IDs assigned to the stored documents.
+        """
+        ...
+
+    def document_count(self) -> int:
+        """
+        Return the number of documents currently stored.
+
+        Returns:
+            Total document count in the collection.
         """
         ...
 
@@ -123,6 +135,34 @@ def get_vectorstore(settings: Settings) -> VectorStoreProtocol:
     return _get_chromadb(settings, embeddings)
 
 
+class _ProtocolVectorStore:
+    """Wrap a LangChain store so ingest and RagConnector share one protocol."""
+
+    def __init__(self, inner: VectorStoreProtocol) -> None:
+        self._inner = inner
+
+    def add_documents(
+        self, documents: list[Document], ids: list[str] | None = None
+    ) -> list[str]:
+        if ids is None:
+            return self._inner.add_documents(documents)
+        return self._inner.add_documents(documents, ids=ids)
+
+    def similarity_search(self, query: str, k: int = 5) -> list[Document]:
+        return self._inner.similarity_search(query, k=k)
+
+    def document_count(self) -> int:
+        collection = getattr(self._inner, "_collection", None)
+        if collection is not None and hasattr(collection, "count"):
+            return int(collection.count())
+        getter = getattr(self._inner, "get", None)
+        if callable(getter):
+            data = getter(include=[])
+            if isinstance(data, dict) and "ids" in data:
+                return len(data["ids"])
+        raise RuntimeError("document_count() is unsupported for this backend")
+
+
 # ---------------------------------------------------------------------------
 # Backend implementations
 # ---------------------------------------------------------------------------
@@ -151,10 +191,12 @@ def _get_chromadb(settings: Settings, embeddings: Embeddings) -> VectorStoreProt
 
         persist_dir = settings.rag_persist_dir
         persist_dir.mkdir(parents=True, exist_ok=True)
-        return Chroma(  # type: ignore[return-value]
-            collection_name="langgraph_rag",
-            embedding_function=embeddings,
-            persist_directory=str(persist_dir),
+        return _ProtocolVectorStore(
+            Chroma(  # type: ignore[arg-type]
+                collection_name="langgraph_rag",
+                embedding_function=embeddings,
+                persist_directory=str(persist_dir),
+            )
         )
 
     except ImportError as exc:
@@ -191,10 +233,12 @@ def _get_pgvector(settings: Settings, embeddings: Embeddings) -> VectorStoreProt
     try:
         from langchain_postgres import PGVector  # type: ignore[import]
 
-        return PGVector(  # type: ignore[return-value]
-            embeddings=embeddings,
-            connection=postgres_url,
-            collection_name="langgraph_rag",
+        return _ProtocolVectorStore(
+            PGVector(  # type: ignore[arg-type]
+                embeddings=embeddings,
+                connection=postgres_url,
+                collection_name="langgraph_rag",
+            )
         )
 
     except ImportError as exc:

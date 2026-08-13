@@ -105,7 +105,7 @@ class TestGetVectorstoreChromaSuccess:
     """Happy path: ChromaDB vector store created with an explicit embedding function."""
 
     def test_returns_chroma_instance_with_explicit_embeddings(self):
-        from core.vectorstore import get_vectorstore
+        from core.vectorstore import _ProtocolVectorStore, get_vectorstore
 
         env_override = {
             "RAG_ENABLED": "true",
@@ -128,7 +128,8 @@ class TestGetVectorstoreChromaSuccess:
             with patch.dict("sys.modules", {"langchain_chroma": mock_chroma_module}):
                 result = get_vectorstore(settings)
 
-        assert result is mock_chroma_instance
+        assert isinstance(result, _ProtocolVectorStore)
+        assert result._inner is mock_chroma_instance
         mock_chroma_module.Chroma.assert_called_once()
         kwargs = mock_chroma_module.Chroma.call_args.kwargs
         assert kwargs["collection_name"] == "langgraph_rag"
@@ -150,7 +151,7 @@ class TestGetVectorstorePGVectorSuccess:
     }
 
     def test_returns_pgvector_instance(self):
-        from core.vectorstore import get_vectorstore
+        from core.vectorstore import _ProtocolVectorStore, get_vectorstore
 
         mock_pgvector_instance = MagicMock()
         mock_pg_module = MagicMock()
@@ -167,7 +168,8 @@ class TestGetVectorstorePGVectorSuccess:
             ):
                 result = get_vectorstore(settings)
 
-        assert result is mock_pgvector_instance
+        assert isinstance(result, _ProtocolVectorStore)
+        assert result._inner is mock_pgvector_instance
         mock_pg_module.PGVector.assert_called_once()
         kwargs = mock_pg_module.PGVector.call_args.kwargs
         assert kwargs["collection_name"] == "langgraph_rag"
