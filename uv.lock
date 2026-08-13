@@ -1614,16 +1614,16 @@ wheels = [
 
 [[package]]
 name = "langchain-openai"
-version = "1.4.1"
+version = "1.4.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "langchain-core" },
     { name = "openai" },
     { name = "tiktoken" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/bf/1b/a83bf6cae4632363cef0b6f2ee1b4f62c8a5ebcf22cd8ef24430a736c2a8/langchain_openai-1.4.1.tar.gz", hash = "sha256:6d16be615d997db80294731b8e768783f1fb8e0313668e64acd50cd68acbad20", size = 3262416, upload-time = "2026-07-23T20:31:13.053Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/62/2a/daaafa7a398dfc5b3824c087ccfac475875c9018d7ec0f21cd015e6fd7fc/langchain_openai-1.4.3.tar.gz", hash = "sha256:416fbb39ccb62f0dac8180387a56b70f255b8c14c2ec3f774c4074dbcd9aae04", size = 3263452, upload-time = "2026-08-10T13:23:12.732Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/fe/1c/8b604dc8be2735c8ae5c655e520066231057d1301958c20c776e62bd00fb/langchain_openai-1.4.1-py3-none-any.whl", hash = "sha256:8528bb34cc78fdfd2d895573c7917f9441cbb82db5f18ae0e6b3b75d95bdefb3", size = 122067, upload-time = "2026-07-23T20:31:11.809Z" },
+    { url = "https://files.pythonhosted.org/packages/b8/fb/a72bb3e8ff427bdd79acd6d04131d77281c57bf979c5c3c8650019a30afc/langchain_openai-1.4.3-py3-none-any.whl", hash = "sha256:351c9dd409ea3ba6562916a9f4655bbf1530e7d84e325b0681e984d63118850b", size = 122433, upload-time = "2026-08-10T13:23:11.326Z" },
 ]
 
 [[package]]
@@ -1800,11 +1800,11 @@ requires-dist = [
     { name = "langchain-google-genai", marker = "extra == 'google'", specifier = ">=4.3.2,<5.0" },
     { name = "langchain-ollama", marker = "extra == 'all-providers'", specifier = ">=1.1.0,<2.0" },
     { name = "langchain-ollama", marker = "extra == 'ollama'", specifier = ">=1.1.0,<2.0" },
-    { name = "langchain-openai", marker = "extra == 'all-providers'", specifier = ">=1.4.1,<2.0" },
-    { name = "langchain-openai", marker = "extra == 'openai'", specifier = ">=1.4.1,<2.0" },
+    { name = "langchain-openai", marker = "extra == 'all-providers'", specifier = ">=1.4.3,<2.0" },
+    { name = "langchain-openai", marker = "extra == 'openai'", specifier = ">=1.4.3,<2.0" },
     { name = "langchain-postgres", marker = "extra == 'postgres'", specifier = ">=0.0.14" },
     { name = "langgraph", specifier = ">=1.2.10,<2.0" },
-    { name = "langgraph-checkpoint-postgres", marker = "extra == 'postgres'", specifier = ">=3.1.1,<4.0" },
+    { name = "langgraph-checkpoint-postgres", marker = "extra == 'postgres'", specifier = ">=3.1.2,<4.0" },
     { name = "langgraph-checkpoint-redis", marker = "extra == 'redis'", specifier = ">=0.5.1,<1.0" },
     { name = "langgraph-checkpoint-sqlite", specifier = ">=3.1.1,<4.0" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.0,<2" },
@@ -1858,7 +1858,7 @@ wheels = [
 
 [[package]]
 name = "langgraph-checkpoint-postgres"
-version = "3.1.1"
+version = "3.1.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "langgraph-checkpoint" },
@@ -1866,9 +1866,9 @@ dependencies = [
     { name = "psycopg" },
     { name = "psycopg-pool" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/06/92/1e8959f8cd1b56e672fde3227f6fd642be85af6c5fd662d73921074aa39d/langgraph_checkpoint_postgres-3.1.1.tar.gz", hash = "sha256:d320e147ddad8c374cd546df0b52b532dd54d0541dd9fd23fc738cbd5de76f41", size = 150413, upload-time = "2026-07-30T19:15:39.014Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/9d/52/6e732f7bf702ef4918b64ea4107e7da21d4276b808f9a651fe34be9b0abe/langgraph_checkpoint_postgres-3.1.2.tar.gz", hash = "sha256:1cd404803ff895a2b79f3ac04ce92b775e6b999715f8333fce674c6d927bba95", size = 155091, upload-time = "2026-08-07T20:40:00.049Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/03/32/ba457698a48a0e18d786caa770033067049fbe36d6846f8e50f13b594b51/langgraph_checkpoint_postgres-3.1.1-py3-none-any.whl", hash = "sha256:6e353aecd8150de144fef8e51a49076f58b7d6830d4cf51392b7ad4d79832ba7", size = 50778, upload-time = "2026-07-30T19:15:37.405Z" },
+    { url = "https://files.pythonhosted.org/packages/0f/62/8899c9f4d9b97d5b3eb0c07c13cdf5f63342f15f5ef93eaf3477958df602/langgraph_checkpoint_postgres-3.1.2-py3-none-any.whl", hash = "sha256:6a7e38ef16985b54e356cba7bdaf447943aae33d5aaf290026c593bb6b4a6264", size = 52084, upload-time = "2026-08-07T20:39:58.994Z" },
 ]
 
 [[package]]
