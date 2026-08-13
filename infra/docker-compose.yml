@@ -29,6 +29,7 @@ services:
     environment:
       # Ensure the app can write SQLite data to the mounted volume
       SQLITE_PATH: /app/data/memory.db
+      RAG_PERSIST_DIR: /app/data/rag
     volumes:
       # Persist SQLite database across container restarts
       - sqlite-data:/app/data

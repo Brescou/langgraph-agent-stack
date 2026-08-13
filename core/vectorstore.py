@@ -1,7 +1,8 @@
 """
 core/vectorstore.py — Pluggable vector store abstraction for RAG.
 
-Dev backend  : ChromaDB in-memory (no external service required).
+Dev backend  : ChromaDB on disk under ``RAG_PERSIST_DIR`` (default
+               ``.rag/chroma``); data survives process exit.
 Prod backend : pgvector via ``langchain_postgres.PGVector``
                (requires MEMORY_BACKEND=postgres).
 
@@ -22,7 +23,7 @@ Backend selection
 +===============================+======================================+
 | ``rag_enabled=False``         | RuntimeError raised                  |
 +-------------------------------+--------------------------------------+
-| ``rag_enabled=True``          | ChromaDB in-memory (default)         |
+| ``rag_enabled=True``          | ChromaDB persistent (default)        |
 +-------------------------------+--------------------------------------+
 | ``rag_enabled=True`` +        | PGVector (langchain-postgres)        |
 | ``memory_backend=postgres``   |                                      |
@@ -31,7 +32,8 @@ Backend selection
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from contextlib import AbstractContextManager
+from typing import Any, Protocol, cast, runtime_checkable
 
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
@@ -49,15 +51,27 @@ class VectorStoreProtocol(Protocol):
     treat them interchangeably through this protocol.
     """
 
-    def add_documents(self, documents: list[Document]) -> list[str]:
+    def add_documents(
+        self, documents: list[Document], ids: list[str] | None = None
+    ) -> list[str]:
         """
         Index a list of LangChain ``Document`` objects.
 
         Args:
             documents: Documents to embed and store.
+            ids: Optional stable IDs for upsert semantics.
 
         Returns:
             A list of string IDs assigned to the stored documents.
+        """
+        ...
+
+    def document_count(self) -> int:
+        """
+        Return the number of documents currently stored.
+
+        Returns:
+            Total document count in the collection.
         """
         ...
 
@@ -84,9 +98,10 @@ def get_vectorstore(settings: Settings) -> VectorStoreProtocol:
 
     * ``rag_enabled=False`` → raises ``RuntimeError`` immediately; callers
       must check the flag before calling this function.
-    * ``rag_enabled=True`` + default/sqlite → ChromaDB in-memory collection
-      named ``langgraph_rag``.  Requires the ``langchain-chroma`` and
-      ``chromadb`` packages (installed via ``uv sync --extra rag``).
+    * ``rag_enabled=True`` + default/sqlite → ChromaDB persistent collection
+      named ``langgraph_rag`` under ``settings.rag_persist_dir``.  Requires
+      the ``langchain-chroma`` and ``chromadb`` packages (installed via
+      ``uv sync --extra rag``).
     * ``rag_enabled=True`` + ``memory_backend=postgres`` → PGVector backed by
       ``settings.postgres_url``.  Requires ``langchain-postgres``
       (installed via ``uv sync --extra postgres``).
@@ -118,7 +133,53 @@ def get_vectorstore(settings: Settings) -> VectorStoreProtocol:
     if use_postgres:
         return _get_pgvector(settings, embeddings)
 
-    return _get_chromadb(embeddings)
+    return _get_chromadb(settings, embeddings)
+
+
+class _ProtocolVectorStore:
+    """Wrap a LangChain store so ingest and RagConnector share one protocol."""
+
+    def __init__(self, inner: VectorStoreProtocol) -> None:
+        self._inner = inner
+
+    def add_documents(
+        self, documents: list[Document], ids: list[str] | None = None
+    ) -> list[str]:
+        if ids is None:
+            return self._inner.add_documents(documents)
+        return self._inner.add_documents(documents, ids=ids)
+
+    def similarity_search(self, query: str, k: int = 5) -> list[Document]:
+        return self._inner.similarity_search(query, k=k)
+
+    def document_count(self) -> int:
+        collection = getattr(self._inner, "_collection", None)
+        if collection is not None and hasattr(collection, "count"):
+            return int(collection.count())
+        getter = getattr(self._inner, "get", None)
+        if callable(getter):
+            data = getter(include=[])
+            if isinstance(data, dict) and "ids" in data:
+                return len(data["ids"])
+        session_maker = getattr(self._inner, "session_maker", None)
+        get_collection = getattr(self._inner, "get_collection", None)
+        embedding_store = getattr(self._inner, "EmbeddingStore", None)
+        if (
+            callable(session_maker)
+            and callable(get_collection)
+            and embedding_store is not None
+        ):
+            with cast(AbstractContextManager[Any], session_maker()) as session:
+                pg_collection = get_collection(session)
+                if pg_collection is None:
+                    return 0
+                collection_uuid = getattr(pg_collection, "uuid")
+                return int(
+                    session.query(embedding_store)
+                    .filter(embedding_store.collection_id == collection_uuid)
+                    .count()
+                )
+        raise RuntimeError("document_count() is unsupported for this backend")
 
 
 # ---------------------------------------------------------------------------
@@ -126,15 +187,16 @@ def get_vectorstore(settings: Settings) -> VectorStoreProtocol:
 # ---------------------------------------------------------------------------
 
 
-def _get_chromadb(embeddings: Embeddings) -> VectorStoreProtocol:
+def _get_chromadb(settings: Settings, embeddings: Embeddings) -> VectorStoreProtocol:
     """
-    Return a ChromaDB in-memory vector store with an explicit embedding model.
+    Return a ChromaDB persistent vector store with an explicit embedding model.
 
-    Uses the ``langchain-chroma`` integration and the default in-process
-    ephemeral client.  Data is lost when the process exits — suitable for
-    development and testing.
+    Uses the ``langchain-chroma`` integration and a on-disk client under
+    ``settings.rag_persist_dir``.  Data survives process exit — suitable for
+    development and single-process deployments.
 
     Args:
+        settings: Application settings; ``rag_persist_dir`` is created if missing.
         embeddings: Explicit embeddings instance (never rely on Chroma defaults).
 
     Returns:
@@ -146,9 +208,14 @@ def _get_chromadb(embeddings: Embeddings) -> VectorStoreProtocol:
     try:
         from langchain_chroma import Chroma  # type: ignore[import]
 
-        return Chroma(  # type: ignore[return-value]
-            collection_name="langgraph_rag",
-            embedding_function=embeddings,
+        persist_dir = settings.rag_persist_dir
+        persist_dir.mkdir(parents=True, exist_ok=True)
+        return _ProtocolVectorStore(
+            Chroma(  # type: ignore[arg-type]
+                collection_name="langgraph_rag",
+                embedding_function=embeddings,
+                persist_directory=str(persist_dir),
+            )
         )
 
     except ImportError as exc:
@@ -185,10 +252,12 @@ def _get_pgvector(settings: Settings, embeddings: Embeddings) -> VectorStoreProt
     try:
         from langchain_postgres import PGVector  # type: ignore[import]
 
-        return PGVector(  # type: ignore[return-value]
-            embeddings=embeddings,
-            connection=postgres_url,
-            collection_name="langgraph_rag",
+        return _ProtocolVectorStore(
+            PGVector(  # type: ignore[arg-type]
+                embeddings=embeddings,
+                connection=postgres_url,
+                collection_name="langgraph_rag",
+            )
         )
 
     except ImportError as exc:

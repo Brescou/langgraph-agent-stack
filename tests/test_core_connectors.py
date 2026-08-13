@@ -105,3 +105,42 @@ async def test_rag_connector_fetch() -> None:
         result = await connector.fetch(ConnectorRequest(query="quantum"))
 
     assert result.records[0]["snippet"] == "vector hit"
+    assert result.metadata["empty_store"] is False
+    assert "count" not in result.metadata
+    mock_store.document_count.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_rag_connector_fetch_empty_collection() -> None:
+    mock_store = MagicMock()
+    mock_store.similarity_search.return_value = []
+    mock_store.document_count.return_value = 0
+
+    settings = _settings_env(RAG_ENABLED="true")
+    with patch("core.vectorstore.get_vectorstore", return_value=mock_store):
+        connector = RagConnector(settings=settings)
+        from connectors.base import ConnectorRequest
+
+        result = await connector.fetch(ConnectorRequest(query="quantum"))
+
+    assert result.records == ()
+    assert result.metadata["empty_store"] is True
+    assert result.metadata["count"] == 0
+    mock_store.document_count.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_rag_connector_fetch_zero_hits_nonempty_store() -> None:
+    mock_store = MagicMock()
+    mock_store.similarity_search.return_value = []
+    mock_store.document_count.return_value = 4
+
+    settings = _settings_env(RAG_ENABLED="true")
+    with patch("core.vectorstore.get_vectorstore", return_value=mock_store):
+        connector = RagConnector(settings=settings)
+        from connectors.base import ConnectorRequest
+
+        result = await connector.fetch(ConnectorRequest(query="no-such-topic"))
+
+    assert result.metadata["empty_store"] is False
+    assert result.metadata["count"] == 4
