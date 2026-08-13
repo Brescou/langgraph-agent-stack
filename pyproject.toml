@@ -78,6 +78,7 @@ packages = [
     "control_plane",
     "pack_kernel",
     "domain_packs",
+    "ingest",
 ]
 
 [tool.bandit]

@@ -89,3 +89,34 @@ def test_ingest_file_and_parent_dir_do_not_duplicate(tmp_path: Path) -> None:
     ingest_path(doc, settings)
     store = get_vectorstore(settings)
     assert store.document_count() == 1
+
+
+def test_cli_ingests_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from ingest.__main__ import main
+
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    (corpus / "a.md").write_text("Nitrogen-vacancy centers in diamond.\n", encoding="utf-8")
+    persist = tmp_path / "chroma"
+    monkeypatch.setenv("RAG_ENABLED", "true")
+    monkeypatch.setenv("LLM_PROVIDER", "mock")
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "mock")
+    monkeypatch.setenv("RAG_PERSIST_DIR", str(persist))
+    from core.config import get_settings
+
+    get_settings.cache_clear()
+    try:
+        code = main([str(corpus)])
+        assert code == 0
+        from core.config import get_settings as _gs
+
+        store = get_vectorstore(_gs())
+        assert store.document_count() >= 1
+    finally:
+        get_settings.cache_clear()
+
+
+def test_cli_missing_path_exits_2() -> None:
+    from ingest.__main__ import main
+
+    assert main(["/definitely/missing/rag-corpus"]) == 2
