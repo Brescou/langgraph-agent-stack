@@ -7,11 +7,19 @@ import re
 from pathlib import Path
 from typing import Any
 
-import prometheus_client  # noqa: F401 — fail loudly if extra missing
+import pytest
 from fastapi.testclient import TestClient
-from prometheus_client import REGISTRY
 
 from agents.models import ResearchResult
+
+_prometheus_available = False
+try:
+    import prometheus_client  # noqa: F401
+    from prometheus_client import REGISTRY
+
+    _prometheus_available = True
+except ImportError:
+    pass
 
 IMPLIED_LABELS = frozenset({"le", "quantile"})
 _DASHBOARDS_DIR = Path("infra/grafana/dashboards")
@@ -199,6 +207,10 @@ def test_each_dashboard_uses_datasource_variable() -> None:
         assert "__inputs" not in payload
 
 
+@pytest.mark.skipif(
+    not _prometheus_available,
+    reason="prometheus-client not installed",
+)
 def test_metrics_endpoint_mounted(test_client: TestClient) -> None:
     response = test_client.get("/metrics")
     assert response.status_code == 200
@@ -219,6 +231,10 @@ def _outcome_budget_exceeded_total() -> float:
     return total
 
 
+@pytest.mark.skipif(
+    not _prometheus_available,
+    reason="prometheus-client not installed",
+)
 def test_dashboard_promql_matches_registry(
     test_client: TestClient,
     tiny_budget_mock_client: TestClient,
