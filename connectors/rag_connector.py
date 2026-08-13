@@ -6,12 +6,15 @@ Requires ``RAG_ENABLED=true`` and the ``rag`` optional dependencies.
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from connectors.base import BaseConnector, ConnectorRequest, ConnectorResult
 
 if TYPE_CHECKING:
     from core.config import Settings
+
+logger = logging.getLogger(__name__)
 
 
 class RagConnector(BaseConnector):
@@ -41,7 +44,14 @@ class RagConnector(BaseConnector):
                     "score": meta.get("score"),
                 }
             )
-        return ConnectorResult(
-            records=tuple(records),
-            metadata={"backend": "rag", "count": len(records)},
-        )
+        metadata: dict[str, Any] = {"backend": "rag", "empty_store": False}
+        if not records:
+            count = store.document_count()
+            metadata["count"] = count
+            metadata["empty_store"] = count == 0
+            if count == 0:
+                logger.warning(
+                    "RAG vector store is empty; ingest documents with "
+                    "`python -m ingest <path>`"
+                )
+        return ConnectorResult(records=tuple(records), metadata=metadata)
