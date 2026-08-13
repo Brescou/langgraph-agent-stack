@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Grafana dashboards** (#98) — Cost, Traffic & latency, and Packs & versions JSON under `infra/grafana/dashboards/`, provisioned by `docker compose --profile observability`. Compose `app` builds with `OBS_EXTRAS=observability` so `/metrics` is not 404. Pytest checks PromQL metric/label names against the Prometheus registry.
 - **RAG ingest CLI** (#117) — `python -m ingest <path>` chunks `.txt`/`.md` into the configured vector store (`get_vectorstore()` / `get_embeddings()`). Chroma persists under `RAG_PERSIST_DIR` (default `.rag/chroma`). Re-ingest upserts by stable file-path IDs. `RagConnector` sets `metadata.empty_store` when a search returns no hits and the collection count is zero.
 - **Pack/version labels on cost and run metrics** (#118) — `pack_run_cost_usd_total` and `llm_cost_usd_total` now include `pack_id` and `version`; new `pack_runs_total` and `pack_run_duration_seconds` expose canary-observable run volume and latency labelled by `pack_id`, `version`, and `outcome` (`success`, `budget_exceeded`, `client_error`, `server_error`). Instrumented at `execute_typed_pack_run`, per-pack SSE streams, and legacy `POST /run` / `POST /run/stream` (legacy routes pass resolved `pack_id`/`pack_version` into `pack_runtime_kwargs`). Pack runs always attach a `CostTracker` (budget optional). HTTP route template labels unchanged. Cardinality (approx): ~156 run series, ~234 provider-cost series, ~585 model-cost series at 13 packs × 3 versions.
 

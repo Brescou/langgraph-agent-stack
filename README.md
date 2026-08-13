@@ -148,7 +148,7 @@ versioning, and canary weights as built-ins. Packaging walkthrough:
 | `POST` | `/research` | Research phase only |
 | `GET` | `/health`, `/ready` | Probes |
 | `GET` | `/sessions/{id}/history` | Session run history |
-| `GET` | `/metrics` | Prometheus (with `observability` extra) |
+| `GET` | `/metrics` | Prometheus (with `observability` extra). Local Grafana: [docs/observability.md](docs/observability.md) |
 
 Responses include `cost_usd` when cost tracking is active; HTTP **402** on budget exceed. See `/docs` for request/response schemas.
 
@@ -203,6 +203,7 @@ Set `LLM_PROVIDER` and install the matching extra. Details and gateway overrides
 ```bash
 docker compose -f infra/docker-compose.yml up
 docker compose -f infra/docker-compose.yml --profile redis up   # Redis memory backend
+docker compose -f infra/docker-compose.yml --profile observability up --build   # Prometheus + Grafana
 ```
 
 **Helm**
@@ -241,7 +242,7 @@ make infra-check   # helm lint + kubeconform + checkov
 |---------|-------------|
 | `POST /run` returns **502** with `LLM provider 'anthropic' rejected the request credentials` | Your API key is missing or invalid. Set `ANTHROPIC_API_KEY` (or your provider's key) in `.env`, or set `LLM_PROVIDER=mock` to run without one. |
 | Responses say `Mock insight 1: Key trend identified.` | You are on `LLM_PROVIDER=mock` (deterministic canned output, $0). Set a real provider + key in `.env`. |
-| `GET /metrics` returns **404** | Prometheus metrics need the observability extra: `uv sync --extra observability`. |
+| `GET /metrics` returns **404** | Prometheus metrics need the observability extra: `uv sync --extra observability`. Compose local image includes the extra via `OBS_EXTRAS`; published GHCR image does not yet (#132). |
 | Regulated pack (`talent_screening`, `contract_reviewer`, …) returns **403** | Expected: these packs are gated behind `REGULATED_PACKS_ENABLED=false` until you complete the pack's `COMPLIANCE.md`. A **422** means your request body doesn't match the pack's input schema — check `/docs`. |
 | **402** on `/run` or a pack route | The per-run USD budget (`PACK_DEFAULT_BUDGET_USD`) was exceeded. Raise it or unset it. |
 | `/docs` is missing | Interactive docs are disabled when `ENVIRONMENT=production`. |
@@ -291,6 +292,7 @@ langgraph-agent-stack/
 | Doc | Contents |
 |-----|----------|
 | [docs/deploy.md](docs/deploy.md) | Cloud deploy runbook (EKS/GKE/AKS apply, verify, destroy) |
+| [docs/observability.md](docs/observability.md) | Compose Grafana profile, dashboard import, PromQL constraints, #132 |
 | [docs/security.md](docs/security.md) | Auth, secrets, K8s hardening, CI scans, supply chain, Checkov prod gate |
 | [domain_packs/README.md](domain_packs/README.md) | Pack catalogue and authoring |
 | [connectors/README.md](connectors/README.md) | Connector contract and wiring |

@@ -99,6 +99,7 @@ dev = [
     "pip-audit>=2.7",
     "pip>=26.1.2",  # PYSEC-2026-196 fixed in 26.1.2
     "pre-commit>=4.0",
+    "pyyaml>=6.0",
 ]
 
 [tool.ruff]
