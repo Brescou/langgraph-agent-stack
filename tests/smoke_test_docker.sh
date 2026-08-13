@@ -19,12 +19,14 @@ set -euo pipefail
 
 IMAGE_NAME="langgraph-agent-stack:smoke-test"
 CONTAINER_NAME="langgraph-smoke-$$"
+VOLUME_NAME="langgraph-smoke-data-$$"
 PORT=18910
 MAX_WAIT=30
 
 cleanup() {
     echo "[smoke] Cleaning up..."
     docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
+    docker volume rm "$VOLUME_NAME" 2>/dev/null || true
     docker rmi "$IMAGE_NAME" 2>/dev/null || true
 }
 trap cleanup EXIT
@@ -36,6 +38,24 @@ echo "════════════════════════�
 # 1. Build the image
 echo "[smoke] Building Docker image..."
 docker build -f infra/Dockerfile -t "$IMAGE_NAME" . --quiet
+
+# 1b. Named volume /app/data must inherit uid 1001 from the image.
+# Compose mounts sqlite-data:/app/data; if the directory is missing from the
+# image, Docker creates the mount as root:root and appuser cannot write SQLite.
+echo "[smoke] Verifying named volume /app/data is writable by uid 1001..."
+docker volume create "$VOLUME_NAME" >/dev/null
+if docker run --rm \
+    --user 1001:1001 \
+    --entrypoint sh \
+    -v "$VOLUME_NAME:/app/data" \
+    "$IMAGE_NAME" \
+    -c 'touch /app/data/.write-probe && rm /app/data/.write-probe'; then
+    echo "[smoke] ✓ Named volume /app/data is writable by uid 1001"
+else
+    echo "[smoke] ✗ Named volume /app/data is not writable by uid 1001"
+    echo "[smoke] Image must mkdir -p /app/data before USER appuser so an empty named volume copies those permissions."
+    exit 1
+fi
 
 # 2. Start the container
 echo "[smoke] Starting container on port $PORT..."

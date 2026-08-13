@@ -113,8 +113,10 @@ COPY connectors/ ./connectors/
 COPY control_plane/ ./control_plane/
 COPY ingest/   ./ingest/
 
-# Transfer ownership of the working directory to the non-root user
-RUN chown -R appuser:appgroup /app
+# /app/data is SQLITE_PATH / RAG_PERSIST_DIR in Compose. mkdir before
+# chown so an empty named volume copies uid 1001 from the image layer
+# (Docker otherwise creates the mount as root:root).
+RUN mkdir -p /app/data && chown -R appuser:appgroup /app
 
 # Switch to non-root user
 USER appuser
