@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 from fastapi.testclient import TestClient
 
 from agents.models import ResearchResult
@@ -304,11 +305,16 @@ def test_http_histogram_never_groups_by_status_code() -> None:
 
 
 def test_compose_observability_services_use_langgraph_net() -> None:
-    text = Path("infra/docker-compose.yml").read_text(encoding="utf-8")
-    assert "OBS_EXTRAS: observability" in text
-    assert "profiles:" in text
-    assert "prometheus" in text
-    assert "grafana" in text
+    compose = yaml.safe_load(
+        Path("infra/docker-compose.yml").read_text(encoding="utf-8")
+    )
+    services = compose["services"]
+    assert services["app"]["build"]["args"]["OBS_EXTRAS"] == "observability"
+    assert "OBS_EXTRAS" not in services["app"].get("environment", {})
+    for name in ("prometheus", "grafana"):
+        svc = services[name]
+        assert svc["profiles"] == ["observability"], name
+        assert "langgraph-net" in svc["networks"], name
 
 
 def test_grafana_provider_is_not_under_dashboards_dir() -> None:
