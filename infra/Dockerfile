@@ -40,11 +40,13 @@ COPY uv.lock ./
 ARG LLM_EXTRAS="anthropic"
 ARG INFRA_EXTRAS=""
 ARG OBS_EXTRAS=""
+ARG RAG_EXTRAS=""
 
 RUN uv sync --locked --no-dev \
     --extra ${LLM_EXTRAS} \
     ${INFRA_EXTRAS:+--extra ${INFRA_EXTRAS}} \
-    ${OBS_EXTRAS:+--extra ${OBS_EXTRAS}}
+    ${OBS_EXTRAS:+--extra ${OBS_EXTRAS}} \
+    ${RAG_EXTRAS:+--extra ${RAG_EXTRAS}}
 
 # =============================================================================
 # Stage 2 — runtime

@@ -9,8 +9,8 @@ from langchain_core.documents import Document
 
 langchain_chroma = pytest.importorskip("langchain_chroma")
 
-from core.config import Settings
-from core.vectorstore import get_vectorstore
+from core.config import Settings  # noqa: E402
+from core.vectorstore import get_vectorstore  # noqa: E402
 
 
 def _rag_settings(tmp_path: Path) -> Settings:
@@ -96,7 +96,9 @@ def test_cli_ingests_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
 
     corpus = tmp_path / "corpus"
     corpus.mkdir()
-    (corpus / "a.md").write_text("Nitrogen-vacancy centers in diamond.\n", encoding="utf-8")
+    (corpus / "a.md").write_text(
+        "Nitrogen-vacancy centers in diamond.\n", encoding="utf-8"
+    )
     persist = tmp_path / "chroma"
     monkeypatch.setenv("RAG_ENABLED", "true")
     monkeypatch.setenv("LLM_PROVIDER", "mock")
@@ -120,3 +122,61 @@ def test_cli_missing_path_exits_2() -> None:
     from ingest.__main__ import main
 
     assert main(["/definitely/missing/rag-corpus"]) == 2
+
+
+def test_ingest_then_research_analysis_merges_snippet(
+    tmp_path: Path,
+) -> None:
+    from unittest.mock import MagicMock, patch
+
+    from agents.analyst import AnalysisReport
+    from agents.researcher import ResearchResult
+    from connectors.rag_connector import RagConnector
+    from domain_packs.research.research_analysis.pack import ResearchAnalysisPack
+    from ingest.pipeline import ingest_path
+
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    (corpus / "qubits.md").write_text(
+        "Dilution-refrigerator transmon control uses microwave pulses.\n",
+        encoding="utf-8",
+    )
+    settings = _rag_settings(tmp_path)
+    ingest_path(corpus, settings)
+
+    mock_research = MagicMock()
+    mock_research.run_structured.return_value = ResearchResult(
+        query="transmon",
+        findings=["agent finding"],
+        summary="s",
+        sources=[],
+        confidence=0.8,
+        metadata={},
+    )
+    mock_analyst = MagicMock()
+    mock_analyst.run_structured.return_value = AnalysisReport(
+        executive_summary="Done.",
+        key_insights=["i"],
+        patterns=[],
+        implications=[],
+        confidence=0.7,
+        research_summary="s",
+        query="transmon",
+        metadata={},
+    )
+
+    connector = RagConnector(settings=settings)
+    with (
+        patch("core.graph.ResearchAgent", return_value=mock_research),
+        patch("core.graph.AnalystAgent", return_value=mock_analyst),
+    ):
+        pack = ResearchAnalysisPack(
+            run_id="rag-ingest-loop",
+            connector=connector,
+        )
+        pack.run("transmon microwave pulses")
+
+    passed = mock_analyst.run_structured.call_args[0][0]
+    assert any("microwave" in f.lower() for f in passed.findings)
+    fetch_meta = passed.metadata["connector"]["fetch_metadata"]
+    assert fetch_meta["empty_store"] is False

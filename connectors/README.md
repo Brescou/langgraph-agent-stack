@@ -37,6 +37,23 @@ The FastAPI lifespan resolves the connector via `connectors/resolver.py` and pas
 
 See `connectors/examples/example_connector.py`, `tests/test_connector_pack.py`, and `tests/test_api_connector.py`.
 
+### RAG ingest
+
+Write path (populate the vector store before enabling the connector):
+
+```bash
+uv sync --extra rag
+uv run python -m ingest examples/rag/corpus
+```
+
+Query path (API or pack): `CONNECTOR_ENABLED=true`, `CONNECTOR_ID=rag`, `RAG_ENABLED=true`.
+
+`RagConnector` sets `metadata.empty_store` only when a similarity search returns **zero hits** and the collection `document_count()` is **zero** — a miss on a non-empty store does not set `empty_store`.
+
+**Concurrency:** Chroma persists under `RAG_PERSIST_DIR` (SQLite). Run ingest while the API is **stopped**; concurrent writers can lock the database.
+
+**Recovery:** There is no `--reset` flag in v1. Stop the API, delete `RAG_PERSIST_DIR` (or drop the PGVector collection when `MEMORY_BACKEND=postgres`), then re-ingest.
+
 ## Layout
 
 | Path | Role |

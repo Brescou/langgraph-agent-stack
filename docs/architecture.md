@@ -141,7 +141,7 @@ Per-pack routes under `/packs/{pack_id}/...` use the registry and pack schemas d
 
 ## Sprint 3 (delivered)
 
-- **Connectors:** `http` and `rag` ids in `connectors/resolver.py`; `RagConnector` uses `get_vectorstore()` when `RAG_ENABLED=true`.
+- **Connectors:** `http` and `rag` ids in `connectors/resolver.py`; `RagConnector` uses `get_vectorstore()` when `RAG_ENABLED=true`. Write path: `python -m ingest <path>` (see `connectors/README.md`).
 - **Control plane:** `PolicyRegistry` + `control_plane/enforce.py` applied in `api/dependencies.py` and pack routes (query limits, budget, stream timeout).
 - **Sticky sessions:** Redis and Postgres run-history backends implement `get_pack_version_for_session` (session + `pack_id` index).
 
