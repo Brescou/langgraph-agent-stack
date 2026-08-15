@@ -2,7 +2,13 @@
 # tests/smoke_test_docker.sh — Docker image smoke test.
 #
 # Builds the Docker image, starts the container, verifies the /health
-# endpoint returns 200, then tears everything down.
+# endpoint returns 200 and that /metrics is served with the metrics the
+# KEDA ScaledObject queries (active_pipelines), then tears everything down.
+#
+# The image is built with the same build-args as the publish job
+# (.github/workflows/ci.yml), so a regression where the published GHCR image
+# loses an extra surfaces here instead of as a silent 404 in production
+# (gh #132).
 #
 # Usage:
 #   bash tests/smoke_test_docker.sh
@@ -35,9 +41,11 @@ echo "════════════════════════�
 echo " Docker Smoke Test — langgraph-agent-stack"
 echo "═══════════════════════════════════════════════"
 
-# 1. Build the image
-echo "[smoke] Building Docker image..."
-docker build -f infra/Dockerfile -t "$IMAGE_NAME" . --quiet
+# 1. Build the image — with the same build-args as the publish job so the
+# smoke test exercises the exact image GHCR ships (gh #132).
+echo "[smoke] Building Docker image (OBS_EXTRAS=observability, matching publish)..."
+docker build -f infra/Dockerfile -t "$IMAGE_NAME" . --quiet \
+    --build-arg OBS_EXTRAS=observability
 
 # 1b. Named volume /app/data must inherit uid 1001 from the image.
 # Compose mounts sqlite-data:/app/data; if the directory is missing from the
@@ -108,7 +116,30 @@ else
     exit 1
 fi
 
-# 6. Verify container runs as non-root
+# 6. Verify /metrics is served with the KEDA autoscaling metric
+# The ServiceMonitor scrapes /metrics and the ScaledObject queries
+# active_pipelines; a 404 here means autoscaling silently never fires on the
+# published image (gh #132).
+METRICS_CODE=$(curl -sf -o /tmp/smoke-metrics.txt -w "%{http_code}" "http://localhost:$PORT/metrics" || true)
+if [ "$METRICS_CODE" = "200" ]; then
+    echo "[smoke] ✓ /metrics returns 200"
+else
+    echo "[smoke] ✗ /metrics returned ${METRICS_CODE:-no response} (expected 200)"
+    echo "[smoke] The image is missing the observability extra; publish must pass OBS_EXTRAS=observability."
+    exit 1
+fi
+
+if grep -q '^active_pipelines' /tmp/smoke-metrics.txt; then
+    echo "[smoke] ✓ /metrics exposition contains active_pipelines"
+else
+    echo "[smoke] ✗ active_pipelines missing from /metrics exposition"
+    echo "[smoke] --- metrics head ---"
+    head -20 /tmp/smoke-metrics.txt
+    exit 1
+fi
+rm -f /tmp/smoke-metrics.txt
+
+# 7. Verify container runs as non-root
 CONTAINER_USER=$(docker exec "$CONTAINER_NAME" whoami 2>/dev/null || echo "unknown")
 if [ "$CONTAINER_USER" = "appuser" ]; then
     echo "[smoke] ✓ Container runs as non-root user (appuser)"

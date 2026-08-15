@@ -37,6 +37,12 @@ COPY uv.lock ./
 #     --build-arg INFRA_EXTRAS=redis \
 #     --build-arg OBS_EXTRAS=observability \
 #     -f infra/Dockerfile .
+#
+# Published GHCR image ships: LLM_EXTRAS=anthropic (the default above),
+# OBS_EXTRAS=observability (passed explicitly by the publish job so /metrics
+# is served), INFRA_EXTRAS="" and RAG_EXTRAS="" (defaults). Keep the publish
+# job's build-args and infra/docker-compose.yml's `app` build args in sync
+# with this set so the GHCR image and local Compose cannot drift (gh #132).
 ARG LLM_EXTRAS="anthropic"
 ARG INFRA_EXTRAS=""
 ARG OBS_EXTRAS=""
