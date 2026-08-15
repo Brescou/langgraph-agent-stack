@@ -390,6 +390,12 @@ jobs:
         with:
           context: .
           file: infra/Dockerfile
+          # Match the extra set infra/docker-compose.yml's `app` service ships
+          # (OBS_EXTRAS=observability) on top of the Dockerfile defaults, so the
+          # GHCR image cannot drift from local Compose: without it, /metrics is
+          # 404 on the published image and KEDA autoscaling never fires (gh #132).
+          build-args: |
+            OBS_EXTRAS=observability
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
