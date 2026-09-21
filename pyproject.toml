@@ -66,7 +66,7 @@ observability = [
     "prometheus-client>=0.20",
 ]
 mcp = [
-    "mcp>=1.0,<2",
+    "mcp>=1.0,<3",
 ]
 
 [tool.hatch.build.targets.wheel]
