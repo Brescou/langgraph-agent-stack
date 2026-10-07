@@ -18,15 +18,6 @@ updates:
       time: "06:00"
       timezone: UTC
     open-pull-requests-limit: 10
-    # fastapi is pre-1.0, so semver calls 0.135 -> 0.142 a *minor* and the
-    # update-types filter on the python-app group below does not hold it back.
-    # 0.141+ pulls in httpx2 and every Starlette TestClient then dies with
-    # RecursionError inside anyio.BlockingPortal (31 failed, 77 errors). Held
-    # at 0.135.x until #150 resolves; delete this entry with that fix.
-    ignore:
-      - dependency-name: fastapi
-        versions:
-          - ">=0.136"
     groups:
       langchain-ecosystem:
         patterns:

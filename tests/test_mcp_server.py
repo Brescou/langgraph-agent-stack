@@ -141,10 +141,9 @@ class TestMcpFlagOff:
 
         paths = _route_paths(app)
         assert "/mcp" not in paths
-        # Sanity: core routes still present
-        assert any(p.startswith("/health") or p == "/health" for p in paths) or any(
-            "/health" in p for p in paths
-        )
+        # Sanity: core routes still served. Checked over HTTP because
+        # fastapi >= 0.141 keeps included routers out of app.routes.
+        assert mcp_disabled_client.get("/health").status_code == 200
 
 
 class TestMcpFlagOnMount:

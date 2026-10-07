@@ -148,15 +148,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             extra={"connector_id": settings.connector_id},
         )
 
-    # Wire per-pack routers — guard against duplicate registration on test reuse
+    # Wire per-pack routers — guard against duplicate registration on test reuse.
+    # Each include_router() also nests the app lifespan one level deeper, so a
+    # missed duplicate eventually overflows the stack. Track ids on app.state:
+    # fastapi >= 0.141 no longer flattens included routes into app.routes.
     from api.router_factory import build_pack_router
 
-    _existing_prefixes = {
-        getattr(r, "path", "").split("/{")[0] for r in app.routes if hasattr(r, "path")
-    }
+    if not hasattr(app.state, "pack_router_ids"):
+        app.state.pack_router_ids = set()
+    pack_router_ids: set[str] = app.state.pack_router_ids
     for pack_id in PackRegistry.list_packs():
-        expected_prefix = f"/packs/{pack_id}/run"
-        if expected_prefix in _existing_prefixes:
+        if pack_id in pack_router_ids:
             logger.debug(
                 "Pack router already registered — skipping",
                 extra={"pack_id": pack_id},
@@ -165,6 +167,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         pack_cls = PackRegistry.get(pack_id)
         in_schema, out_schema = PackRegistry.get_schemas(pack_id)
         app.include_router(build_pack_router(pack_id, pack_cls, in_schema, out_schema))
+        pack_router_ids.add(pack_id)
         logger.info("Pack router registered", extra={"pack_id": pack_id})
 
     state.shared_memory = create_run_history(settings)
