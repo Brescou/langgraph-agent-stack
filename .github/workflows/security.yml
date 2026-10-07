@@ -254,13 +254,72 @@ jobs:
           retention-days: 30
 
       - name: Run Trivy vulnerability scanner
+        id: trivy_gate
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
         with:
           image-ref: langgraph-agent-stack:scan
           format: table
+          output: trivy-table.txt
           exit-code: "1"
           ignore-unfixed: true
           severity: "HIGH,CRITICAL"
+
+      # Surface the gating table two ways, because the step above is the only
+      # place the flagged CVE IDs appear and a failure there used to be
+      # unreadable outside a browser: the Actions API serves job logs through a
+      # redirect to blob storage, the code-scanning API answers 403 for a
+      # workflow-scoped token, and the check-run annotation carried nothing
+      # beyond "Process completed with exit code 1". That cost three weeks of
+      # not knowing which package was flagged.
+      #
+      #   - $GITHUB_STEP_SUMMARY renders the table on the run page.
+      #   - A workflow error command puts it in the check-run annotations,
+      #     which the REST API does serve, so tooling can read it too.
+      #
+      # The annotation is emitted only when the gate actually failed, so a
+      # clean scan adds no spurious error.
+      - name: Publish Trivy findings to the run summary
+        if: always()
+        env:
+          GATE_OUTCOME: ${{ steps.trivy_gate.outcome }}
+        run: |
+          if [ ! -s trivy-table.txt ]; then
+            echo "Trivy produced no table."
+            echo "## Trivy image scan: no findings table produced" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          cat trivy-table.txt
+          {
+            echo "## Trivy image scan"
+            echo
+            echo "Gate: HIGH and CRITICAL, fixable only (\`ignore-unfixed: true\`)."
+            echo
+            echo '```'
+            cat trivy-table.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$GATE_OUTCOME" = "failure" ]; then
+            # Annotations are length-capped, and the table opens with a
+            # Report Summary row per scanned target (hundreds of them, almost
+            # all zero), which on its own overflows the cap and buries the
+            # findings. Keep only the rows that name a vulnerability, falling
+            # back to the tail of the table if the format ever changes.
+            findings=$(grep -E 'CVE-[0-9]|GHSA-' trivy-table.txt | head -60 || true)
+            if [ -z "$findings" ]; then
+              findings=$(tail -n 60 trivy-table.txt)
+            fi
+            # Workflow commands are one line, so newlines are escaped as %0A
+            # (and literal % as %25 first) to keep this in one annotation
+            # instead of one per finding.
+            encoded=$(
+              printf '%s\n' "$findings" \
+                | sed -e 's/%/%25/g' -e 's/\r$//' \
+                | awk '{ printf "%s%%0A", $0 }'
+            )
+            echo "::error title=Trivy HIGH/CRITICAL findings::${encoded}"
+          fi
 
       - name: Run Trivy (SARIF for GitHub Security tab)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
