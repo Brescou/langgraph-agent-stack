@@ -458,9 +458,7 @@ To add custom patterns, extend `_DANGEROUS_PATTERNS` in `core/security.py`:
 import re
 from core.security import _DANGEROUS_PATTERNS
 
-_DANGEROUS_PATTERNS.append(
-    re.compile(r"your-custom-pattern", re.IGNORECASE)
-)
+_DANGEROUS_PATTERNS.append(re.compile(r"your-custom-pattern", re.IGNORECASE))
 ```
 
 ---
