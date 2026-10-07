@@ -17,6 +17,7 @@ from typing import Annotated, Any, cast
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
 
+import api.guardrails as guardrails
 import api.state as state
 from agents.base_agent import (
     AgentAuthenticationError,
@@ -44,11 +45,7 @@ from api.pack_execution import (
 )
 from control_plane.enforce import effective_stream_timeout_seconds
 from core.config import get_settings
-from core.observability import (
-    outcome_from_http_status,
-    record_pack_run,
-    set_span_attributes,
-)
+from core.observability import record_pack_run, set_span_attributes
 from pack_kernel.base_pack import normalize_pack_stream_event
 from pack_kernel.registry import PackRegistry
 
@@ -156,6 +153,9 @@ def build_pack_router(
 
             validate_pack_body_fields(pack_id, body)
             validate_pack_query(pack_id, pack_primary_text(body))
+            input_verdict = guardrails.screen(
+                pack_id, "input", guardrails.screenable_payload(body), run_id=run_id
+            )
 
             stream_outcome: list[str] = ["success"]
 
@@ -172,16 +172,32 @@ def build_pack_router(
                 )
                 try:
                     last_event: dict[str, Any] | None = None
+                    output_verdict = None
                     async for event in _iter_pack_stream_events(
                         pack_cls_to_use, pack, body
                     ):
                         last_event = event
+                        try:
+                            output_verdict = (
+                                guardrails.screen_stream_event(
+                                    pack_id, event, run_id=run_id
+                                )
+                                or output_verdict
+                            )
+                        except guardrails.GuardrailBlockedError as exc:
+                            stream_outcome[0] = guardrails.GUARDRAIL_BLOCKED_OUTCOME
+                            blocked = guardrails.blocked_stream_event(exc.phase)
+                            yield f"data: {json.dumps(blocked)}\n\n"
+                            return
                         yield f"data: {json.dumps(event, default=str)}\n\n"
                     await create_review_best_effort(
                         run_id=run_id,
                         pack_id=pack_id,
                         session_id=session_id,
                         result_payload=last_event or {},
+                        escalation_reason=guardrails.escalation_reason(
+                            input_verdict, output_verdict
+                        ),
                     )
                 except AgentTimeoutError as exc:
                     stream_outcome[0] = "server_error"
@@ -271,7 +287,7 @@ def build_pack_router(
                 },
             )
         except HTTPException as exc:
-            _record(outcome_from_http_status(exc.status_code))
+            _record(guardrails.pack_run_outcome(exc))
             raise
         except Exception:
             _record("server_error")

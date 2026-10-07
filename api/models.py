@@ -293,6 +293,10 @@ class ReviewEntry(BaseModel):
         default=None, description="Identifier of the human who decided."
     )
     notes: str | None = Field(default=None, description="Reviewer notes.")
+    reason: str | None = Field(
+        default=None,
+        description="Why the run was queued, e.g. a guardrail escalation.",
+    )
 
 
 class ReviewListResponse(BaseModel):

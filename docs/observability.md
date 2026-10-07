@@ -85,6 +85,17 @@ A mock run at $0 still creates cost series (`on_llm_end` increments unconditiona
 | Pack latency p95 by version | `histogram_quantile` on `pack_run_duration_seconds_bucket` |
 | `active_pipelines` (KEDA scaling signal) | `active_pipelines` as a **time series** (gauge returns to 0 after runs) |
 
+### Guardrails (no dashboard panel yet)
+
+Emitted only when `GUARDRAILS_ENABLED=true` and a pack policy names rule sets (`docs/security.md` → Guardrails):
+
+| Metric | Labels |
+|--------|--------|
+| `guardrail_findings_total` | `pack_id`, `phase` (`input` / `output`), `rule_set`, `rule_id`, `action` (`flag` / `escalate` / `block`) |
+| `pack_runs_total{outcome="guardrail_blocked"}` | `pack_id`, `version` — runs rejected by a `block` rule, counted apart from `client_error` / `server_error` |
+
+Cardinality is bounded by configuration: one series per subscribed (pack, phase, rule) and action actually seen. Start with `sum by (pack_id, rule_set, rule_id) (rate(guardrail_findings_total[5m]))`.
+
 ---
 
 ## Seed metrics (visual authoring)

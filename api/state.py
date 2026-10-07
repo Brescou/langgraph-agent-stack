@@ -14,6 +14,7 @@ from typing import Any
 
 from langchain_core.language_models import BaseChatModel
 
+from core.guardrails import RuleSet
 from core.security import (
     IdempotencyStore,
     InMemoryIdempotencyStore,
@@ -49,6 +50,10 @@ input_validator: InputValidator = InputValidator(max_length=2000)
 # Human-review queue for regulated pack outputs (core/review_store.py).
 # Set during lifespan startup; None means review tracking is unavailable.
 review_store: Any | None = None
+
+# Loaded guardrail rule sets by name (core/guardrails). Set on every lifespan
+# startup; None means GUARDRAILS_ENABLED is false and no screening runs.
+guardrail_rule_sets: dict[str, RuleSet] | None = None
 
 # ---------------------------------------------------------------------------
 # Lifecycle flags

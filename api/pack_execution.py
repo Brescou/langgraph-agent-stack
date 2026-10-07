@@ -21,6 +21,7 @@ from typing import Any
 
 from fastapi import HTTPException, status
 
+import api.guardrails as guardrails
 import api.state as state
 from agents.base_agent import (
     AgentAuthenticationError,
@@ -38,11 +39,7 @@ from api.dependencies import (
     validate_pack_query,
 )
 from core.config import get_settings
-from core.observability import (
-    outcome_from_http_status,
-    record_pack_run,
-    set_span_attributes,
-)
+from core.observability import record_pack_run, set_span_attributes
 from core.security import (
     IdempotencyConflictError,
     IdempotencyStatus,
@@ -197,9 +194,16 @@ async def create_review_best_effort(
     pack_id: str,
     session_id: str | None,
     result_payload: dict[str, Any],
+    escalation_reason: str | None = None,
 ) -> None:
-    """Queue a pending human review for a regulated run, without ever failing it."""
-    if state.review_store is None or not pack_requires_human_review(pack_id):
+    """Queue a pending human review, without ever failing the run.
+
+    A review is queued when the pack mandates one or when ``escalation_reason``
+    is set (e.g. a guardrail escalated the run).
+    """
+    if state.review_store is None:
+        return
+    if escalation_reason is None and not pack_requires_human_review(pack_id):
         return
     from core.review_store import summarize_output
 
@@ -209,6 +213,7 @@ async def create_review_best_effort(
         pack_id=pack_id,
         session_id=session_id,
         output_summary=summarize_output(result_payload),
+        reason=escalation_reason,
     )
     try:
         await asyncio.wait_for(
@@ -332,6 +337,9 @@ async def execute_typed_pack_run(
 
         validate_pack_body_fields(pack_id, body)
         query = validate_pack_query(pack_id, pack_primary_text(body))
+        input_verdict = guardrails.screen(
+            pack_id, "input", guardrails.screenable_payload(body), run_id=run_id
+        )
 
         body_hash = hashlib.sha256(body.model_dump_json().encode("utf-8")).hexdigest()
 
@@ -442,6 +450,13 @@ async def execute_typed_pack_run(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
                 ) from exc
 
+            output_verdict = guardrails.screen(
+                pack_id,
+                "output",
+                guardrails.screenable_payload(serialized),
+                run_id=run_id,
+            )
+
             await save_run_best_effort(
                 run_id=run_id,
                 query=query,
@@ -458,6 +473,9 @@ async def execute_typed_pack_run(
                 pack_id=pack_id,
                 session_id=session_id,
                 result_payload=result_payload,
+                escalation_reason=guardrails.escalation_reason(
+                    input_verdict, output_verdict
+                ),
             )
             result = PackRunResult(
                 serialized=serialized,
@@ -483,7 +501,7 @@ async def execute_typed_pack_run(
                 state.release_session(session_id)
 
     except HTTPException as exc:
-        outcome = outcome_from_http_status(exc.status_code)
+        outcome = guardrails.pack_run_outcome(exc)
         raise
     except Exception:
         outcome = "server_error"

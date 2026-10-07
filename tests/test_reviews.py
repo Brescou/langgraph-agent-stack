@@ -124,6 +124,65 @@ class TestReviewStoreBackends:
         )
         assert len(record.output_summary) == 500
 
+    def test_reason_round_trips_and_defaults_to_none(self, store) -> None:
+        store.create(
+            run_id="run-r",
+            pack_id="summariser",
+            reason="guardrail: pii_basic/email (output)",
+        )
+        store.create(run_id="run-no-reason", pack_id="financial_memo")
+
+        assert store.get("run-r").reason == "guardrail: pii_basic/email (output)"
+        assert store.get("run-no-reason").reason is None
+        assert {r.run_id: r.reason for r in store.list_reviews()} == {
+            "run-r": "guardrail: pii_basic/email (output)",
+            "run-no-reason": None,
+        }
+
+
+def test_sqlite_store_adds_reason_column_to_existing_database(tmp_path) -> None:
+    import sqlite3
+
+    path = tmp_path / "legacy.db"
+    legacy = sqlite3.connect(path)
+    legacy.executescript(
+        """
+        CREATE TABLE reviews (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id TEXT NOT NULL UNIQUE,
+            pack_id TEXT NOT NULL,
+            session_id TEXT,
+            status TEXT NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending', 'approved', 'rejected')),
+            output_summary TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            decided_at TEXT,
+            reviewer TEXT,
+            notes TEXT
+        );
+        INSERT INTO reviews (run_id, pack_id, created_at)
+            VALUES ('run-old', 'contract_reviewer', '2026-01-01T00:00:00+00:00');
+        """
+    )
+    legacy.commit()
+    legacy.close()
+
+    migrated = SqliteReviewStore(db_path=str(path))
+    try:
+        old = migrated.get("run-old")
+        assert old is not None
+        assert old.reason is None
+        migrated.create(run_id="run-new", pack_id="summariser", reason="guardrail")
+        assert migrated.get("run-new").reason == "guardrail"
+    finally:
+        migrated.close()
+
+    reopened = SqliteReviewStore(db_path=str(path))
+    try:
+        assert reopened.get("run-new").reason == "guardrail"
+    finally:
+        reopened.close()
+
 
 def test_sqlite_store_persists_across_reopen(tmp_path) -> None:
     path = str(tmp_path / "reviews.db")

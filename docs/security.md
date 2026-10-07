@@ -13,6 +13,7 @@ default, what requires operator configuration, and how to report vulnerabilities
 4. [Required vs Optional Environment Variables](#4-required-vs-optional-environment-variables)
 5. [Kubernetes Hardening](#5-kubernetes-hardening)
 6. [Rate Limiting and Input Validation](#6-rate-limiting-and-input-validation)
+   - [Guardrails (opt-in)](#guardrails-opt-in)
 7. [Automated Security Scanning](#7-automated-security-scanning)
    - [Before going to production (Checkov)](#before-going-to-production-checkov)
 8. [Supply Chain (SBOM & Image Signing)](#8-supply-chain-sbom--image-signing)
@@ -308,6 +309,8 @@ Alternative secret management solutions:
 | `LLM_REQUEST_TIMEOUT_SECONDS` | `120` | Per-call HTTP timeout for synchronous LLM requests (`llm.invoke`). |
 | `MAX_REQUEST_BODY_BYTES` | `1048576` | Max inbound HTTP body size; enforced before JSON parsing. |
 | `STREAM_TIMEOUT_SECONDS` | `120` | Wall-clock timeout for SSE streaming runs. |
+| `GUARDRAILS_ENABLED` | `false` | Opt-in rule-based screening of pack input and output ([Guardrails](#guardrails-opt-in)). |
+| `GUARDRAILS_RULES_PATH` | — | JSON file adding or replacing guardrail rule sets. |
 
 ---
 
@@ -460,6 +463,117 @@ from core.security import _DANGEROUS_PATTERNS
 
 _DANGEROUS_PATTERNS.append(re.compile(r"your-custom-pattern", re.IGNORECASE))
 ```
+
+### Guardrails (opt-in)
+
+`InputValidator` applies the same fixed patterns to every route and always
+rejects. Guardrails (`core/guardrails/`, applied by `api/guardrails.py`) are a
+separate, configurable layer: named regex rule sets that each pack subscribes
+to, for its input and its output, with one of three actions per rule. They are
+**off by default**; with `GUARDRAILS_ENABLED=false` nothing is loaded and no
+request is scanned.
+
+| Variable | Default | Description |
+|---|---|---|
+| `GUARDRAILS_ENABLED` | `false` | Load rule sets at startup and screen the boundaries below. |
+| `GUARDRAILS_RULES_PATH` | — | Optional JSON file of extra or replacement rule sets. |
+
+**Binding.** A pack only gets screened if its `PackPolicy` names rule sets
+(`control_plane/README.md`). No built-in policy does, so enabling the flag alone
+changes nothing:
+
+```python
+import dataclasses
+
+from control_plane import GuardrailPolicy, PolicyRegistry
+
+policy = PolicyRegistry.get("summariser")
+PolicyRegistry.register(
+    dataclasses.replace(
+        policy,
+        guardrails=GuardrailPolicy(
+            input_rule_sets=("prompt_injection", "pii_basic"),
+            output_rule_sets=("pii_basic",),
+        ),
+    )
+)
+```
+
+**Built-in sets** (`core/guardrails/builtin_rules.json`). They all flag except
+in `output_integrity`, so subscribing to them never rejects traffic until you
+choose to:
+
+| Set | Rules | Action |
+|---|---|---|
+| `prompt_injection` | `instruction_override`, `disregard_directive`, `role_confusion_tag`, `system_prefix`, `persona_shift` | flag |
+| `pii_basic` | `email`, `payment_card`, `iban` | flag |
+| `output_integrity` | 8 injection-echo patterns, plus `delimiter_echo` | block (`delimiter_echo`: flag) |
+
+**Rule file.** `GUARDRAILS_RULES_PATH` adds sets, and a set with a built-in name
+replaces that set entirely (rules are not merged):
+
+```json
+{
+  "rule_sets": {
+    "pii_basic": {
+      "rules": [
+        {"id": "email", "pattern": "[\\w.+-]+@[\\w-]+\\.[\\w.]+", "action": "escalate"},
+        {"id": "internal_ticket", "pattern": "\\bINC-\\d{6}\\b", "action": "block",
+         "ignore_case": true, "description": "Internal incident id."}
+      ]
+    }
+  }
+}
+```
+
+Rule keys are `id`, `pattern`, `action`, and optionally `ignore_case`,
+`multiline` and `description`; unknown keys are rejected. With the flag on, the
+app **refuses to start** on an unreadable file, invalid JSON, an unknown key or
+action, a duplicate rule id, an invalid regex, or a policy naming a set that
+does not exist. The error names the file, set and rule.
+
+**Actions.** Every string field of the payload is scanned, and the most severe
+matching action applies:
+
+| Action | Input | Output |
+|---|---|---|
+| `flag` | Audit log + metric; the run continues. | Audit log + metric; the response is returned. |
+| `escalate` | As `flag`, plus a pending review after the run. | As `flag`, plus a pending review; the response is returned. |
+| `block` | HTTP 422 before any LLM call: no cost, no run history, no idempotency record. | HTTP 502: response withheld, run not saved, not stored for idempotency (a retry with the same key runs again). |
+
+A block returns a generic body that does not say which rule fired:
+
+```json
+{"detail": {"code": "guardrail_blocked", "phase": "input", "message": "Request blocked by a guardrail policy."}}
+```
+
+Escalations land in the `/reviews` queue with a `reason` such as
+`guardrail: pii_basic/email (output)`, including for packs that do not mandate
+review. A run that is both regulated and escalated gets a single review.
+
+**Where it applies.** Typed `POST /packs/{id}/run` (and therefore MCP tool
+calls, which map a 422 to `INVALID_PARAMS`), typed `POST /packs/{id}/run/stream`,
+and the legacy `POST /run`, `POST /run/stream` (both under `DEFAULT_PACK_ID`'s
+policy) and `POST /research` (under `research_only`'s policy).
+
+**Streaming limitation.** On SSE routes only the final event is screened
+(`pipeline_completed` on typed streams, `done` on `/run/stream`). An output
+block replaces that event with
+`{"type": "error", "code": "guardrail_blocked", "phase": "output", ...}`, but
+tokens already sent are **not recalled**. If partial output must never reach the
+client, use the non-streaming route for that pack. Input blocks on stream routes
+are a plain HTTP 422, raised before the stream opens.
+
+**Audit trail without PII.** Each finding logs a `guardrail_finding` event with
+`pack_id`, `run_id`, `phase`, `rule_set`, `rule_id`, `field_path` and `action`,
+never the matched text, and increments `guardrail_findings_total`
+(`docs/observability.md`). A blocked run is counted as
+`pack_runs_total{outcome="guardrail_blocked"}`.
+
+**Regulated packs are independent.** The output-integrity guard of regulated
+packs (`domain_packs/common/output_guard.py`) runs on the same engine but always
+uses the built-in `output_integrity` set, whatever the flag and even when the
+rule file redefines `output_integrity`, so an override cannot weaken it.
 
 ---
 

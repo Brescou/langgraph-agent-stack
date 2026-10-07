@@ -54,6 +54,31 @@ async def _init_llm_and_checkpointer(settings: Settings) -> None:
         state.shared_checkpointer = None
 
 
+def _init_guardrails(settings: Settings) -> None:
+    """Load guardrail rule sets when enabled; fail startup on invalid config.
+
+    Runs before any other resource is created so a bad rule file or a policy
+    naming an unknown set stops the process instead of serving unscreened.
+    """
+    state.guardrail_rule_sets = None
+    if not settings.guardrails_enabled:
+        return
+
+    from control_plane.enforce import validate_guardrail_policies
+    from core.guardrails import load_rule_sets
+
+    rule_sets = load_rule_sets(settings.guardrails_rules_path)
+    validate_guardrail_policies(rule_sets)
+    state.guardrail_rule_sets = rule_sets
+    logger.info(
+        "Guardrails enabled",
+        extra={
+            "rule_sets": sorted(rule_sets),
+            "rules_path": str(settings.guardrails_rules_path or ""),
+        },
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage application startup and shutdown resources.
@@ -68,6 +93,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     state.start_time = time.monotonic()
     settings = get_settings()
+
+    _init_guardrails(settings)
 
     if state.rate_limiter is None:
         state.rate_limiter = create_rate_limiter(

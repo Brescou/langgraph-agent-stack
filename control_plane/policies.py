@@ -25,6 +25,18 @@ class ExecutionConstraints:
 
 
 @dataclass(frozen=True, slots=True)
+class GuardrailPolicy:
+    """Rule sets (by name) screened on a pack's input and output.
+
+    Applied only when ``GUARDRAILS_ENABLED`` is true; names must exist in the
+    loaded rule sets or startup fails.
+    """
+
+    input_rule_sets: tuple[str, ...] = ()
+    output_rule_sets: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class PackPolicy:
     """Associates a registered ``pack_id`` with constraints and governance metadata.
 
@@ -40,4 +52,5 @@ class PackPolicy:
     labels: frozenset[str] = field(default_factory=frozenset)
     human_review_required: bool = False
     compliance_disclaimer: str | None = None
+    guardrails: GuardrailPolicy = field(default_factory=GuardrailPolicy)
     extensions: dict[str, Any] = field(default_factory=dict)

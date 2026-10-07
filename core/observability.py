@@ -344,6 +344,7 @@ requests_rejected_during_shutdown: Any | None = None
 llm_retry_attempts_total: Any | None = None
 agent_node_duration_seconds: Any | None = None
 output_guard_findings_total: Any | None = None
+guardrail_findings_total: Any | None = None
 pack_runs_total: Any | None = None
 pack_run_duration_seconds: Any | None = None
 _PROMETHEUS_AVAILABLE = False
@@ -447,6 +448,12 @@ try:
         "rejected by the fail-closed policy",
         ["pack_id", "action"],
     )
+    # rule_set/rule_id cardinality is bounded by the loaded guardrail rule files.
+    guardrail_findings_total = Counter(
+        "guardrail_findings_total",
+        "Guardrail rule matches on pack input or output, by the rule's action",
+        ["pack_id", "phase", "rule_set", "rule_id", "action"],
+    )
     # Pack-run wall duration reuses HTTP buckets (sub-second through SSE timeout).
     pack_runs_total = Counter(
         "pack_runs_total",
@@ -500,6 +507,25 @@ def record_pack_run(
     }
     pack_runs_total.labels(**labels).inc()
     pack_run_duration_seconds.labels(**labels).observe(duration_seconds)
+
+
+def record_guardrail_finding(
+    pack_id: str,
+    phase: str,
+    rule_set: str,
+    rule_id: str,
+    action: str,
+) -> None:
+    """Increment ``guardrail_findings_total`` (no-op without Prometheus)."""
+    if guardrail_findings_total is None:
+        return
+    guardrail_findings_total.labels(
+        pack_id=pack_id or "unknown",
+        phase=phase,
+        rule_set=rule_set,
+        rule_id=rule_id,
+        action=action,
+    ).inc()
 
 
 # ---------------------------------------------------------------------------
