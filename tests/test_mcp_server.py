@@ -153,6 +153,65 @@ class TestMcpFlagOnMount:
         paths = _route_paths(app)
         assert "/mcp" in paths
 
+    def test_restart_drops_the_mount_when_mcp_is_disabled(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A lifespan with the flag off must not keep a /mcp mount from an earlier one.
+
+        Regression for #169: Starlette never unmounts, and the suite reuses one
+        app, so ``test_mcp_not_mounted_when_disabled`` failed whenever a
+        flag-on startup had run first.
+        """
+        from core.config import get_settings
+
+        monkeypatch.setenv("LLM_PROVIDER", "mock")
+        monkeypatch.delenv("API_KEY", raising=False)
+        monkeypatch.setenv("REGULATED_PACKS_ENABLED", "false")
+        monkeypatch.setenv("MCP_SERVER_ENABLED", "true")
+        get_settings.cache_clear()
+
+        from api.main import app
+
+        try:
+            with TestClient(app):
+                assert "/mcp" in _route_paths(app)
+
+            monkeypatch.setenv("MCP_SERVER_ENABLED", "false")
+            get_settings.cache_clear()
+            with TestClient(app) as client:
+                assert "/mcp" not in _route_paths(app)
+                assert "/metrics" in _route_paths(app)
+                assert client.get("/health").status_code == 200
+            assert "/mcp" not in _route_paths(app)
+        finally:
+            get_settings.cache_clear()
+
+    def test_restart_with_mcp_enabled_does_not_stack_mounts(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from core.config import get_settings
+
+        monkeypatch.setenv("LLM_PROVIDER", "mock")
+        monkeypatch.delenv("API_KEY", raising=False)
+        monkeypatch.setenv("REGULATED_PACKS_ENABLED", "false")
+        monkeypatch.setenv("MCP_SERVER_ENABLED", "true")
+        get_settings.cache_clear()
+
+        from api.main import app
+
+        def _mcp_mounts() -> list[Any]:
+            return [
+                route for route in app.routes if getattr(route, "path", None) == "/mcp"
+            ]
+
+        try:
+            with TestClient(app):
+                pass
+            with TestClient(app):
+                assert len(_mcp_mounts()) == 1
+        finally:
+            get_settings.cache_clear()
+
 
 class TestMcpAuth:
     """`/mcp` is not auth-exempt — same Bearer gate as REST when API_KEY is set."""

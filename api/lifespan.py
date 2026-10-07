@@ -199,11 +199,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     state.shared_memory = create_run_history(settings)
 
-    mcp_server = None
-    if settings.mcp_server_enabled:
-        from api.mcp_server import mount_mcp_server
+    # Drop a mount left by a previous lifespan on this same app (tests reuse it).
+    # A second mount would sit in front of a server whose session manager has
+    # already stopped, and a restart with the flag off would still serve /mcp.
+    from api.mcp_server import mount_mcp_server, unmount_mcp_server
 
-        mcp_server = mount_mcp_server(app)
+    unmount_mcp_server(app)
+    mcp_server = mount_mcp_server(app) if settings.mcp_server_enabled else None
 
     logger.info(
         "API server starting up",
@@ -239,4 +241,5 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         state.shared_memory.close()
     if state.review_store is not None:
         state.review_store.close()
+    unmount_mcp_server(app)
     logger.info("Shutdown complete")
