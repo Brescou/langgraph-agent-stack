@@ -16,10 +16,12 @@ import json
 import logging
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from core.guardrails import iter_string_fields, load_builtin_rule_sets
 from core.security import sanitize_log_data, wrap_untrusted_content
 from domain_packs.common.compliance import REGULATED_PACK_IDS
 
@@ -38,67 +40,17 @@ def _record_guard_event(pack_id: str, action: str) -> None:
         output_guard_findings_total.labels(pack_id=pack_id, action=action).inc()
 
 
-# (pattern_id, compiled regex, fail_closed_when_matched)
-_OUTPUT_INTEGRITY_PATTERNS: tuple[tuple[str, re.Pattern[str], bool], ...] = (
-    (
-        "instruction_override",
-        re.compile(
-            r"ignore\s+(?:all\s+)?(?:previous|prior)\s+"
-            r"(?:instructions?|directives?|prompts?|rules?|weaknesses?|gaps?)",
-            re.IGNORECASE,
-        ),
-        True,
-    ),
-    (
-        "instruction_override_short",
-        re.compile(r"ignore\s+the\s+above\b", re.IGNORECASE),
-        True,
-    ),
-    (
-        "instruction_override_prior",
-        re.compile(
-            r"ignore\s+(?:prior|previous)\s+\w+",
-            re.IGNORECASE,
-        ),
-        True,
-    ),
-    (
-        "disregard_directive",
-        re.compile(
-            r"disregard\s+(the\s+)?(above|prior|previous|earlier)",
-            re.IGNORECASE,
-        ),
-        True,
-    ),
-    (
-        "neglect_directive",
-        re.compile(
-            r"neglect\s+(the\s+)?(above|prior|previous|weaknesses?|gaps?)",
-            re.IGNORECASE,
-        ),
-        True,
-    ),
-    (
-        "role_confusion_tag",
-        re.compile(r"</?(system|assistant|user|human|prompt)\s*/?>", re.IGNORECASE),
-        True,
-    ),
-    (
-        "system_prefix",
-        re.compile(r"(?m)^system:\s", re.IGNORECASE),
-        True,
-    ),
-    (
-        "persona_shift",
-        re.compile(r"you are now (?:acting as|a)\s", re.IGNORECASE),
-        True,
-    ),
-    (
-        "delimiter_echo",
-        re.compile(r"BEGIN UNTRUSTED USER CONTENT", re.IGNORECASE),
-        False,
-    ),
-)
+@lru_cache(maxsize=1)
+def output_integrity_patterns() -> tuple[tuple[str, re.Pattern[str], bool], ...]:
+    """Return ``(pattern_id, regex, fail_closed_when_matched)`` for every rule.
+
+    Sourced from the built-in ``output_integrity`` rule set only, never from
+    ``GUARDRAILS_RULES_PATH``, so an override file cannot weaken regulated packs.
+    """
+    rule_set = load_builtin_rule_sets()["output_integrity"]
+    return tuple(
+        (rule.id, rule.pattern, rule.action == "block") for rule in rule_set.rules
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,7 +70,7 @@ def scan_text_for_integrity_signals(
     if not text:
         return []
     findings: list[OutputIntegrityFinding] = []
-    for pattern_id, pattern, fail_closed in _OUTPUT_INTEGRITY_PATTERNS:
+    for pattern_id, pattern, fail_closed in output_integrity_patterns():
         match = pattern.search(text)
         if match is None:
             continue
@@ -140,16 +92,8 @@ def scan_structured_output(
 ) -> list[OutputIntegrityFinding]:
     """Recursively scan all string values in parsed JSON output."""
     findings: list[OutputIntegrityFinding] = []
-    if isinstance(data, str):
-        findings.extend(scan_text_for_integrity_signals(data, field_path=prefix))
-    elif isinstance(data, dict):
-        for key, value in data.items():
-            path = f"{prefix}.{key}"
-            findings.extend(scan_structured_output(value, prefix=path))
-    elif isinstance(data, list):
-        for index, item in enumerate(data):
-            path = f"{prefix}[{index}]"
-            findings.extend(scan_structured_output(item, prefix=path))
+    for field_path, text in iter_string_fields(data, prefix):
+        findings.extend(scan_text_for_integrity_signals(text, field_path=field_path))
     return findings
 
 

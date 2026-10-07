@@ -16,6 +16,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
+import api.guardrails as guardrails
 import api.state as state
 from agents.analyst import AnalysisReport
 from agents.base_agent import (
@@ -34,20 +35,20 @@ from api.dependencies import (
 from api.models import ResearchRequest, ResearchResponse, RunRequest, RunResponse
 from api.pack_execution import (
     SESSION_IN_FLIGHT_DETAIL,
+    create_review_best_effort,
     resolve_pack_version,
     save_run_best_effort,
 )
 from control_plane.enforce import effective_stream_timeout_seconds
 from core.config import Settings, get_settings
-from core.observability import (
-    active_pipelines,
-    outcome_from_http_status,
-    record_pack_run,
-    set_span_attributes,
-)
+from core.guardrails import Verdict
+from core.observability import active_pipelines, record_pack_run, set_span_attributes
 
 router = APIRouter(tags=["Pipeline"])
 logger = logging.getLogger(__name__)
+
+#: ``/research`` runs ResearchAgent directly; it shares the research_only policy.
+RESEARCH_GUARDRAIL_PACK_ID = "research_only"
 
 
 async def _run_in_executor(fn: Any, *args: Any) -> Any:
@@ -65,6 +66,28 @@ async def _run_in_executor(fn: Any, *args: Any) -> Any:
     finally:
         if active_pipelines is not None:
             active_pipelines.dec()
+
+
+async def _queue_escalation_review(
+    *,
+    run_id: str,
+    pack_id: str,
+    session_id: str | None,
+    result_payload: dict[str, Any],
+    input_verdict: Verdict | None,
+    output_verdict: Verdict | None,
+) -> None:
+    """Queue a review when a guardrail escalated a legacy-route run."""
+    reason = guardrails.escalation_reason(input_verdict, output_verdict)
+    if reason is None:
+        return
+    await create_review_best_effort(
+        run_id=run_id,
+        pack_id=pack_id,
+        session_id=session_id,
+        result_payload=result_payload,
+        escalation_reason=reason,
+    )
 
 
 @router.post(
@@ -114,6 +137,9 @@ async def run_pipeline(
         session_id = body.session_id or str(uuid.uuid4())
         run_id = str(uuid.uuid4())
         set_span_attributes({"pack_id": pack_id, "run_id": run_id})
+        input_verdict = guardrails.screen(
+            pack_id, "input", {"query": query}, run_id=run_id
+        )
         logger.info(
             "POST /run — pipeline started",
             extra={
@@ -206,12 +232,26 @@ async def run_pipeline(
                     detail="An unexpected error occurred.",
                 ) from exc
 
+            output_verdict = guardrails.screen(
+                pack_id,
+                "output",
+                guardrails.screenable_payload(response),
+                run_id=run_id,
+            )
             await save_run_best_effort(
                 run_id=run_id,
                 query=query,
                 result=report_payload,
                 metadata={"session_id": session_id, "agent": "MultiAgentGraph"},
                 session_id=session_id,
+            )
+            await _queue_escalation_review(
+                run_id=run_id,
+                pack_id=pack_id,
+                session_id=session_id,
+                result_payload=report_payload,
+                input_verdict=input_verdict,
+                output_verdict=output_verdict,
             )
         finally:
             if body.session_id:
@@ -229,7 +269,7 @@ async def run_pipeline(
         outcome = "success"
         return response
     except HTTPException as exc:
-        outcome = outcome_from_http_status(exc.status_code)
+        outcome = guardrails.pack_run_outcome(exc)
         raise
     except Exception:
         outcome = "server_error"
@@ -247,6 +287,7 @@ async def _stream_pipeline(
     pack_id: str,
     pack_version: str,
     stream_outcome: list[str],
+    input_verdict: Verdict | None = None,
 ) -> AsyncGenerator[str, None]:
     """Async generator that streams the pipeline execution as SSE events."""
     if active_pipelines is not None:
@@ -301,14 +342,6 @@ async def _stream_pipeline(
             },
         )
 
-        await save_run_best_effort(
-            run_id=run_id,
-            query=query,
-            result=report.to_dict(),
-            metadata={"session_id": session_id, "agent": "stream_pipeline"},
-            session_id=session_id,
-        )
-
         done_payload = {
             "type": "done",
             "run_id": run_id,
@@ -320,6 +353,34 @@ async def _stream_pipeline(
             "confidence": report.confidence,
             "research_summary": report.research_summary,
         }
+        try:
+            output_verdict = guardrails.screen(
+                pack_id,
+                "output",
+                {key: value for key, value in done_payload.items() if key != "type"},
+                run_id=run_id,
+            )
+        except guardrails.GuardrailBlockedError as exc:
+            stream_outcome[0] = guardrails.GUARDRAIL_BLOCKED_OUTCOME
+            yield f"data: {json.dumps(guardrails.blocked_stream_event(exc.phase))}\n\n"
+            return
+
+        report_payload = report.to_dict()
+        await save_run_best_effort(
+            run_id=run_id,
+            query=query,
+            result=report_payload,
+            metadata={"session_id": session_id, "agent": "stream_pipeline"},
+            session_id=session_id,
+        )
+        await _queue_escalation_review(
+            run_id=run_id,
+            pack_id=pack_id,
+            session_id=session_id,
+            result_payload=report_payload,
+            input_verdict=input_verdict,
+            output_verdict=output_verdict,
+        )
         yield f"data: {json.dumps(done_payload)}\n\n"
 
     except AgentTimeoutError as exc:
@@ -415,6 +476,9 @@ async def run_stream(
         run_id = str(uuid.uuid4())
         set_span_attributes({"pack_id": pack_id, "run_id": run_id})
         stream_timeout = effective_stream_timeout_seconds(pack_id, settings)
+        input_verdict = guardrails.screen(
+            pack_id, "input", {"query": query}, run_id=run_id
+        )
 
         logger.info(
             "POST /run/stream — pipeline started",
@@ -443,6 +507,7 @@ async def run_stream(
                         pack_id=pack_id,
                         pack_version=used_version,
                         stream_outcome=stream_outcome,
+                        input_verdict=input_verdict,
                     ):
                         yield event
             except TimeoutError:
@@ -463,7 +528,7 @@ async def run_stream(
             },
         )
     except HTTPException as exc:
-        _record(outcome_from_http_status(exc.status_code))
+        _record(guardrails.pack_run_outcome(exc))
         raise
     except Exception:
         _record("server_error")
@@ -508,6 +573,9 @@ async def run_research(
 
     session_id = body.session_id or str(uuid.uuid4())
     run_id = str(uuid.uuid4())
+    input_verdict = guardrails.screen(
+        RESEARCH_GUARDRAIL_PACK_ID, "input", {"query": query}, run_id=run_id
+    )
     logger.info(
         "POST /research — started",
         extra={
@@ -587,12 +655,26 @@ async def run_research(
             detail="An unexpected error occurred.",
         ) from exc
 
+    output_verdict = guardrails.screen(
+        RESEARCH_GUARDRAIL_PACK_ID,
+        "output",
+        guardrails.screenable_payload(response),
+        run_id=run_id,
+    )
     await save_run_best_effort(
         run_id=run_id,
         query=query,
         result=result_payload,
         metadata={"session_id": session_id, "agent": "ResearchAgent"},
         session_id=session_id,
+    )
+    await _queue_escalation_review(
+        run_id=run_id,
+        pack_id=RESEARCH_GUARDRAIL_PACK_ID,
+        session_id=session_id,
+        result_payload=result_payload,
+        input_verdict=input_verdict,
+        output_verdict=output_verdict,
     )
 
     logger.info(

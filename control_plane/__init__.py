@@ -8,10 +8,12 @@ via ``control_plane.enforce`` at request boundaries.
 from control_plane.enforce import (
     effective_budget_usd,
     effective_stream_timeout_seconds,
+    guardrail_rule_sets,
+    validate_guardrail_policies,
     validate_pack_body,
     validate_query_for_pack,
 )
-from control_plane.policies import ExecutionConstraints, PackPolicy
+from control_plane.policies import ExecutionConstraints, GuardrailPolicy, PackPolicy
 from control_plane.registry import PolicyRegistry
 from domain_packs.common.compliance import (
     CONTRACT_REVIEWER_DISCLAIMER,
@@ -109,10 +111,13 @@ for _policy in _BUILTIN_POLICIES:
 
 __all__ = [
     "ExecutionConstraints",
+    "GuardrailPolicy",
     "PackPolicy",
     "PolicyRegistry",
     "effective_budget_usd",
     "effective_stream_timeout_seconds",
+    "guardrail_rule_sets",
+    "validate_guardrail_policies",
     "validate_pack_body",
     "validate_query_for_pack",
 ]

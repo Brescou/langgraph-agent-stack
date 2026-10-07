@@ -4,10 +4,12 @@ control_plane/enforce.py — Apply registered pack policies at API boundaries.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from control_plane.registry import PolicyRegistry
 from core.config import Settings
+from core.guardrails import GuardrailConfigError, GuardrailPhase, RuleSet
 from core.security import InputValidator
 
 
@@ -28,6 +30,44 @@ def effective_stream_timeout_seconds(pack_id: str, settings: Settings) -> float:
     if policy is None or policy.constraints.stream_timeout_seconds is None:
         return timeout
     return min(timeout, policy.constraints.stream_timeout_seconds)
+
+
+def guardrail_rule_sets(
+    pack_id: str,
+    phase: GuardrailPhase,
+    loaded: Mapping[str, RuleSet],
+) -> list[RuleSet]:
+    """Resolve the rule sets a pack's policy subscribes to for ``phase``, in order.
+
+    Names were validated at startup by :func:`validate_guardrail_policies`.
+    """
+    policy = PolicyRegistry.get(pack_id)
+    if policy is None:
+        return []
+    names = (
+        policy.guardrails.input_rule_sets
+        if phase == "input"
+        else policy.guardrails.output_rule_sets
+    )
+    return [loaded[name] for name in names]
+
+
+def validate_guardrail_policies(loaded: Mapping[str, RuleSet]) -> None:
+    """Fail when any registered policy references a rule set that is not loaded."""
+    for pack_id in PolicyRegistry.list_policies():
+        policy = PolicyRegistry.get(pack_id)
+        if policy is None:
+            continue
+        referenced = (
+            *policy.guardrails.input_rule_sets,
+            *policy.guardrails.output_rule_sets,
+        )
+        for name in referenced:
+            if name not in loaded:
+                raise GuardrailConfigError(
+                    f"Pack policy {pack_id!r} references unknown guardrail rule "
+                    f"set {name!r}; loaded sets: {sorted(loaded)}"
+                )
 
 
 def validate_query_for_pack(

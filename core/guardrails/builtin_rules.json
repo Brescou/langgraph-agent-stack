@@ -1,0 +1,121 @@
+{
+  "rule_sets": {
+    "output_integrity": {
+      "rules": [
+        {
+          "id": "instruction_override",
+          "pattern": "ignore\\s+(?:all\\s+)?(?:previous|prior)\\s+(?:instructions?|directives?|prompts?|rules?|weaknesses?|gaps?)",
+          "ignore_case": true,
+          "action": "block",
+          "description": "Output echoes an instruction-override directive."
+        },
+        {
+          "id": "instruction_override_short",
+          "pattern": "ignore\\s+the\\s+above\\b",
+          "ignore_case": true,
+          "action": "block"
+        },
+        {
+          "id": "instruction_override_prior",
+          "pattern": "ignore\\s+(?:prior|previous)\\s+\\w+",
+          "ignore_case": true,
+          "action": "block"
+        },
+        {
+          "id": "disregard_directive",
+          "pattern": "disregard\\s+(the\\s+)?(above|prior|previous|earlier)",
+          "ignore_case": true,
+          "action": "block"
+        },
+        {
+          "id": "neglect_directive",
+          "pattern": "neglect\\s+(the\\s+)?(above|prior|previous|weaknesses?|gaps?)",
+          "ignore_case": true,
+          "action": "block"
+        },
+        {
+          "id": "role_confusion_tag",
+          "pattern": "</?(system|assistant|user|human|prompt)\\s*/?>",
+          "ignore_case": true,
+          "action": "block"
+        },
+        {
+          "id": "system_prefix",
+          "pattern": "(?m)^system:\\s",
+          "ignore_case": true,
+          "action": "block"
+        },
+        {
+          "id": "persona_shift",
+          "pattern": "you are now (?:acting as|a)\\s",
+          "ignore_case": true,
+          "action": "block"
+        },
+        {
+          "id": "delimiter_echo",
+          "pattern": "BEGIN UNTRUSTED USER CONTENT",
+          "ignore_case": true,
+          "action": "flag",
+          "description": "Output echoes the untrusted-content delimiter."
+        }
+      ]
+    },
+    "prompt_injection": {
+      "rules": [
+        {
+          "id": "instruction_override",
+          "pattern": "ignore\\s+(?:all\\s+)?(?:previous|prior|above)\\s+(?:instructions?|directives?|prompts?|rules?)",
+          "ignore_case": true,
+          "action": "flag",
+          "description": "Input asks the model to ignore its instructions."
+        },
+        {
+          "id": "disregard_directive",
+          "pattern": "disregard\\s+(the\\s+)?(above|prior|previous|earlier)",
+          "ignore_case": true,
+          "action": "flag"
+        },
+        {
+          "id": "role_confusion_tag",
+          "pattern": "</?(system|assistant|user|human|prompt)\\s*/?>",
+          "ignore_case": true,
+          "action": "flag"
+        },
+        {
+          "id": "system_prefix",
+          "pattern": "(?m)^system:\\s",
+          "ignore_case": true,
+          "action": "flag"
+        },
+        {
+          "id": "persona_shift",
+          "pattern": "you are now (?:acting as|a)\\s",
+          "ignore_case": true,
+          "action": "flag"
+        }
+      ]
+    },
+    "pii_basic": {
+      "rules": [
+        {
+          "id": "email",
+          "pattern": "[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)*\\.[A-Za-z]{2,}",
+          "action": "flag",
+          "description": "Email address."
+        },
+        {
+          "id": "payment_card",
+          "pattern": "\\b(?:\\d[ -]?){12,18}\\d\\b",
+          "action": "flag",
+          "description": "13-19 digit run shaped like a payment card number (no Luhn check)."
+        },
+        {
+          "id": "iban",
+          "pattern": "\\b[A-Z]{2}\\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,3})?\\b",
+          "action": "flag",
+          "description": "IBAN-shaped string (no mod-97 check)."
+        }
+      ]
+    }
+  }
+}

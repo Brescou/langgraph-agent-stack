@@ -584,6 +584,23 @@ class Settings(BaseSettings):
         ),
     )
 
+    guardrails_enabled: bool = Field(
+        default=False,
+        validation_alias="GUARDRAILS_ENABLED",
+        description=(
+            "When true, screen pack input/output with the rule sets each pack "
+            "policy subscribes to (control_plane GuardrailPolicy). When false "
+            "(default), no rule file is read and no screening runs."
+        ),
+    )
+    guardrails_rules_path: Path | None = Field(
+        default=None,
+        validation_alias="GUARDRAILS_RULES_PATH",
+        description=(
+            "Optional JSON file whose rule sets replace built-in sets by name or "
+            "add new ones. See core/guardrails/loader.py for the format."
+        ),
+    )
     mcp_server_enabled: bool = Field(
         default=False,
         validation_alias="MCP_SERVER_ENABLED",

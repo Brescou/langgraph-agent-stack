@@ -91,6 +91,13 @@ class ReviewRecord(BaseModel):
     notes: str | None = Field(
         default=None, description="Optional free-text reviewer notes."
     )
+    reason: str | None = Field(
+        default=None,
+        description=(
+            "Why the run was queued when the pack does not mandate review, "
+            "e.g. a guardrail escalation."
+        ),
+    )
 
 
 class ReviewNotFoundError(KeyError):
@@ -112,6 +119,7 @@ class ReviewStoreBackend(Protocol):
         pack_id: str,
         session_id: str | None = None,
         output_summary: str = "",
+        reason: str | None = None,
     ) -> ReviewRecord:
         """Create a pending review for *run_id*. Raises ValueError on duplicate."""
         ...
@@ -176,6 +184,7 @@ class InMemoryReviewStore:
         pack_id: str,
         session_id: str | None = None,
         output_summary: str = "",
+        reason: str | None = None,
     ) -> ReviewRecord:
         if not run_id or not run_id.strip():
             raise ValueError("create: run_id must not be empty.")
@@ -187,6 +196,7 @@ class InMemoryReviewStore:
             session_id=session_id,
             output_summary=output_summary[:OUTPUT_SUMMARY_MAX_CHARS],
             created_at=_utc_now_iso(),
+            reason=reason,
         )
         with self._lock:
             if run_id in self._records:
@@ -268,10 +278,16 @@ class SqliteReviewStore:
         created_at TEXT NOT NULL,
         decided_at TEXT,
         reviewer TEXT,
-        notes TEXT
+        notes TEXT,
+        reason TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_reviews_status_id ON reviews (status, id DESC);
     """
+
+    _COLUMNS = (
+        "run_id, pack_id, session_id, status, output_summary, "
+        "created_at, decided_at, reviewer, notes, reason"
+    )
 
     def __init__(self, db_path: str = "./data/review_store.db") -> None:
         if db_path == ":memory:":
@@ -296,7 +312,17 @@ class SqliteReviewStore:
         self._lock = threading.Lock()
         with self._lock:
             self._conn.executescript(self._SCHEMA)
+            self._migrate()
             self._conn.commit()
+
+    def _migrate(self) -> None:
+        """Add columns introduced after a database was first created."""
+        existing = {
+            row["name"]
+            for row in self._conn.execute("PRAGMA table_info(reviews)").fetchall()
+        }
+        if "reason" not in existing:
+            self._conn.execute("ALTER TABLE reviews ADD COLUMN reason TEXT")
 
     def create(
         self,
@@ -305,6 +331,7 @@ class SqliteReviewStore:
         pack_id: str,
         session_id: str | None = None,
         output_summary: str = "",
+        reason: str | None = None,
     ) -> ReviewRecord:
         if not run_id or not run_id.strip():
             raise ValueError("create: run_id must not be empty.")
@@ -316,9 +343,10 @@ class SqliteReviewStore:
             try:
                 self._conn.execute(
                     "INSERT INTO reviews "
-                    "(run_id, pack_id, session_id, status, output_summary, created_at) "
-                    "VALUES (?, ?, ?, 'pending', ?, ?)",
-                    (run_id, pack_id, session_id, summary, created_at),
+                    "(run_id, pack_id, session_id, status, output_summary, "
+                    "created_at, reason) "
+                    "VALUES (?, ?, ?, 'pending', ?, ?, ?)",
+                    (run_id, pack_id, session_id, summary, created_at, reason),
                 )
                 self._conn.commit()
             except sqlite3.IntegrityError as exc:
@@ -335,14 +363,13 @@ class SqliteReviewStore:
             session_id=session_id,
             output_summary=summary,
             created_at=created_at,
+            reason=reason,
         )
 
     def get(self, run_id: str) -> ReviewRecord | None:
         with self._lock:
             row = self._conn.execute(
-                "SELECT run_id, pack_id, session_id, status, output_summary, "
-                "created_at, decided_at, reviewer, notes "
-                "FROM reviews WHERE run_id = ?",
+                f"SELECT {self._COLUMNS} FROM reviews WHERE run_id = ?",
                 (run_id,),
             ).fetchone()
         return self._row_to_record(row) if row is not None else None
@@ -355,10 +382,7 @@ class SqliteReviewStore:
         offset: int = 0,
     ) -> list[ReviewRecord]:
         _validate_list_args(limit, offset)
-        base = (
-            "SELECT run_id, pack_id, session_id, status, output_summary, "
-            "created_at, decided_at, reviewer, notes FROM reviews"
-        )
+        base = f"SELECT {self._COLUMNS} FROM reviews"
         with self._lock:
             if status is None:
                 rows = self._conn.execute(
@@ -425,6 +449,7 @@ class SqliteReviewStore:
             decided_at=row["decided_at"],
             reviewer=row["reviewer"],
             notes=row["notes"],
+            reason=row["reason"],
         )
 
 
