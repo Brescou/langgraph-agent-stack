@@ -49,7 +49,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Install uv
-        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v8.3.2 (SHA verified)
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v8.3.2 (SHA verified)
         with:
           version: ${{ env.UV_VERSION }}
 
@@ -84,7 +84,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Install uv
-        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v8.3.2 (SHA verified)
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v8.3.2 (SHA verified)
         with:
           version: ${{ env.UV_VERSION }}
 
@@ -121,7 +121,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Install uv
-        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v8.3.2 (SHA verified)
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v8.3.2 (SHA verified)
         with:
           version: ${{ env.UV_VERSION }}
 
@@ -179,7 +179,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Install uv
-        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v8.3.2 (SHA verified)
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v8.3.2 (SHA verified)
         with:
           version: ${{ env.UV_VERSION }}
 
@@ -231,7 +231,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Install uv
-        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v8.3.2 (SHA verified)
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v8.3.2 (SHA verified)
         with:
           version: ${{ env.UV_VERSION }}
 
@@ -266,7 +266,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Install uv
-        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v8.3.2 (SHA verified)
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v8.3.2 (SHA verified)
         with:
           version: ${{ env.UV_VERSION }}
 
@@ -306,7 +306,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Install uv
-        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v8.3.2 (SHA verified)
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v8.3.2 (SHA verified)
         with:
           version: ${{ env.UV_VERSION }}
 
@@ -403,7 +403,7 @@ jobs:
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache
 
       - name: Generate SBOM (Syft / SPDX)
-        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26  # v0.24.2
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c  # v0.24.3
         with:
           image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.push.outputs.digest }}
           format: spdx-json
