@@ -3597,16 +3597,16 @@ wheels = [
 
 [[package]]
 name = "redis"
-version = "7.4.0"
+version = "8.1.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/7b/7f/3759b1d0d72b7c92f0d70ffd9dc962b7b7b5ee74e135f9d7d8ab06b8a318/redis-7.4.0.tar.gz", hash = "sha256:64a6ea7bf567ad43c964d2c30d82853f8df927c5c9017766c55a1d1ed95d18ad", size = 4943913, upload-time = "2026-03-24T09:14:37.53Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a8/99/604f0b666d4c616d891cf77ebb9db6bb21601344c051aebf1b72b9ff915f/redis-8.1.0.tar.gz", hash = "sha256:6e1a19beef9225c83efd689c7e6b7da2d5215b1f42cd13b7fc3714d0a09c7b25", size = 5254356, upload-time = "2026-07-30T08:51:00.269Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/74/3a/95deec7db1eb53979973ebd156f3369a72732208d1391cd2e5d127062a32/redis-7.4.0-py3-none-any.whl", hash = "sha256:a9c74a5c893a5ef8455a5adb793a31bb70feb821c86eccb62eebef5a19c429ec", size = 409772, upload-time = "2026-03-24T09:14:35.968Z" },
+    { url = "https://files.pythonhosted.org/packages/66/9d/c5731f6e3608663d4d3656fd8d3aecee8b509c3082818f5a13eae925baea/redis-8.1.0-py3-none-any.whl", hash = "sha256:a4fe1aac3d3b3cc791d4b3d5931c5a956045dc951ee74d1c913ee3ac4d2ee9fb", size = 560618, upload-time = "2026-07-30T08:50:58.497Z" },
 ]
 
 [[package]]
 name = "redisvl"
-version = "0.16.0"
+version = "0.27.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jsonpath-ng" },
@@ -3618,9 +3618,9 @@ dependencies = [
     { name = "redis" },
     { name = "tenacity" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c7/cf/a41c9b547d46a1945b3a154c304efdb0e10df8c8117a333382522f915b6a/redisvl-0.16.0.tar.gz", hash = "sha256:992c0b8c305fbcd89f6b39fb75f1cd708ac7f8d2cf332bd08a2ad49f67f610c4", size = 874578, upload-time = "2026-03-13T12:56:31.137Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e1/a9/e1b9e23febbb3c2c5ab2ee3a3072d657fb39c6e35d18514a414ff19c31e9/redisvl-0.27.2.tar.gz", hash = "sha256:9a08c7ce107056d7aa9cc8e390d049350b1c7acc2801e34bd731f4dd014a1d09", size = 1354907, upload-time = "2026-09-10T10:51:36.614Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/40/7d/6685ad622785f9b78772ab36ffd00cf9b957b19a4ec846dd72dc420e1b89/redisvl-0.16.0-py3-none-any.whl", hash = "sha256:af11e4b3bd2c23241f715d6979afeb8a738bee83551b538bed35cca025006114", size = 199510, upload-time = "2026-03-13T12:56:29.239Z" },
+    { url = "https://files.pythonhosted.org/packages/2f/f0/ad05c7f9b1830301ac90858f5b2da1f090119c736cbac748b6043546a056/redisvl-0.27.2-py3-none-any.whl", hash = "sha256:d6fb9138b17f01baaa7fd9c2f1476e3f30078dec1baff01867ad996683985843", size = 424647, upload-time = "2026-09-10T10:51:35.148Z" },
 ]
 
 [[package]]
