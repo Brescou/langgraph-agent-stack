@@ -802,6 +802,27 @@ def test_run_returns_503_when_llm_not_configured() -> None:
     assert response.status_code == 503
 
 
+def test_restarting_the_app_does_not_reinclude_pack_routers() -> None:
+    """A second lifespan startup on the same app must not include pack routers again.
+
+    Regression test for issue 150: fastapi >= 0.141 stores included routers as a
+    single ``_IncludedRouter`` entry without a ``path``, so the guard missed them
+    and every startup nested one more lifespan per pack until RecursionError.
+    """
+    from api.main import app
+
+    with TestClient(app):
+        pass
+    routes_after_first_startup = len(app.routes)
+    lifespan_after_first_startup = app.router.lifespan_context
+
+    with TestClient(app):
+        pass
+
+    assert len(app.routes) == routes_after_first_startup
+    assert app.router.lifespan_context is lifespan_after_first_startup
+
+
 # ---------------------------------------------------------------------------
 # SSE done event and timeout tests
 # ---------------------------------------------------------------------------
