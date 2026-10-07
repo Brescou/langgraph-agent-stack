@@ -242,7 +242,7 @@ make infra-check   # helm lint + kubeconform + checkov
 |---------|-------------|
 | `POST /run` returns **502** with `LLM provider 'anthropic' rejected the request credentials` | Your API key is missing or invalid. Set `ANTHROPIC_API_KEY` (or your provider's key) in `.env`, or set `LLM_PROVIDER=mock` to run without one. |
 | Responses say `Mock insight 1: Key trend identified.` | You are on `LLM_PROVIDER=mock` (deterministic canned output, $0). Set a real provider + key in `.env`. |
-| `GET /metrics` returns **404** | Prometheus metrics need the observability extra: `uv sync --extra observability`. Compose local image includes the extra via `OBS_EXTRAS`; published GHCR image does not yet (#132). |
+| `GET /metrics` returns **404** | Prometheus metrics need the observability extra: `uv sync --extra observability`. The Compose image and the published GHCR image both build with `OBS_EXTRAS=observability` (#132), so a 404 means a locally built image without the arg, or a GHCR tag published before that fix. A **307** is not a failure: `/metrics` is a mount, so the slashless path redirects to `/metrics/`. Use `curl -L`. |
 | Regulated pack (`talent_screening`, `contract_reviewer`, …) returns **403** | Expected: these packs are gated behind `REGULATED_PACKS_ENABLED=false` until you complete the pack's `COMPLIANCE.md`. A **422** means your request body doesn't match the pack's input schema — check `/docs`. |
 | **402** on `/run` or a pack route | The per-run USD budget (`PACK_DEFAULT_BUDGET_USD`) was exceeded. Raise it or unset it. |
 | `/docs` is missing | Interactive docs are disabled when `ENVIRONMENT=production`. |
@@ -292,7 +292,7 @@ langgraph-agent-stack/
 | Doc | Contents |
 |-----|----------|
 | [docs/deploy.md](docs/deploy.md) | Cloud deploy runbook (EKS/GKE/AKS apply, verify, destroy) |
-| [docs/observability.md](docs/observability.md) | Compose Grafana profile, dashboard import, PromQL constraints, #132 |
+| [docs/observability.md](docs/observability.md) | Compose Grafana profile, dashboard import, PromQL constraints, GHCR `/metrics` |
 | [docs/security.md](docs/security.md) | Auth, secrets, K8s hardening, CI scans, supply chain, Checkov prod gate |
 | [domain_packs/README.md](domain_packs/README.md) | Pack catalogue and authoring |
 | [connectors/README.md](connectors/README.md) | Connector contract and wiring |

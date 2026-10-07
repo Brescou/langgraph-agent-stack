@@ -2,7 +2,7 @@
 
 Local Compose can scrape the API and provision three Grafana dashboards against the metrics that already exist (`pack_run_cost_usd_total`, HTTP counters/histograms, `pack_runs_total`, `pack_run_duration_seconds`, `active_pipelines`). This is a **local profile**, not a Helm add-on: Grafana is not in the chart. Operators with an existing Grafana import the JSON files below.
 
-Helm `ServiceMonitor` / KEDA still expect `GET /metrics` on the running image. The published GHCR image returns **404** on `/metrics` until [#132](https://github.com/Brescou/langgraph-agent-stack/issues/132) (GHCR `OBS_EXTRAS=observability` build-arg). Do not treat this Compose profile as a substitute for that image.
+Helm `ServiceMonitor` and KEDA expect `GET /metrics` on the running image, which the published GHCR image now serves: the publish job builds it with `OBS_EXTRAS=observability` ([#132](https://github.com/Brescou/langgraph-agent-stack/issues/132)). Images published before that fix return 404, see [GHCR, Helm, and KEDA](#ghcr-helm-and-keda) below.
 
 ---
 
@@ -112,12 +112,16 @@ curl -X POST http://localhost:8000/packs/research_only/run \
 
 ---
 
-## GHCR, Helm, and KEDA (#132)
+## GHCR, Helm, and KEDA
 
-| Surface | `/metrics` today |
-|---------|------------------|
+| Surface | `/metrics` |
+|---------|------------|
 | Local Compose (`OBS_EXTRAS=observability` build-arg) | **200** |
 | `uv sync --extra observability` + uvicorn | **200** |
-| Published **GHCR** image | **404** until [#132](https://github.com/Brescou/langgraph-agent-stack/issues/132) |
+| Published **GHCR** image | **200** since [#132](https://github.com/Brescou/langgraph-agent-stack/issues/132) |
 
-Helm `ServiceMonitor` and KEDA (`active_pipelines`) need an image that actually serves `/metrics`. Until #132 lands, do **not** expect cluster scrape or HPA-from-Prometheus to work against GHCR. This PR does not add Grafana to Helm or GHCR `build-args`.
+Helm `ServiceMonitor` and KEDA (`active_pipelines`) need an image that actually serves `/metrics`, which the published image now does: the publish job passes `OBS_EXTRAS=observability` as a build-arg, and `tests/smoke_test_docker.sh` builds with the same arg and fails the `docker-smoke` job if `/metrics` stops answering 200 or stops exposing `active_pipelines`. `tests/test_image_extras.py` asserts the publish job, the smoke test and the Compose `app` service all still carry that build-arg and agree, since each hardcodes it independently.
+
+Images published **before** #132 landed still return 404. Pull a tag built after it, or check with `docker run --rm <image> python -c "import prometheus_client"`.
+
+One detail if you write your own probe: `/metrics` is a Starlette mount, so a request to the slashless path answers **307** redirecting to `/metrics/`. Prometheus and the ServiceMonitor follow redirects, and so does `curl -L`; a bare `curl` does not. Grafana is still not in the Helm chart, by design.

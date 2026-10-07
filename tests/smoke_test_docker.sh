@@ -120,7 +120,15 @@ fi
 # The ServiceMonitor scrapes /metrics and the ScaledObject queries
 # active_pipelines; a 404 here means autoscaling silently never fires on the
 # published image (gh #132).
-METRICS_CODE=$(curl -sf -o /tmp/smoke-metrics.txt -w "%{http_code}" "http://localhost:$PORT/metrics" || true)
+# -L is required, not optional: api/app.py mounts the metrics ASGI app with
+# app.mount("/metrics", ...), and a Starlette mount redirects the slashless
+# path to the trailing-slash one, so a bare curl sees 307 rather than 200.
+# TestClient follows redirects by default, which is why tests/test_metrics.py
+# never caught this. Keep the URL slashless: that is what the Helm
+# ServiceMonitor and infra/prometheus/prometheus.yml scrape, and Prometheus
+# follows redirects too. Without the extra nothing is mounted at all and both
+# paths 404, so the check still discriminates.
+METRICS_CODE=$(curl -sfL -o /tmp/smoke-metrics.txt -w "%{http_code}" "http://localhost:$PORT/metrics" || true)
 if [ "$METRICS_CODE" = "200" ]; then
     echo "[smoke] ✓ /metrics returns 200"
 else
