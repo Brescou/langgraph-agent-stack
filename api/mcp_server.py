@@ -27,6 +27,9 @@ logger = logging.getLogger(__name__)
 
 _MCP_IMPORT_HINT = "Install with: uv sync --extra mcp"
 
+#: Starlette mount path. ``Mount.path`` is stored without a trailing slash.
+_MCP_MOUNT_PATH = "/mcp"
+
 
 def _ensure_mcp_installed() -> None:
     """Raise a clear ImportError when the optional ``mcp`` extra is missing."""
@@ -180,7 +183,7 @@ def mount_mcp_server(app: FastAPI) -> Any:
     # mounted on the FastAPI app, so Bearer API_KEY (plus existing middleware)
     # is the auth guardrail, not Host allowlisting.
     app.mount(
-        "/mcp",
+        _MCP_MOUNT_PATH,
         mcp_server.streamable_http_app(
             streamable_http_path="/",
             stateless_http=True,
@@ -191,3 +194,27 @@ def mount_mcp_server(app: FastAPI) -> Any:
     )
     logger.info("MCP streamable HTTP mounted at /mcp")
     return mcp_server
+
+
+def unmount_mcp_server(app: FastAPI) -> bool:
+    """Remove every previously mounted ``/mcp`` route.
+
+    Starlette keeps a mount for the life of the process. The test suite reuses
+    one ``FastAPI`` instance across lifespans, so a mount left by
+    ``MCP_SERVER_ENABLED=true`` would still be routed after a restart with the
+    flag off, and a second startup with the flag on would stack a second mount
+    in front of a server whose session manager is no longer running.
+
+    Returns:
+        True when at least one mount was removed.
+    """
+    from starlette.routing import Mount
+
+    removed = False
+    for route in list(app.router.routes):
+        if isinstance(route, Mount) and route.path == _MCP_MOUNT_PATH:
+            app.router.routes.remove(route)
+            removed = True
+    if removed:
+        logger.info("MCP streamable HTTP unmounted from /mcp")
+    return removed
