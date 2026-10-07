@@ -102,7 +102,9 @@ Open `pack_kernel/builtin_packs.py` and add your class to the registration list 
 
 ```python
 import pack_kernel  # noqa: F401
-from api.lifespan import register_builtin_packs  # or call register_builtin_packs() in test setup
+
+# Or call register_builtin_packs() in test setup.
+from api.lifespan import register_builtin_packs
 from pack_kernel.registry import PackRegistry
 
 register_builtin_packs()
