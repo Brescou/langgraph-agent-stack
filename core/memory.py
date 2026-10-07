@@ -51,17 +51,21 @@ import json
 import logging
 import sqlite3
 import threading
-from collections.abc import Generator
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from types import TracebackType
-from typing import Any, Protocol, cast, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 from urllib.parse import urlparse
 
 from langgraph.checkpoint.memory import MemorySaver
 
 from core.config import MemoryBackend, Settings
+
+if TYPE_CHECKING:
+    # Annotation-only; the redis extra is optional and imported lazily below.
+    from redis.typing import EncodableT, FieldT
 
 logger = logging.getLogger(__name__)
 
@@ -945,7 +949,13 @@ class RedisRunHistory:
 
         created_at = datetime.now(UTC).isoformat()
         meta = metadata or {}
-        data = {
+        # Typed as redis types rather than dict[str, str]: Mapping is invariant
+        # in its key, so dict[str, str] is not assignable to the
+        # Mapping[FieldT, EncodableT] that redis 8 declares for hset(mapping=).
+        # The zadd literals below type-check without this because pyright
+        # infers an inline dict against the expected type; data cannot, having
+        # been inferred already by the time it reaches the call.
+        data: Mapping[FieldT, EncodableT] = {
             "run_id": run_id,
             "query": query.strip(),
             "result_json": json.dumps(result, ensure_ascii=False, default=str),
