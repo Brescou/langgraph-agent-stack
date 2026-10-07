@@ -47,21 +47,22 @@ def _http_detail(detail: Any) -> str:
 
 def _map_http_exception(exc: HTTPException) -> None:
     """Re-raise an HTTPException as the matching MCP protocol/tool error."""
-    from mcp.server.fastmcp.exceptions import ToolError
-    from mcp.shared.exceptions import McpError
-    from mcp.types import INVALID_PARAMS, ErrorData
+    from mcp.server.mcpserver.exceptions import ToolError
+    from mcp.shared.exceptions import MCPError
+    from mcp.types import INVALID_PARAMS
 
     detail = _http_detail(exc.detail)
     if exc.status_code == 422:
-        raise McpError(ErrorData(code=INVALID_PARAMS, message=detail)) from exc
+        # mcp 2.x takes code/message directly; 1.x wrapped them in ErrorData.
+        raise MCPError(code=INVALID_PARAMS, message=detail) from exc
     # 402 budget / 403 compliance / other kernel errors → tool error with same text
     raise ToolError(detail) from exc
 
 
 def _make_tool_callable(pack_id: str, input_model: type[BaseModel]) -> Any:
     """Build an async tool function with a flat signature from ``input_model``."""
-    from mcp.shared.exceptions import McpError
-    from mcp.types import INVALID_PARAMS, ErrorData
+    from mcp.shared.exceptions import MCPError
+    from mcp.types import INVALID_PARAMS
 
     params: list[inspect.Parameter] = []
     annotations: dict[str, Any] = {}
@@ -88,7 +89,7 @@ def _make_tool_callable(pack_id: str, input_model: type[BaseModel]) -> Any:
         try:
             body = input_model.model_validate(kwargs)
         except ValidationError as exc:
-            raise McpError(ErrorData(code=INVALID_PARAMS, message=str(exc))) from exc
+            raise MCPError(code=INVALID_PARAMS, message=str(exc)) from exc
 
         # Default registry version only — see module docstring / issue #92.
         try:
@@ -110,7 +111,7 @@ def _make_tool_callable(pack_id: str, input_model: type[BaseModel]) -> Any:
 
     _impl.__name__ = pack_id
     _impl.__doc__ = f"Run the {pack_id} domain pack."
-    # FastMCP derives the call-time arg model from __signature__; assign via
+    # MCPServer derives the call-time arg model from __signature__; assign via
     # Any because FunctionType does not declare that attribute for pyright.
     impl: Any = _impl
     impl.__signature__ = inspect.Signature(params, return_annotation=dict)
@@ -129,30 +130,17 @@ def _iter_mcp_pack_ids(*, regulated_packs_enabled: bool) -> list[str]:
 
 
 def build_mcp_server() -> Any:
-    """Create a ``FastMCP`` instance with one tool per eligible pack.
+    """Create an ``MCPServer`` instance with one tool per eligible pack.
 
     Returns:
-        Configured ``FastMCP`` server (caller owns lifespan / mounting).
+        Configured ``MCPServer`` (caller owns lifespan / mounting).
     """
     _ensure_mcp_installed()
-    from mcp.server.fastmcp import FastMCP
-    from mcp.server.fastmcp.tools.base import Tool
-    from mcp.server.transport_security import TransportSecuritySettings
+    from mcp.server.mcpserver import MCPServer
+    from mcp.server.mcpserver.tools.base import Tool
 
     settings = get_settings()
-    # DNS rebinding protection defaults to localhost-only hosts; that breaks
-    # any real deployment Host header. Disable deliberately: this transport is
-    # mounted on the FastAPI app, so Bearer API_KEY (+ existing middleware) is
-    # the auth guardrail — not Host allowlisting.
-    mcp_server = FastMCP(
-        "langgraph-agent-stack",
-        stateless_http=True,
-        streamable_http_path="/",
-        transport_security=TransportSecuritySettings(
-            enable_dns_rebinding_protection=False
-        ),
-    )
-
+    tools: list[Any] = []
     for pack_id in _iter_mcp_pack_ids(
         regulated_packs_enabled=settings.regulated_packs_enabled
     ):
@@ -161,26 +149,45 @@ def build_mcp_server() -> Any:
         description = getattr(pack_cls, "description", None) or pack_id
         fn = _make_tool_callable(pack_id, input_model)
         tool = Tool.from_function(fn, name=pack_id, description=description)
-        # Override listed schema with the pack's Pydantic JSON Schema so Field
-        # constraints (minLength, ge, …) match REST. FastMCP has no public
-        # "register Tool with custom parameters" API in v1, so we write through
-        # _tool_manager._tools (private). Risk is bounded by pyproject pin
-        # mcp>=1.0,<2 — revisit if upgrading past that major.
+        # Override the listed schema with the pack's Pydantic JSON Schema so
+        # Field constraints (minLength, ge, …) match REST. ``add_tool`` takes a
+        # callable and derives the schema itself, so a pre-built Tool carrying
+        # custom ``parameters`` goes through the constructor instead. mcp 1.x
+        # had no such entry point and this wrote through the private
+        # ``_tool_manager._tools``; 2.x makes it public.
         tool.parameters = input_model.model_json_schema()
-        mcp_server._tool_manager._tools[tool.name] = tool
+        tools.append(tool)
         logger.info("MCP tool registered", extra={"pack_id": pack_id})
 
-    return mcp_server
+    return MCPServer("langgraph-agent-stack", tools=tools)
 
 
 def mount_mcp_server(app: FastAPI) -> Any:
     """Build tools and mount streamable HTTP at ``/mcp`` on ``app``.
 
     Returns:
-        The ``FastMCP`` instance (its ``session_manager.run()`` must be entered
-        during application lifespan).
+        The ``MCPServer`` instance (its ``session_manager.run()`` must be
+        entered during application lifespan).
     """
+    from mcp.server.transport_security import TransportSecuritySettings
+
     mcp_server = build_mcp_server()
-    app.mount("/mcp", mcp_server.streamable_http_app())
+    # mcp 2.x moved the transport options off the constructor and onto the
+    # app builder, so they are passed here rather than in build_mcp_server.
+    #
+    # DNS rebinding protection defaults to localhost-only hosts; that breaks
+    # any real deployment Host header. Disabled deliberately: this transport is
+    # mounted on the FastAPI app, so Bearer API_KEY (plus existing middleware)
+    # is the auth guardrail, not Host allowlisting.
+    app.mount(
+        "/mcp",
+        mcp_server.streamable_http_app(
+            streamable_http_path="/",
+            stateless_http=True,
+            transport_security=TransportSecuritySettings(
+                enable_dns_rebinding_protection=False
+            ),
+        ),
+    )
     logger.info("MCP streamable HTTP mounted at /mcp")
     return mcp_server

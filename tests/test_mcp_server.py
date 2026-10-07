@@ -116,14 +116,16 @@ async def _mcp_session_with_app_runtime(
     api_state.shared_llm = None
     api_state.shared_checkpointer = None
 
-    from mcp.shared.memory import create_connected_server_and_client_session as connect
+    # mcp 2.x dropped create_connected_server_and_client_session; Client now
+    # takes an MCPServer directly and wires the in-memory streams itself.
+    from mcp import Client
 
     from api.main import app
     from api.mcp_server import build_mcp_server
 
     with TestClient(app):
         mcp = build_mcp_server()
-        async with connect(mcp) as session:
+        async with Client(mcp) as session:
             yield session, mcp
 
     api_state.shared_llm = None
@@ -238,11 +240,11 @@ class TestMcpTools:
                 "summariser",
                 {"text": "Hello world. This is a short paragraph for summarising."},
             )
-            assert result.isError is False, result.content
+            assert result.is_error is False, result.content
             # Structured or text JSON payload
             payload: dict[str, Any]
-            if result.structuredContent:
-                payload = dict(result.structuredContent)
+            if result.structured_content:
+                payload = dict(result.structured_content)
             else:
                 text = result.content[0].text  # type: ignore[index]
                 payload = json.loads(text)
@@ -261,7 +263,7 @@ class TestMcpTools:
             tool = next(t for t in listed.tools if t.name == "summariser")
             input_model, _ = PackRegistry.get_schemas("summariser")
             expected = input_model.model_json_schema()
-            actual = tool.inputSchema
+            actual = tool.input_schema
             assert actual.get("required") == expected.get("required")
             assert set(actual.get("properties", {})) == set(
                 expected.get("properties", {})
@@ -274,6 +276,42 @@ class TestMcpTools:
                     text_schema.get("minLength")
                     == expected["properties"]["text"]["minLength"]
                 )
+
+    @pytest.mark.asyncio
+    async def test_field_constraint_violation_raises_invalid_params(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A Field constraint the tool signature cannot express must raise INVALID_PARAMS.
+
+        ``_make_tool_callable`` copies only annotations into ``__signature__``,
+        so MCPServer's own argument validation sees ``bullet_count: int`` and
+        lets 99 through. The pack's own ``model_validate`` then rejects it
+        against ``maximum: 10``, and that is the branch under test: it is the
+        only place our ``MCPError`` is constructed.
+
+        Worth a test of its own because the branch was broken across the mcp
+        2.x migration and nothing caught it. ``MCPError`` stopped accepting an
+        ``ErrorData`` and now takes ``code``/``message``, so the old call raised
+        ``TypeError``, which MCPServer masked as a generic
+        ``Error executing tool summariser`` with ``is_error=True``. A missing
+        required field does not reach here: MCPServer rejects that first.
+        """
+        from mcp.shared.exceptions import MCPError
+        from mcp.types import INVALID_PARAMS
+
+        async with _mcp_session_with_app_runtime(monkeypatch) as (session, _mcp):
+            input_model, _ = PackRegistry.get_schemas("summariser")
+            schema = input_model.model_json_schema()
+            assert schema["properties"]["bullet_count"]["maximum"] == 10, (
+                "test assumes summariser caps bullet_count at 10"
+            )
+            with pytest.raises(MCPError) as excinfo:
+                await session.call_tool(
+                    "summariser",
+                    {"text": "Some valid text here.", "bullet_count": 99},
+                )
+            assert excinfo.value.code == INVALID_PARAMS
+            assert "bullet_count" in excinfo.value.message
 
     @pytest.mark.asyncio
     async def test_budget_exceeded_maps_to_tool_error(
@@ -305,7 +343,7 @@ class TestMcpTools:
                         "meeting_goal": "discovery",
                     },
                 )
-                assert result.isError is True, result.content
+                assert result.is_error is True, result.content
                 text = result.content[0].text  # type: ignore[index]
                 assert "budget" in text.lower() or "0.001" in text or "USD" in text
         finally:
