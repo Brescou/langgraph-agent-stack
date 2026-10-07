@@ -24,6 +24,11 @@ updates:
           - langchain*
           - langgraph*
           - langsmith*
+      # Minor and patch only. A major lands as its own PR instead of riding
+      # along in the group: #148 grouped four majors (fastapi 0.141, mcp 2.x,
+      # redis 8, anthropic 1.x) and three of them broke the build
+      # independently, which made the single PR unmergeable and unbisectable
+      # without pinning packages back one at a time.
       python-app:
         patterns:
           - "*"
@@ -31,6 +36,9 @@ updates:
           - langchain*
           - langgraph*
           - langsmith*
+        update-types:
+          - minor
+          - patch
       dev-dependencies:
         dependency-type: development
         patterns:
