@@ -102,7 +102,7 @@ services:
       - langgraph-net
 
   grafana:
-    image: grafana/grafana:13.2.3
+    image: grafana/grafana:13.2.4
     container_name: langgraph-grafana
     profiles: [observability]
     environment:
